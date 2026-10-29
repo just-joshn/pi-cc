@@ -40,8 +40,10 @@ For `SYSTEM.md` and `APPEND_SYSTEM.md`, the trusted project file takes precedenc
 
 ## Context files
 
-Context files are separate from project `.pi` configuration. Pi loads them from the agent directory, the working directory, and its parent directories. A context file applies whenever Pi runs in its directory or anywhere below it.
+Context files are separate from project `.pi` configuration. Pi loads one context file from the agent directory into the system prompt: the first of `AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, or `CLAUDE.MD`.
 
-An `AGENTS.override.md` replaces `AGENTS.md` or `CLAUDE.md` only in the same directory. It does not suppress context files from the agent directory or other directories.
+Pi loads project instruction files as Claude Code memory, which it sends with the first user message instead of the system prompt. For the working directory and each parent directory, from the top down, Pi loads `CLAUDE.md`, `.claude/CLAUDE.md`, the `.md` files under `.claude/rules`, and `CLAUDE.local.md`. When none of the `CLAUDE.md`, `.claude/CLAUDE.md`, or `CLAUDE.local.md` files has content, Pi loads each directory's `AGENTS.md` and `.claude/AGENTS.md` instead. Pi does not load `AGENTS.override.md` from project directories.
 
-Context-file discovery does not require project trust.
+To load `AGENTS.md` next to `CLAUDE.md`, set `pluginConfigs["cc-plugin-agents-md@builtin"].options.instructionFiles` to `claude-md-and-agents-md` in `~/.claude/settings.json`. The value `claude-md` turns `AGENTS.md` loading off.
+
+Project and local memory follow pi's project trust decision. A stored "do not trust" decision, `--no-approve`, or `defaultProjectTrust: "never"` skips them. Without a decision, they load when the project has no trust-requiring resource and otherwise follow the trust prompt. Agent-directory context files do not require project trust.
