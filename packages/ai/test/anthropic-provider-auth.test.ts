@@ -167,6 +167,18 @@ describe("provider environment at auth resolution", () => {
 		expect(result?.source).toBe("OAuth");
 	});
 
+	it("sends the environment API key rather than an OAuth token with a stored key", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedKey("stored-key"),
+			envContext({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env", ANTHROPIC_API_KEY: "env-key" }),
+			{ signal },
+		);
+
+		expect(result?.auth.apiKey).toBe("env-key");
+		expect(result?.sourceKind).toBe("environment");
+	});
+
 	it("keeps a stored api key over ANTHROPIC_OAUTH_TOKEN", async () => {
 		const result = await resolveProviderAuth(
 			anthropicProvider(),

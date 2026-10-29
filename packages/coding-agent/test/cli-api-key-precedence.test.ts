@@ -96,6 +96,35 @@ describe("CLI --api-key and a quiet environment", () => {
 		expect(result?.auth.headers?.Authorization).toBe("Bearer env-bearer");
 	});
 
+	it("sends ANTHROPIC_API_KEY rather than an OAuth token with a stored key and models.json endpoint", async () => {
+		isolateEnv({ ANTHROPIC_API_KEY: "env-key", ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env" });
+		const modelRuntime = await ModelRuntime.create({
+			credentials: await stored("api_key"),
+			modelsPath: modelsPath({ providers: { anthropic: { baseUrl: "https://gateway.example" } } }),
+			allowModelNetwork: false,
+			refreshOnCreate: false,
+		});
+
+		const result = await modelRuntime.getAuth("anthropic");
+
+		expect(result?.auth.apiKey).toBe("env-key");
+		expect(result?.auth.headers?.Authorization).toBeUndefined();
+	});
+
+	it("sends a models.json key rather than a lone OAuth token", async () => {
+		isolateEnv({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env" });
+		const modelRuntime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: modelsPath({ providers: { anthropic: { apiKey: "models-json-key" } } }),
+			allowModelNetwork: false,
+			refreshOnCreate: false,
+		});
+
+		const result = await modelRuntime.getAuth("anthropic");
+
+		expect(result?.auth.apiKey).toBe("models-json-key");
+	});
+
 	it("keeps a stored OAuth token over a models.json key when no Anthropic env credential is set", async () => {
 		isolateEnv();
 		const modelRuntime = await ModelRuntime.create({

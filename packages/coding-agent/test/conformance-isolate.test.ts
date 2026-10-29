@@ -205,6 +205,20 @@ describe("seedFiles", () => {
 		expect(() => readFileSync(join(roots.root, "zz"), "utf8")).toThrow();
 		expect(() => readFileSync(join(roots.out, "requests.jsonl"), "utf8")).toThrow();
 	});
+
+	test("refuses a seeded path whose parent or leaf is a symlink outside an allowed subtree", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-seed-")), "links", "pi-cc");
+		tempDirs.push(roots.root);
+		const outside = mkdtempSync(join(tmpdir(), "pi-cc-seed-outside-"));
+		tempDirs.push(outside);
+		symlinkSync(outside, join(roots.workspace, "escape"));
+		symlinkSync(join(outside, "leaf.txt"), join(roots.workspace, "leaf.txt"));
+
+		expect(() => seedFiles(roots, { "escape/parent.txt": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "leaf.txt": "no" })).toThrow(/escapes the side root/);
+		expect(() => readFileSync(join(outside, "parent.txt"))).toThrow();
+		expect(() => readFileSync(join(outside, "leaf.txt"))).toThrow();
+	});
 });
 
 describe("the profile keeps the harness artifacts out of the side's reach", () => {

@@ -1,0 +1,43 @@
+{
+  "id": "zzr3/t03-oauth-apikey",
+  "area": "zzr3",
+  "argv": [
+    "-p",
+    "Reply with exactly PROBE_OK",
+    "--output-format",
+    "json"
+  ],
+  "env": {
+    "ANTHROPIC_OAUTH_TOKEN": "sk-ant-oat01-ENVOAUTH"
+  },
+  "stdin": null,
+  "files": {},
+  "model": {
+    "turns": [
+      {
+        "text": "PROBE_OK"
+      }
+    ]
+  },
+  "timeout_ms": 60000,
+  "compare": {
+    "exit": 0,
+    "requests": [
+      {
+        "pathStartsWith": "/v1/messages",
+        "count": 1,
+        "method": "POST",
+        "headers": {
+          "authorization": null,
+          "x-api-key": "sk-ant-conformance-fixture-0000000000000000",
+          "anthropic-beta": {
+            "excludes": [
+              "oauth-2025-04-20"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "skip": []
+}
