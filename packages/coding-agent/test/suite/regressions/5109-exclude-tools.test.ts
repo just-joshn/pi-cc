@@ -48,10 +48,16 @@ describe("regression #5109: exclude tools", () => {
 			const allToolNames = toolNames(harness.session.getAllTools());
 			expect(allToolNames).not.toContain("read");
 			expect(allToolNames).not.toContain("ask_question");
-			expect(allToolNames).toContain("bash");
+			expect(allToolNames).toContain("Bash");
 			expect(allToolNames).toContain("dynamic_tool");
-			expect(harness.session.getActiveToolNames().sort()).toEqual(["bash", "dynamic_tool", "edit", "write"]);
-			expect(harness.session.systemPrompt).not.toContain("- read:");
+			expect(harness.session.getActiveToolNames().sort()).toEqual([
+				"Bash",
+				"DeferredToolPlaceholder",
+				"Edit",
+				"Write",
+				"dynamic_tool",
+			]);
+			expect(harness.session.systemPrompt).not.toContain("- Read:");
 			expect(harness.session.systemPrompt).not.toContain("ask_question");
 			expect(harness.session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
 		} finally {
@@ -69,10 +75,10 @@ describe("regression #5109: exclude tools", () => {
 		try {
 			await harness.session.bindExtensions({});
 
-			expect(toolNames(harness.session.getAllTools())).toEqual(["bash"]);
-			expect(harness.session.getActiveToolNames()).toEqual(["bash"]);
-			expect(harness.session.systemPrompt).toContain("- bash:");
-			expect(harness.session.systemPrompt).not.toContain("- read:");
+			expect(toolNames(harness.session.getAllTools())).toEqual(["Bash", "bash"]);
+			expect(harness.session.getActiveToolNames()).toEqual(["Bash"]);
+			expect(harness.session.systemPrompt).toContain("- Bash:");
+			expect(harness.session.systemPrompt).not.toContain("- Read:");
 			expect(harness.session.systemPrompt).not.toContain("ask_question");
 		} finally {
 			harness.cleanup();
@@ -81,17 +87,17 @@ describe("regression #5109: exclude tools", () => {
 
 	it("matches allowlist and denylist patterns", async () => {
 		const harness = await createHarness({
-			allowedToolNames: ["*_tool", "ask_*", "re*"],
+			allowedToolNames: ["*_tool", "ask_*", "Re*"],
 			excludedToolNames: ["ask*"],
-			initialActiveToolNames: ["*_tool", "ask_*", "re*"],
+			initialActiveToolNames: ["*_tool", "ask_*", "Re*"],
 			extensionFactories,
 		});
 		try {
 			await harness.session.bindExtensions({});
 
 			// Patterns that match a tool activate it like its name.
-			expect(toolNames(harness.session.getAllTools())).toEqual(["dynamic_tool", "read"]);
-			expect(harness.session.getActiveToolNames().sort()).toEqual(["dynamic_tool", "read"]);
+			expect(toolNames(harness.session.getAllTools())).toEqual(["Read", "dynamic_tool", "read"]);
+			expect(harness.session.getActiveToolNames().sort()).toEqual(["Read", "dynamic_tool"]);
 		} finally {
 			harness.cleanup();
 		}

@@ -37,14 +37,16 @@ describe("AgentSession dynamic tool registration", () => {
 			settingsManager,
 			extensionFactories: [
 				(pi) => {
-					pi.registerTool(
-						createBashTool(tempDir, {
+					pi.registerTool({
+						...createBashTool(tempDir, {
 							spawnHook: (ctx) => {
 								sessionEnv = ctx.env;
 								return ctx;
 							},
 						}),
-					);
+						name: "bash_env_probe",
+						label: "bash env probe",
+					});
 					pi.registerTool({
 						...createBashTool(tempDir, {
 							exposeSessionEnvironment: false,
@@ -72,7 +74,7 @@ describe("AgentSession dynamic tool registration", () => {
 			resourceLoader,
 		});
 
-		const bashTool = session.agent.state.tools.find((tool) => tool.name === "bash")!;
+		const bashTool = session.agent.state.tools.find((tool) => tool.name === "bash_env_probe")!;
 		expect(session.systemPrompt).toContain(
 			"You can inspect PI_* environment variables for current model and session details.",
 		);

@@ -76,9 +76,9 @@ describe("AgentSession tool orchestration", () => {
 		await harness.session.bindExtensions({});
 
 		expect(harness.session.getActiveToolNames()).toEqual(["echo", "run_tools"]);
-		expect(harness.session.getCallableToolNames()).toEqual(["echo", "helper"]);
+		expect(harness.session.getCallableToolNames()).toEqual(["read", "bash", "edit", "write", "echo", "helper"]);
 		const find = (name: string) => harness.session.agent.state.tools.find((tool) => tool.name === name);
-		expect(find("run_tools")?.description).toBe("Runs tools: echo, helper");
+		expect(find("run_tools")?.description).toBe("Runs tools: read, bash, edit, write, echo, helper");
 		expect(find("echo")?.description).toBe("Echo text (also callable from run_tools).");
 
 		const requestTools: string[][] = [];
@@ -97,7 +97,12 @@ describe("AgentSession tool orchestration", () => {
 			(message): message is ToolResultMessage => message.role === "toolResult",
 		);
 		if (!result) throw new Error("No tool result");
-		expect(result.content).toEqual([{ type: "text", text: "helped | echo: hi | Tool run_tools not found" }]);
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: "helped | echo: hi | <tool_use_error>Error: No such tool available: run_tools</tool_use_error>",
+			},
+		]);
 		const parent = result.toolCallId;
 		expect(toolCalls).toEqual(["run_tools:top", `helper:${parent}`, `echo:${parent}`]);
 		expect(result.nestedCalls?.calls.map((call) => [call.id, call.name, call.status])).toEqual([
@@ -119,12 +124,12 @@ describe("AgentSession tool orchestration", () => {
 		expect(plain.session.getAllTools().map((tool) => tool.name)).toEqual(
 			expect.arrayContaining(["codemode", "tool_search"]),
 		);
-		expect(plain.session.getActiveToolNames()).toEqual(["read", "bash", "edit", "write"]);
+		expect(plain.session.getActiveToolNames()).toEqual(["Bash", "Edit", "Read", "DeferredToolPlaceholder", "Write"]);
 
 		// --tools and the defaultTools setting name them explicitly.
 		const allowed = await createHarness({ allowedToolNames: ["read", "codemode"], extensionFactories });
 		harnesses.push(allowed);
-		expect(allowed.session.getActiveToolNames()).toEqual(["read", "codemode"]);
+		expect(allowed.session.getActiveToolNames()).toEqual(["Read", "codemode"]);
 		const initial = await createHarness({ initialActiveToolNames: ["tool_search"], extensionFactories });
 		harnesses.push(initial);
 		expect(initial.session.getActiveToolNames()).toEqual(["tool_search"]);

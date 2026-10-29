@@ -7,6 +7,7 @@ import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { canonicalToolName } from "../src/core/tools/cc/names.ts";
 import { createAllToolDefinitions, createAllTools } from "../src/core/tools/index.ts";
 import { wrapToolDefinition } from "../src/core/tools/tool-definition-wrapper.ts";
 
@@ -85,7 +86,7 @@ describe("strict built-in tools", () => {
 				try {
 					const originalPrompt = session.systemPrompt;
 					await session.bindExtensions({});
-					expect(session.getActiveToolNames()).toEqual(activeTools);
+					expect(session.getActiveToolNames().sort()).toEqual(activeTools.map(canonicalToolName).sort());
 					expect(session.systemPrompt).toBe(originalPrompt);
 					for (const name of strictToolNames) {
 						expect(session.getToolDefinition(name)?.constrainedSampling).toBe(false);
@@ -95,9 +96,9 @@ describe("strict built-in tools", () => {
 					}
 					if (activeTools.includes("read")) {
 						writeFileSync(join(cwd, "sample.txt"), "still works");
-						const read = session.agent.state.tools.find((tool) => tool.name === "read")!;
-						const result = await read.execute("read-test", { path: "sample.txt" });
-						expect(result.content).toEqual([{ type: "text", text: "still works" }]);
+						const read = session.agent.state.tools.find((tool) => tool.name === "Read")!;
+						const result = await read.execute("read-test", { file_path: "sample.txt" });
+						expect(result.content).toEqual([{ type: "text", text: "1\tstill works" }]);
 					}
 				} finally {
 					session.dispose();
