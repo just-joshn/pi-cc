@@ -155,7 +155,66 @@ describe("Anthropic workload identity federation", () => {
 		expect(message?.headers.get("authorization")).toBe("Bearer federated-token");
 		expect(message?.headers.get("x-api-key")).toBeNull();
 		expect(message?.body.betas).toBeUndefined();
-		expect(message?.headers.get("anthropic-beta") ?? "").not.toContain("oauth-2025-04-20");
+		// The SDK added the OAuth beta to token-authenticated requests, so a federated
+		// bearer carried it too.
+		expect(message?.headers.get("anthropic-beta")).toBe("oauth-2025-04-20");
+	});
+
+	it("merges the OAuth beta into pi's betas for a federated bearer without duplicates", async () => {
+		const { requests, fetch } = federationFetch();
+		// A fresh endpoint, so the previous test's cached token does not hide the exchange.
+		const endpoint: Model<"anthropic-messages"> = {
+			...anthropicModel,
+			baseUrl: "https://federation-betas.example",
+		};
+
+		await streamAnthropic(endpoint, context, {
+			env: federationEnv,
+			fetch,
+			headers: { "anthropic-beta": "custom-beta, oauth-2025-04-20" },
+		}).result();
+		await streamAnthropic(endpoint, context, {
+			env: federationEnv,
+			fetch,
+			headers: { "anthropic-beta": "custom-beta" },
+		}).result();
+
+		const betas = requests
+			.filter((request) => request.url.pathname === "/v1/messages")
+			.map((request) => request.headers.get("anthropic-beta"));
+		expect(betas).toEqual(["custom-beta,oauth-2025-04-20", "custom-beta,oauth-2025-04-20"]);
+	});
+
+	it("exchanges a new token after the current one is rejected with 401", async () => {
+		let exchanges = 0;
+		let rejected = false;
+		const { requests, fetch } = recordFetch((request) => {
+			if (request.url.pathname === "/v1/oauth/token") {
+				exchanges += 1;
+				return Response.json({ access_token: `federated-token-${exchanges}`, expires_in: 3600 });
+			}
+			if (rejected) return sseResponse();
+			rejected = true;
+			return Response.json(
+				{ type: "error", error: { type: "authentication_error", message: "expired" } },
+				{ status: 401 },
+			);
+		});
+		// A fresh endpoint, so the previous test's cached token does not hide the exchange.
+		const endpoint: Model<"anthropic-messages"> = { ...anthropicModel, baseUrl: "https://federation-401.example" };
+
+		const first = await streamAnthropic(endpoint, context, { env: federationEnv, fetch }).result();
+		const second = await streamAnthropic(endpoint, context, { env: federationEnv, fetch }).result();
+
+		expect(first.stopReason).toBe("error");
+		expect(second.stopReason).toBe("stop");
+		expect(requests.map((request) => request.url.pathname)).toEqual([
+			"/v1/oauth/token",
+			"/v1/messages",
+			"/v1/oauth/token",
+			"/v1/messages",
+		]);
+		expect(requests.at(-1)?.headers.get("authorization")).toBe("Bearer federated-token-2");
 	});
 
 	it("threads authContext federation variables through Models", async () => {
