@@ -18,7 +18,7 @@ import {
 	projectToolCall,
 	wrapStreamFn,
 } from "../src/core/tools/cc-surface.ts";
-import { CC_TOOL_TEXT } from "../src/core/tools/cc-text.ts";
+import { CC_FILE_STATE_SUFFIX, CC_TOOL_TEXT } from "../src/core/tools/cc-text.ts";
 import { createEditTool, createEditToolDefinition } from "../src/core/tools/edit.ts";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
 import { createReadState } from "../src/core/tools/read-state.ts";
@@ -510,34 +510,47 @@ describe("Claude Code read advice, edit suffix, and custom operations", () => {
 		expect(result.inputError).toContain("expected as `int` but provided as `number`");
 	});
 
-	it("fails an edit that creates a file when the custom operations have no mkdir", async () => {
+	it("creates a file in an existing directory through custom edit operations that have no mkdir", async () => {
 		dir = mkdtempSync(join(tmpdir(), "pi-cc-edit-nomkdir-"));
 		const missing = async () => {
 			throw Object.assign(new Error("missing"), { code: "ENOENT" });
 		};
+		const writes: Array<[string, string]> = [];
 		const edit = createEditTool(dir, {
-			operations: { access: missing, readFile: missing, writeFile: async () => {} },
+			operations: {
+				access: missing,
+				readFile: missing,
+				writeFile: async (path, content) => {
+					writes.push([path, content]);
+				},
+			},
 		});
-		await expect(
-			edit.execute("1", { path: "new/deep.txt", edits: [{ oldText: "", newText: "made\n" }] }),
-		).rejects.toThrow(/mkdir/);
-		expect(() => readFileSync(join(dir, "new/deep.txt"))).toThrow();
+		await edit.execute("1", { path: "made.txt", edits: [{ oldText: "", newText: "made\n" }] });
+		expect(writes).toEqual([[join(dir, "made.txt"), "made\n"]]);
 	});
 
-	it("fails a write when the custom operations have no readFile, without reading the local file", async () => {
+	it("writes through custom operations that have no readFile without reading the local file", async () => {
 		dir = mkdtempSync(join(tmpdir(), "pi-cc-write-noread-"));
 		writeFileSync(join(dir, "local.txt"), "local\n");
-		let written = false;
-		const write = createWriteTool(dir, {
-			operations: {
-				writeFile: async () => {
-					written = true;
-				},
-				mkdir: async () => {},
-			} as never,
+		const writes: string[] = [];
+		const operations = {
+			writeFile: async (_path: string, content: string) => {
+				writes.push(content);
+			},
+			mkdir: async () => {},
+		} as never;
+		const write = createWriteTool(dir, { operations, readState: createReadState() });
+		const result = await write.execute("1", { path: "local.txt", content: "new\n" });
+		expect(result.content[0]).toEqual({
+			type: "text",
+			text: `File written successfully at: local.txt ${CC_FILE_STATE_SUFFIX}`,
 		});
-		await expect(write.execute("1", { path: "local.txt", content: "new\n" })).rejects.toThrow(/readFile/);
-		expect(written).toBe(false);
+		expect(writes).toEqual(["new\n"]);
+		expect(readFileSync(join(dir, "local.txt"), "utf8")).toBe("local\n");
+
+		const gated = createWriteTool(dir, { operations, readState: createReadState(), isReadGated: () => true });
+		await expect(gated.execute("2", { path: "local.txt", content: "gated\n" })).rejects.toThrow(/readFile/);
+		expect(writes).toEqual(["new\n"]);
 	});
 
 	it("records a refused call under pi's name and keeps the model's name for replay", () => {
