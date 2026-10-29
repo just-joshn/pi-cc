@@ -269,6 +269,12 @@ describe("Claude Code output format", () => {
 		expect(parseArgs(["--output-format", "stream-json"]).mode).toBe("json");
 		expect(parseArgs(["--output-format", "text"]).print).toBe(true);
 	});
+
+	test("keeps an explicit pi mode over the mode the output format implies", () => {
+		expect(parseArgs(["--mode", "rpc", "--output-format", "stream-json"]).mode).toBe("rpc");
+		expect(parseArgs(["--mode", "rpc", "--output-format", "json"]).mode).toBe("rpc");
+		expect(parseArgs(["--mode", "rpc", "--output-format", "text"]).print).toBeUndefined();
+	});
 });
 
 describe("existing pi parsing", () => {
