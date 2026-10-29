@@ -24,8 +24,6 @@ export function formatIgnoredProjectSettings(paths: readonly string[]): string[]
 
 function formatFailure(failure: CcSettingsFailure): string {
 	switch (failure.kind) {
-		case "missing":
-			return `${failure.path} was not found`;
 		case "malformed":
 			return `${failure.path}: Invalid or malformed JSON`;
 		case "shape": {

@@ -23,7 +23,6 @@ export interface CcSettings {
 }
 
 export type CcSettingsFailure =
-	| { readonly kind: "missing"; readonly source: CcSettingsSource; readonly path: string }
 	| { readonly kind: "malformed"; readonly source: CcSettingsSource; readonly path: string; readonly detail: string }
 	| {
 			readonly kind: "shape";
