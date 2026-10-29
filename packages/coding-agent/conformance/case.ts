@@ -52,6 +52,19 @@ export interface ConformanceCase {
 
 const SKIP_REASONS = new Set(["macos-only", "needs-tty", "claude-binary-absent", "spec-gap"]);
 
+const FORBIDDEN_SUBCOMMANDS = new Set(["install", "login", "logout", "setup-token", "update"]);
+
+const CASE_KEYS = ["id", "area", "binary", "argv", "env", "stdin", "files", "model", "timeout_ms", "compare", "skip"];
+const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "requests"];
+const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
+const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
+const JSON_STDOUT_KEYS = ["kind", "records"];
+const STDERR_KEYS = ["contains", "equals"];
+const REQUEST_KEYS = ["pathStartsWith", "count", "bodyEquals"];
+const MODEL_KEYS = ["turns"];
+const TURN_KEYS = ["text", "tool_use", "tool_uses", "sse"];
+const TOOL_USE_KEYS = ["name", "input"];
+
 export function loadCases(casesDir: string): ConformanceCase[] {
 	if (!existsSync(casesDir)) throw new Error(`No cases directory at ${casesDir}`);
 	const cases: ConformanceCase[] = [];
@@ -69,7 +82,7 @@ export function loadCases(casesDir: string): ConformanceCase[] {
 }
 
 function parseCase(raw: unknown, source: string, area: string): ConformanceCase {
-	const object = asObject(raw, source, "case");
+	const object = asCheckedObject(raw, source, "case", CASE_KEYS);
 	const id = asString(object.id, source, "id");
 	if (!id.startsWith(`${area}/`)) fail(source, `id "${id}" does not start with the area "${area}/"`);
 	if (asString(object.area, source, "area") !== area) fail(source, `area must be "${area}"`);
@@ -77,12 +90,14 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	for (const reason of skip) {
 		if (!SKIP_REASONS.has(reason)) fail(source, `unknown skip reason "${reason}"`);
 	}
-	const model = object.model === null ? null : asObject(object.model, source, "model");
+	const model = object.model === null ? null : asCheckedObject(object.model, source, "model", MODEL_KEYS);
+	const argv = asOptionalStringArray(object.argv, source, "argv") ?? [];
+	assertArgvAllowed(argv, source);
 	return {
 		id,
 		area,
 		binary: asOptionalString(object.binary, source, "binary"),
-		argv: asOptionalStringArray(object.argv, source, "argv") ?? [],
+		argv,
 		env: asStringRecord(object.env, source, "env"),
 		stdin: asStdin(object.stdin, source),
 		files: asStringRecord(object.files, source, "files"),
@@ -93,8 +108,24 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	};
 }
 
+/**
+ * A case runs against the real Claude Code install, so it must never reach a subcommand that
+ * authenticates, installs, or replaces that binary.
+ */
+function assertArgvAllowed(argv: readonly string[], source: string): void {
+	const subcommand = argv[0];
+	if (subcommand !== undefined && FORBIDDEN_SUBCOMMANDS.has(subcommand)) {
+		fail(source, `argv must not run "${subcommand}": the harness never runs it against the installed claude`);
+	}
+	for (const argument of argv) {
+		if (argument === "--update" || argument.startsWith("--update=")) {
+			fail(source, `argv must not contain "${argument}": the harness never updates the installed claude`);
+		}
+	}
+}
+
 function asCompareSpec(value: unknown, source: string): CompareSpec {
-	const object = asObject(value, source, "compare");
+	const object = asCheckedObject(value, source, "compare", COMPARE_KEYS);
 	const exit = object.exit;
 	if (exit !== undefined && typeof exit !== "number" && !isNumberArray(exit)) {
 		fail(source, "compare.exit must be a number or an array of numbers");
@@ -113,6 +144,7 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 	const object = asObject(value, source, "compare.stdout");
 	const kind = asString(object.kind, source, "compare.stdout.kind");
 	if (kind === "text") {
+		assertKnownKeys(object, TEXT_STDOUT_KEYS, source, "compare.stdout");
 		return {
 			kind,
 			equals: asOptionalString(object.equals, source, "compare.stdout.equals"),
@@ -121,6 +153,7 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 		};
 	}
 	if (kind === "help") {
+		assertKnownKeys(object, HELP_STDOUT_KEYS, source, "compare.stdout");
 		return {
 			kind,
 			requireFlags: asOptionalStringArray(object.requireFlags, source, "compare.stdout.requireFlags"),
@@ -129,6 +162,7 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 		};
 	}
 	if (kind === "json") {
+		assertKnownKeys(object, JSON_STDOUT_KEYS, source, "compare.stdout");
 		return { kind, records: asOptionalStringArray(object.records, source, "compare.stdout.records") };
 	}
 	return fail(source, `unknown compare.stdout.kind "${kind}"`);
@@ -136,7 +170,7 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 
 function asStderrSpec(value: unknown, source: string) {
 	if (value === undefined) return undefined;
-	const object = asObject(value, source, "compare.stderr");
+	const object = asCheckedObject(value, source, "compare.stderr", STDERR_KEYS);
 	return {
 		contains: asOptionalStringArray(object.contains, source, "compare.stderr.contains"),
 		equals: asOptionalString(object.equals, source, "compare.stderr.equals"),
@@ -147,9 +181,10 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 	if (value === undefined) return undefined;
 	if (!Array.isArray(value)) fail(source, "compare.requests must be an array");
 	return value.map((entry, index) => {
-		const object = asObject(entry, source, `compare.requests[${index}]`);
+		const field = `compare.requests[${index}]`;
+		const object = asCheckedObject(entry, source, field, REQUEST_KEYS);
 		const body = object.bodyEquals;
-		if (body !== undefined) asObject(body, source, `compare.requests[${index}].bodyEquals`);
+		if (body !== undefined) asObject(body, source, `${field}.bodyEquals`);
 		return {
 			pathStartsWith: asOptionalString(object.pathStartsWith, source, "pathStartsWith"),
 			count: asOptionalNumber(object.count, source, "count"),
@@ -161,10 +196,10 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 function asTurns(value: unknown, source: string): Turn[] {
 	if (!Array.isArray(value)) fail(source, "model.turns must be an array");
 	return value.map((entry, index) => {
-		const object = asObject(entry, source, `model.turns[${index}]`);
+		const object = asCheckedObject(entry, source, `model.turns[${index}]`, TURN_KEYS);
 		if (typeof object.text === "string") return { text: object.text };
 		if (object.tool_use !== undefined) {
-			const toolUse = asObject(object.tool_use, source, "model.turns[].tool_use");
+			const toolUse = asCheckedObject(object.tool_use, source, "model.turns[].tool_use", TOOL_USE_KEYS);
 			return { tool_use: { name: asString(toolUse.name, source, "tool_use.name"), input: toolUse.input } };
 		}
 		if (Array.isArray(object.tool_uses)) {
@@ -176,7 +211,7 @@ function asTurns(value: unknown, source: string): Turn[] {
 }
 
 function asToolUse(value: unknown, source: string) {
-	const object = asObject(value, source, "tool_uses[]");
+	const object = asCheckedObject(value, source, "tool_uses[]", TOOL_USE_KEYS);
 	return { name: asString(object.name, source, "tool_uses[].name"), input: object.input };
 }
 
@@ -184,8 +219,14 @@ function asStdin(value: unknown, source: string): StdinSpec {
 	if (value === undefined || value === null) return null;
 	const object = asObject(value, source, "stdin");
 	const kind = asString(object.kind, source, "stdin.kind");
-	if (kind === "text") return { kind, data: asString(object.data, source, "stdin.data") };
-	if (kind === "stream-json") return { kind, lines: asOptionalStringArray(object.lines, source, "stdin.lines") ?? [] };
+	if (kind === "text") {
+		assertKnownKeys(object, ["kind", "data"], source, "stdin");
+		return { kind, data: asString(object.data, source, "stdin.data") };
+	}
+	if (kind === "stream-json") {
+		assertKnownKeys(object, ["kind", "lines"], source, "stdin");
+		return { kind, lines: asOptionalStringArray(object.lines, source, "stdin.lines") ?? [] };
+	}
 	return fail(source, `unknown stdin.kind "${kind}"`);
 }
 
@@ -238,6 +279,28 @@ function isNumberArray(value: unknown): boolean {
 function asObject(value: unknown, source: string, field: string): Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) fail(source, `${field} must be an object`);
 	return value as Record<string, unknown>;
+}
+
+/** An object the loader reads by name, so a misspelled key cannot silently drop a rule. */
+function asCheckedObject(
+	value: unknown,
+	source: string,
+	field: string,
+	allowed: readonly string[],
+): Record<string, unknown> {
+	const object = asObject(value, source, field);
+	assertKnownKeys(object, allowed, source, field);
+	return object;
+}
+
+function assertKnownKeys(
+	object: Record<string, unknown>,
+	allowed: readonly string[],
+	source: string,
+	field: string,
+): void {
+	const unknown = Object.keys(object).filter((key) => !allowed.includes(key));
+	if (unknown.length > 0) fail(source, `${field} has unknown key "${unknown[0]}"`);
 }
 
 function fail(source: string, message: string): never {

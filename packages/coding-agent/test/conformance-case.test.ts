@@ -1,0 +1,68 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { loadCases } from "../conformance/case.ts";
+
+const CASES_DIR = join(import.meta.dirname, "..", "conformance", "cases");
+
+function loadOne(caseJson: Record<string, unknown>): void {
+	const root = mkdtempSync(join(tmpdir(), "pi-cc-case-"));
+	mkdirSync(join(root, "cli"), { recursive: true });
+	writeFileSync(join(root, "cli", "probe.json"), JSON.stringify({ area: "cli", ...caseJson }));
+	loadCases(root);
+}
+
+const MINIMAL_CASE = {
+	id: "cli/probe",
+	argv: [],
+	model: null,
+	compare: { exit: 0 },
+};
+
+describe("loadCases", () => {
+	test("loads every shipped case", () => {
+		const cases = loadCases(CASES_DIR);
+		expect(cases.length).toBeGreaterThan(20);
+	});
+
+	test("rejects a misspelled compare key", () => {
+		expect(() =>
+			loadOne({
+				...MINIMAL_CASE,
+				compare: { ext: 0, stdout: { kind: "text", equals: "" } },
+			}),
+		).toThrow(/compare has unknown key "ext"/);
+	});
+
+	test("rejects a misspelled key inside a stdout spec", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { stdout: { kind: "text", eqals: "x" } } })).toThrow(
+			/compare\.stdout has unknown key "eqals"/,
+		);
+	});
+
+	test("rejects a misspelled key inside a request spec", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { requests: [{ pathStartWith: "/v1" }] } })).toThrow(
+			/compare\.requests\[0\] has unknown key "pathStartWith"/,
+		);
+	});
+
+	test("rejects a misspelled top-level key", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compar: { exit: 0 } })).toThrow(/case has unknown key "compar"/);
+	});
+
+	test("rejects a case that runs a subcommand the harness must never reach", () => {
+		for (const subcommand of ["login", "logout", "update", "install", "setup-token"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, argv: [subcommand] })).toThrow(
+				new RegExp(`argv must not run "${subcommand}"`),
+			);
+		}
+	});
+
+	test("rejects --update", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--update"] })).toThrow(/argv must not contain "--update"/);
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hi", "--update=now"] })).toThrow(
+			/argv must not contain "--update=now"/,
+		);
+	});
+});
