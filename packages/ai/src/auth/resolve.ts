@@ -95,7 +95,7 @@ async function resolveCredentialAuth(
 	}
 
 	// An env-first provider reads the ambient credential before the stored one, so an env token disables a
-	// stored subscription instead of being shadowed by it.
+	// stored subscription.
 	const apiKey = provider.auth.apiKey;
 	const ambient =
 		provider.auth.environmentFirst && apiKey

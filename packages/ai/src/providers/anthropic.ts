@@ -33,8 +33,7 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 			}
 
 			// Claude Code sends the bearer and the key together when both variables are set, so the bearer
-			// rides along with whichever key source answers. `ANTHROPIC_AUTH_TOKEN` is the higher of the two,
-			// so it is the source reported.
+			// rides along with whichever key source answers.
 			const authToken = await ctx.env(ANTHROPIC_AUTH_TOKEN_ENV);
 			signal.throwIfAborted();
 			const bearer = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;

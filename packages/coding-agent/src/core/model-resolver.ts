@@ -552,10 +552,8 @@ export interface InitialModelResult {
 }
 
 /**
- * The model `ANTHROPIC_MODEL` selects, or undefined when the variable is unset or the Anthropic provider has
- * no credentials to serve it. A family alias resolves to that family's model; any other name is a model id
- * Claude Code sends as written, so an id the catalog does not carry becomes a custom model on the provider
- * rather than falling through to another provider's model of the same name.
+ * The model `ANTHROPIC_MODEL` selects. An id the catalog does not carry becomes a custom model on the
+ * Anthropic provider, because Claude Code sends the name as written.
  */
 export function anthropicEnvModel(
 	modelRuntime: ModelRuntime,

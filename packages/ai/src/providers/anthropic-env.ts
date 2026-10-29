@@ -43,10 +43,9 @@ export async function readAnthropicEnvironment(context: AuthContext): Promise<Au
 	};
 }
 
-/** Names the client computes per request, so a value here could only replace one of them with a wrong one. */
 const CLIENT_OWNED_HEADERS: readonly string[] = ["anthropic-beta"];
 
-function withoutClientOwnedHeaders(headers: Record<string, string> | undefined) {
+function withoutClientOwnedHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
 	if (headers === undefined) return undefined;
 	const kept = Object.entries(headers).filter(([name]) => !CLIENT_OWNED_HEADERS.includes(name.toLowerCase()));
 	return kept.length === 0 ? undefined : Object.fromEntries(kept);

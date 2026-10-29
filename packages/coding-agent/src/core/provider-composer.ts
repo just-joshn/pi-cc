@@ -433,8 +433,7 @@ function composeApiKeyAuth(
 	if (!inherited && rawKey === undefined && oauth) return undefined;
 	const rawHeaders = configuredHeaders(config, extension);
 	const authHeader = extension?.authHeader ?? config?.authHeader ?? false;
-	// An env-first provider reads the environment before a key written into models.json, the same way the
-	// resolver reads it before a stored credential.
+	// An env-first provider reads the environment before a key written into models.json.
 	const envFirst = base?.auth.environmentFirst === true;
 	return {
 		name: inherited?.name ?? "API key",
@@ -472,9 +471,7 @@ function composeApiKeyAuth(
 						? { auth: { apiKey: input.credential.key }, env: input.credential.env, source: "stored credential" }
 						: undefined;
 			} else if (rawKey !== undefined) {
-				// For an env-first provider the environment outranks a key written into models.json. Asking the
-				// provider's own ladder keeps the order in one place; it answers undefined when no env credential
-				// exists, and only then does the configured key apply.
+				// For an env-first provider the environment outranks a key written into models.json.
 				if (envFirst) result = await inherited?.resolve({ ctx: input.ctx, signal: input.signal });
 				if (!result) {
 					const env = await configContextEnv([rawKey], input.ctx);

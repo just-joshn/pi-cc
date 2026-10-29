@@ -221,8 +221,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRuntime.getModel(provider, modelId),
 	);
 
-	// If session has data, try to restore model from it. `ANTHROPIC_MODEL` owns the session model when the
-	// Anthropic provider can serve it, so a restored model would contradict what the operator set.
+	// `ANTHROPIC_MODEL` owns the session model when the Anthropic provider can serve it, so a restored
+	// model would contradict what the operator set.
 	const envModel = anthropicEnvModel(modelRuntime);
 	if (!model && hasExistingSession && sessionModel && !envModel) {
 		const restoredModel = modelRuntime.getModel(sessionModel.provider, sessionModel.modelId);

@@ -274,7 +274,6 @@ function recordedHeader(headers: IncomingHttpHeaders, name: string): string | un
 	return Array.isArray(value) ? value.join(", ") : value;
 }
 
-/** A header whose value is a list the case only partly knows (a feature set) is compared by membership. */
 function headerDiffs(name: string, expected: HeaderValueSpec, actual: string | undefined): Diff[] {
 	const check = "requests.headers";
 	const found = actual === undefined ? "(absent)" : `${name}: ${actual}`;

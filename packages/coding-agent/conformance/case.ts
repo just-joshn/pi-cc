@@ -73,7 +73,7 @@ export interface ConformanceCase {
 	binary?: string;
 	argv: string[];
 	env: Record<string, string>;
-	/** Harness-provided keys this case removes, so it can measure what a side does with nothing seeded. */
+	/** Harness-provided keys this case removes to observe the side with nothing seeded. */
 	unset: string[];
 	stdin: StdinSpec;
 	/**

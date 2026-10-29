@@ -154,7 +154,6 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 	return env;
 }
 
-/** Seeds a case's files inside its side root, expanding placeholders in paths and contents. */
 export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const target = seedTarget(roots, path);
