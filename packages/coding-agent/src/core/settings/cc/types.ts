@@ -25,7 +25,14 @@ export interface CcSettings {
 export type CcSettingsFailure =
 	| { readonly kind: "missing"; readonly source: CcSettingsSource; readonly path: string }
 	| { readonly kind: "malformed"; readonly source: CcSettingsSource; readonly path: string; readonly detail: string }
-	| { readonly kind: "shape"; readonly source: CcSettingsSource; readonly path: string; readonly detail: string };
+	| {
+			readonly kind: "shape";
+			readonly source: CcSettingsSource;
+			readonly path: string;
+			/** The key that failed; absent when the whole document did. */
+			readonly key?: string;
+			readonly detail: string;
+	  };
 
 /** One tier that parsed, with the tier it came from. */
 export interface CcSettingsDocument {

@@ -82,10 +82,7 @@ export function loadCcSettings(location: CcSettingsLocation): CcLoadResult {
 			}
 			continue;
 		}
-		const failure = readSettingsFile(source, path, documents);
-		if (failure !== undefined) {
-			failures.push(failure);
-		}
+		readSettingsFile(source, path, documents, failures);
 	}
 
 	if (location.flagSettings !== undefined) {
@@ -137,25 +134,33 @@ function readSettingsFile(
 	source: CcSettingsSource,
 	path: string,
 	documents: CcSettingsDocument[],
-): CcSettingsFailure | undefined {
+	failures: CcSettingsFailure[],
+): void {
 	if (!existsSync(path)) {
-		return undefined;
+		return;
 	}
 	let text: string;
 	try {
 		text = readFileSync(path, "utf8");
 	} catch (error) {
+		// The failure kinds have no read kind, so an unreadable file is reported as a shape problem of
+		// the whole document: it contributes nothing and appears under the same block.
 		const detail = error instanceof Error ? error.message : String(error);
-		return { kind: "malformed", source, path, detail: `could not read the file: ${detail}` };
+		failures.push({ kind: "shape", source, path, detail: `could not read the file: ${detail}` });
+		return;
 	}
 	const parsed = parseCcSettingsText(text);
 	if (parsed.kind === "document") {
 		documents.push({ source, path, values: parsed.values });
-		return undefined;
+		return;
 	}
-	return parsed.kind === "malformed"
-		? { kind: "malformed", source, path, detail: parsed.detail }
-		: { kind: "shape", source, path, detail: parsed.detail };
+	if (parsed.kind === "malformed") {
+		failures.push({ kind: "malformed", source, path, detail: "Invalid or malformed JSON" });
+		return;
+	}
+	for (const problem of parsed.problems) {
+		failures.push({ kind: "shape", source, path, key: problem.key, detail: problem.detail });
+	}
 }
 
 function readFlagSettings(
@@ -171,12 +176,13 @@ function readFlagSettings(
 		documents.push({ source: "flag", path: parsed.path, values: parsed.values });
 		return;
 	}
-	failures.push({
-		kind: parsed.malformed ? "malformed" : "shape",
-		source: "flag",
-		path: parsed.path,
-		detail: parsed.detail,
-	});
+	if (parsed.kind === "malformed") {
+		failures.push({ kind: "malformed", source: "flag", path: parsed.path, detail: "Invalid or malformed JSON" });
+		return;
+	}
+	for (const problem of parsed.problems) {
+		failures.push({ kind: "shape", source: "flag", path: parsed.path, key: problem.key, detail: problem.detail });
+	}
 }
 
 function policyValues(documents: readonly CcSettingsDocument[]): Readonly<Record<string, unknown>> {

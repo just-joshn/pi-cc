@@ -1,9 +1,20 @@
-/** The stderr lines for settings that did not load and for project settings trust suppressed. */
+/**
+ * The stderr blocks Claude Code prints for settings it could not use, and the line it prints for
+ * project settings a trust decision suppressed. The wording of the first block is measured from
+ * 2.1.312: a file that fails to load is named under one header, and a file that loaded is never
+ * mentioned.
+ */
 
 import type { CcSettingsFailure } from "./types.ts";
 
+const DID_NOT_LOAD_HEADER =
+	"These settings files did not load, so nothing in them is in effect, including hooks and permission rules. Each loads again once the problem listed for it is fixed:";
+
 export function formatSettingsFailures(failures: readonly CcSettingsFailure[]): string[] {
-	return failures.map(formatFailure);
+	if (failures.length === 0) {
+		return [];
+	}
+	return [DID_NOT_LOAD_HEADER, ...failures.map((failure) => `  ${formatFailure(failure)}`)];
 }
 
 /** One line per ignored file, so a user can see which project settings the trust decision suppressed. */
@@ -16,8 +27,10 @@ function formatFailure(failure: CcSettingsFailure): string {
 		case "missing":
 			return `${failure.path} was not found`;
 		case "malformed":
-			return `${failure.path} did not load: Invalid or malformed JSON: ${failure.detail}`;
-		case "shape":
-			return `${failure.path} did not load: ${failure.detail}`;
+			return `${failure.path}: Invalid or malformed JSON`;
+		case "shape": {
+			const label = failure.key === undefined ? failure.path : `${failure.path} (${failure.key})`;
+			return `${label}: ${failure.detail}`;
+		}
 	}
 }

@@ -38,8 +38,7 @@ describe("inline JSON", () => {
 	});
 
 	test("malformed inline JSON is a failure, not a throw", () => {
-		const parsed = parseFlagSettings('{"model":', "/irrelevant");
-		expect(parsed).toMatchObject({ kind: "failure", path: FLAG_SETTINGS_LABEL, malformed: true });
+		expect(parseFlagSettings('{"model":', "/irrelevant")).toEqual({ kind: "malformed", path: FLAG_SETTINGS_LABEL });
 	});
 
 	test("inline JSON of the wrong shape is a shape failure", () => {
@@ -69,21 +68,22 @@ describe("file paths", () => {
 
 	test("a malformed file names its path and detail", () => {
 		const path = fileWith('{"model":');
-		const parsed = parseFlagSettings(path, "/irrelevant");
-		expect(parsed).toMatchObject({ kind: "failure", path, malformed: true });
+		expect(parseFlagSettings(path, "/irrelevant")).toEqual({ kind: "malformed", path });
 	});
 
 	test("a file holding valid JSON that is not an object is a shape failure", () => {
 		const path = fileWith("[]");
 		const parsed = parseFlagSettings(path, "/irrelevant");
-		expect(parsed).toMatchObject({ kind: "failure", path, malformed: false });
+		expect(parsed).toMatchObject({ kind: "shape", path });
+		if (parsed.kind !== "shape") throw new Error("expected a shape failure");
+		expect(parsed.problems[0].detail).toBe("Expected object, but received array");
 	});
 
 	test("a missing file is a read failure, not a throw", () => {
 		const path = join(tempDir(), "absent.json");
 		const parsed = parseFlagSettings(path, "/irrelevant");
-		expect(parsed).toMatchObject({ kind: "failure", path, malformed: true });
-		if (parsed.kind !== "failure") throw new Error("expected a failure");
-		expect(parsed.detail).toContain("could not read the file");
+		expect(parsed).toMatchObject({ kind: "shape", path });
+		if (parsed.kind !== "shape") throw new Error("expected a shape failure");
+		expect(parsed.problems[0].detail).toContain("could not read the file");
 	});
 });

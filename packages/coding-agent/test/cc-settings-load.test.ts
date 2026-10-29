@@ -89,8 +89,8 @@ describe("tier loading", () => {
 		expect(loaded.settings.model).toBe("claude-sonnet-4-5");
 		expect(loaded.failures).toHaveLength(1);
 		expect(loaded.failures[0]).toMatchObject({ kind: "malformed", source: "user" });
-		expect(formatSettingsFailures(loaded.failures)).toEqual([
-			`${join(parts.config, "settings.json")} did not load: Invalid or malformed JSON: Unexpected end of JSON input`,
+		expect(formatSettingsFailures(loaded.failures).slice(1)).toEqual([
+			`  ${join(parts.config, "settings.json")}: Invalid or malformed JSON`,
 		]);
 	});
 
@@ -99,8 +99,18 @@ describe("tier loading", () => {
 		write(join(parts.config, "settings.json"), '{"model":"claude-haiku-4-5","hooks":"not-an-object"}');
 		const loaded = loadCcSettings(location(parts));
 		expect(loaded.settings.model).toBeUndefined();
-		expect(loaded.failures[0]).toMatchObject({ kind: "shape", source: "user" });
-		expect(formatSettingsFailures(loaded.failures)[0]).toContain("hooks must be an object");
+		expect(loaded.failures[0]).toMatchObject({ kind: "shape", source: "user", key: "hooks" });
+		expect(formatSettingsFailures(loaded.failures).slice(1)).toEqual([
+			`  ${join(parts.config, "settings.json")} (hooks): Expected object, but received string`,
+		]);
+	});
+
+	test("the block header matches the measured Claude Code wording", () => {
+		const parts = side();
+		write(join(parts.config, "settings.json"), "[]");
+		const lines = formatSettingsFailures(loadCcSettings(location(parts)).failures);
+		expect(lines[0]).toContain("These settings files did not load");
+		expect(lines[1]).toBe(`  ${join(parts.config, "settings.json")}: Expected object, but received array`);
 	});
 });
 
@@ -186,11 +196,10 @@ describe("flag tier", () => {
 		write(join(parts.workspace, ".claude", "settings.json"), '{"model":"claude-sonnet-4-5"}');
 		const loaded = loadCcSettings(location(parts, { flagSettings: path }));
 		expect(loaded.settings.model).toBe("claude-sonnet-4-5");
-		const lines = formatSettingsFailures(loaded.failures);
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toContain(path);
-		expect(lines[0]).toContain("did not load");
-		expect(lines[0]).toContain("Invalid or malformed JSON");
+		const block = formatSettingsFailures(loaded.failures).join("\n");
+		expect(block).toContain("did not load");
+		expect(block).toContain("Invalid or malformed JSON");
+		expect(block).toContain(path);
 	});
 });
 

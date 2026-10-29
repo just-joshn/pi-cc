@@ -1,16 +1,19 @@
 /**
- * The document shape: which JSON kind each documented Claude Code key must have, how two tiers merge
- * one key, and the parser that applies the table to a settings file. A file that fails the table is
- * reported once and skipped whole, because a half-applied settings document is worse than none.
+ * The document shape: which JSON kind each Claude Code key must have, how two tiers merge one key, and
+ * the parser that applies the table to a settings file. Claude Code names a file that fails the table
+ * on stderr and loads none of it, so a document with one bad key contributes nothing.
  */
 
 import { stripBom } from "../../../utils/text.ts";
 
 export type CcJsonKind = "string" | "boolean" | "number" | "array" | "object";
 
-/** Documented Claude Code settings keys and the JSON kind each one must have. */
+/**
+ * Documented Claude Code keys whose JSON kind is known here. A key outside this table still loads and
+ * stays readable through `CcSettings.values`; it is unchecked because guessing a kind would turn a
+ * valid file into a "did not load" block. The table grows as later units learn each key's shape.
+ */
 export const KEY_KINDS: Readonly<Record<string, CcJsonKind>> = {
-	// Scalars a session reads, or that a later unit maps onto pi.
 	model: "string",
 	fallbackModel: "string",
 	advisorModel: "string",
@@ -22,7 +25,7 @@ export const KEY_KINDS: Readonly<Record<string, CcJsonKind>> = {
 	requiredMinimumVersion: "string",
 	requiredMaximumVersion: "string",
 	autoUpdatesChannel: "string",
-	// Booleans.
+
 	allowManagedHooksOnly: "boolean",
 	allowManagedMcpServersOnly: "boolean",
 	allowManagedPermissionRulesOnly: "boolean",
@@ -30,15 +33,11 @@ export const KEY_KINDS: Readonly<Record<string, CcJsonKind>> = {
 	autoUpdates: "boolean",
 	disableAllHooks: "boolean",
 	enforceAvailableModels: "boolean",
-	forceRemoteSettingsRefresh: "boolean",
-	includeCoAuthoredBy: "boolean",
 	respectGitignore: "boolean",
-	// Numbers.
+
 	cleanupPeriodDays: "number",
 	desktopSessionCleanupPeriodDays: "number",
-	// Arrays. Every array key merges by concatenation except `fallbackModel`, which is a string.
-	additionalMarketplaces: "array",
-	allowedChannelPlugins: "array",
+
 	allowedHttpHookUrls: "array",
 	allowedMarketplaces: "array",
 	allowedMcpServers: "array",
@@ -48,29 +47,17 @@ export const KEY_KINDS: Readonly<Record<string, CcJsonKind>> = {
 	deniedModels: "array",
 	disabledMcpjsonServers: "array",
 	enabledMcpjsonServers: "array",
-	enabledPlugins: "array",
 	httpHookAllowedEnvVars: "array",
-	pluginSuggestionMarketplaces: "array",
 	strictKnownMarketplaces: "array",
-	// Objects. These are loaded and exposed; P04, P07, P08 and P24 act on them.
-	agents: "object",
-	claudeMd: "object",
+
 	env: "object",
-	extraKnownMarketplaces: "object",
 	hooks: "object",
 	mcpServers: "object",
-	managedMcpServers: "object",
-	modelOverrides: "object",
-	modelPicker: "object",
-	modelPricing: "object",
 	permissions: "object",
-	pluginConfigs: "object",
-	plugins: "object",
 	sandbox: "object",
-	skills: "object",
 	statusLine: "object",
-	// `allowedProviders` is deliberately absent: policy.ts validates it, so a bad value must reach
-	// the policy gate and refuse the run instead of being dropped here as a shape failure.
+	// `allowedProviders` is deliberately absent: policy.ts validates it, so a bad value must reach the
+	// policy gate and refuse the run instead of being dropped here as a shape failure.
 };
 
 /** Policy keys that replace the merged value when the policy tier defines them. */
@@ -97,50 +84,58 @@ export function mergeValue(key: string, previous: unknown, next: unknown): unkno
 	return next;
 }
 
+/** One reason a document does not load. `key` is absent when the whole document is the problem. */
+export interface CcDocumentProblem {
+	readonly key: string | undefined;
+	readonly detail: string;
+}
+
 export type CcDocumentParse =
 	| { readonly kind: "document"; readonly values: Record<string, unknown> }
-	| { readonly kind: "malformed"; readonly detail: string }
-	| { readonly kind: "shape"; readonly detail: string };
+	| { readonly kind: "malformed" }
+	| { readonly kind: "shape"; readonly problems: readonly CcDocumentProblem[] };
 
-/** Parses one settings document and checks every documented key against its kind. */
 export function parseCcSettingsText(text: string): CcDocumentParse {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(stripBom(text));
-	} catch (error) {
-		return { kind: "malformed", detail: error instanceof Error ? error.message : String(error) };
+	} catch {
+		return { kind: "malformed" };
 	}
 	if (!isJsonObject(parsed)) {
-		return { kind: "shape", detail: `expected a JSON object, found ${describeValue(parsed)}` };
+		return {
+			kind: "shape",
+			problems: [{ key: undefined, detail: `Expected object, but received ${describe(parsed)}` }],
+		};
 	}
-	const problems: string[] = [];
+	const problems: CcDocumentProblem[] = [];
 	for (const [key, value] of Object.entries(parsed)) {
-		const problem = keyKindProblem(key, value);
+		const problem = keyProblem(key, value);
 		if (problem !== undefined) {
-			problems.push(problem);
+			problems.push({ key, detail: problem });
 		}
 	}
-	if (problems.length > 0) {
-		return { kind: "shape", detail: problems.join("; ") };
-	}
-	return { kind: "document", values: parsed };
+	return problems.length > 0 ? { kind: "shape", problems } : { kind: "document", values: parsed };
 }
 
 export function isJsonObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function keyKindProblem(key: string, value: unknown): string | undefined {
+function keyProblem(key: string, value: unknown): string | undefined {
 	const kind = KEY_KINDS[key];
 	if (kind === undefined) {
 		return undefined;
 	}
 	if (!matchesKind(value, kind)) {
-		return `${key} must be ${kindName(kind)}, found ${describeValue(value)}`;
+		return `Expected ${kind}, but received ${describe(value)}`;
 	}
-	// An env block is a flat string map in Claude Code, so a non-string entry invalidates the file.
-	if (key === "env" && isJsonObject(value) && !Object.values(value).every((entry) => typeof entry === "string")) {
-		return "env values must be strings";
+	// An env block is a flat string map in Claude Code, so a non-string entry is a problem of its own.
+	if (key === "env" && isJsonObject(value)) {
+		const entry = Object.entries(value).find(([, envValue]) => typeof envValue !== "string");
+		if (entry !== undefined) {
+			return `Expected string for env.${entry[0]}, but received ${describe(entry[1])}`;
+		}
 	}
 	return undefined;
 }
@@ -160,18 +155,14 @@ function matchesKind(value: unknown, kind: CcJsonKind): boolean {
 	}
 }
 
-function kindName(kind: CcJsonKind): string {
-	return kind === "array" ? "an array" : kind === "object" ? "an object" : kind;
-}
-
-function describeValue(value: unknown): string {
+function describe(value: unknown): string {
 	if (value === null) {
 		return "null";
 	}
 	if (Array.isArray(value)) {
-		return "an array";
+		return "array";
 	}
-	return typeof value === "object" ? "an object" : `${typeof value} ${JSON.stringify(value)}`;
+	return typeof value;
 }
 
 function concatUnique(previous: readonly unknown[], next: readonly unknown[]): unknown[] {
