@@ -17,7 +17,7 @@ What the harness took from them, all re-expressed for a general case root rather
 paths:
 
 - default deny, then explicit allows, in that order, because Seatbelt applies the last matching rule;
-- allow `process-exec*`, then deny the credential-reading executables (`security`, `securityd`, `ssh-add`, `osascript`);
+- allow `process-exec*`, then deny the executables that read credentials or hand work to another app (`security`, `securityd`, `ssh-add`, `osascript`, `open`);
 - allow `mach-lookup`, then deny the Security framework and trust services;
 - allow reads broadly, then deny the real home, `/Library/Keychains`, `/private/var/db/dslocal` and the
   managed-policy roots, then re-allow the side's executable and its own root;
