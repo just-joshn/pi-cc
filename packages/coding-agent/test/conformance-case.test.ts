@@ -376,6 +376,9 @@ const READ_ONLY_ARGV: [string[], string?][] = [
 	[["--settings", "{}"]],
 	[["--setting-sources", "project"]],
 	[["--model", "claude-haiku-4-5"]],
+	[["--tools", "Read,Bash"]],
+	[["--disallowedTools", "Agent,Bash"]],
+	[["--permission-mode", "acceptEdits"]],
 	[["-A", "$HOME"], "ls"],
 ];
 

@@ -17,9 +17,9 @@
  * run root. `isolation/seeded-hook-contained` and `isolation/inline-settings-hook-contained` prove it
  * with a hook that tries all three escapes from inside settings the case supplied.
  *
- * Every entry below is a token a shipped case, PR #5 (`cc/p02-settings`) or PR #6 (`cc/provider-env`)
- * writes in its argv. Nothing is listed for a case that might exist later: a unit that needs a flag, a
- * subcommand word, or an env key adds it here in its own reviewable diff.
+ * Every entry below is a token a shipped case, PR #5 (`cc/p02-settings`), PR #6 (`cc/provider-env`),
+ * or PR #7 (`cc/p03-tools`) writes in its argv. Nothing is listed for a case that might exist later: a
+ * unit that needs a flag, a subcommand word, or an env key adds it here in its own reviewable diff.
  */
 
 import { HARNESS_ENV_KEYS, type ProbeName } from "./isolate.ts";
@@ -65,6 +65,9 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--setting-sources",
 		"--bare",
 		"--safe-mode",
+		// tool selection, which PR #7's cases pin
+		"--tools",
+		"--disallowedTools",
 		// a token that exists to be rejected, so a case can pin the unknown-flag error
 		"--no-such-flag-probe",
 	],
@@ -84,6 +87,7 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"project",
 		// the model id PR #5's `--model` case writes
 		"claude-haiku-4-5",
+		// a value of `--permission-mode` in PR #7's cases
 		"acceptEdits",
 	],
 };
