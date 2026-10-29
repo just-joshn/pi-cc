@@ -998,6 +998,7 @@ export async function main(args: string[], options?: MainOptions) {
 				...ccResources,
 				memorySettings: () => ({
 					values: ccAdmission.run.settings.values,
+					pluginOptions: ccAdmission.run.settings.pluginOptions,
 					settingSources: toSettingSources(parsed.settingSources),
 				}),
 				disabledBuiltinExtensions: ccResources.noMcp ? ["mcp"] : undefined,

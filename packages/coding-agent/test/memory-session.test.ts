@@ -42,6 +42,7 @@ async function memoryHarness(): Promise<{ harness: Harness; workspace: string; m
 		excludes: [],
 		autoMemory: { dir: memoryDir },
 		disabled: false,
+		instructionFiles: "claude-md",
 	});
 	const resourceLoader: ResourceLoader = { ...createTestResourceLoader(), getMemory: () => snapshot };
 	const harness = await createHarness({ resourceLoader });

@@ -307,6 +307,7 @@ export function loadProjectContextFiles(options: {
 
 export interface MemorySettings {
 	readonly values: Readonly<Record<string, unknown>>;
+	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 	readonly settingSources: readonly string[] | undefined;
 }
 
@@ -441,7 +442,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.noThemes = options.noThemes ?? false;
 		this.noContextFiles = options.noContextFiles ?? false;
 		this.noMemory = options.noMemory ?? false;
-		this.memorySettings = options.memorySettings ?? (() => ({ values: {}, settingSources: undefined }));
+		this.memorySettings =
+			options.memorySettings ?? (() => ({ values: {}, pluginOptions: {}, settingSources: undefined }));
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
 		this.extensionsOverride = options.extensionsOverride;
@@ -717,6 +719,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				env: process.env,
 				platform: process.platform,
 				values: memorySettings.values,
+				pluginOptions: memorySettings.pluginOptions,
 				settingSources: memorySettings.settingSources,
 				projectTrusted: this.settingsManager.isProjectTrusted(),
 				disabled: this.noContextFiles || this.noMemory,

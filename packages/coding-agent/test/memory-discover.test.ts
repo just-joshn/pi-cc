@@ -57,6 +57,7 @@ function location(parts: Side, overrides: Partial<MemoryLocation> = {}): MemoryL
 		excludes: [],
 		autoMemory: undefined,
 		disabled: false,
+		instructionFiles: "claude-md",
 		...overrides,
 	};
 }
@@ -322,6 +323,7 @@ describe("resolveMemoryLocation", () => {
 		env: { CLAUDE_CONFIG_DIR: parts.config, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
 		platform: "darwin",
 		values: {},
+		pluginOptions: {},
 		settingSources: undefined,
 		projectTrusted: true,
 		disabled: false,

@@ -10,6 +10,7 @@ import { parseFrontmatter } from "../../utils/frontmatter.ts";
 import { canonicalizePath } from "../../utils/paths.ts";
 import { stripBom } from "../../utils/text.ts";
 import { findGitPaths } from "../footer-data-provider.ts";
+import { isJsonObject } from "../settings/cc/keys.ts";
 import { ccConfigDir, ccManagedDir } from "../settings/cc/paths.ts";
 import { CC_FILE_SOURCES } from "../settings/cc/types.ts";
 import { isAutoMemoryEnabled, resolveAutoMemoryDir, truncateMemoryIndex } from "./auto-memory.ts";
@@ -17,6 +18,13 @@ import { extractImportPaths, isTextPath, resolveImportPath, stripCommentBlocks }
 import { listRuleFiles, type MemoryRule, ruleGlobs, ruleMatches } from "./rules.ts";
 
 export type MemoryType = "managed" | "user" | "project" | "local" | "auto";
+
+/**
+ * Which startup memory Claude Code's built-in AGENTS.md plugin lets through, named as its
+ * `instructionFiles` option names them. The default loads a project's `AGENTS.md` files where no
+ * `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` on the directory walk loads.
+ */
+export type InstructionFiles = (typeof INSTRUCTION_FILES)[number];
 
 /** One loaded memory file. `content` has its frontmatter and comment-only blocks removed. */
 export interface MemoryFile {
@@ -40,6 +48,7 @@ export interface MemoryLocation {
 	readonly excludes: readonly string[];
 	readonly autoMemory: { readonly dir: string } | undefined;
 	readonly disabled: boolean;
+	readonly instructionFiles: InstructionFiles;
 }
 
 export interface MemorySnapshot {
@@ -57,6 +66,8 @@ export interface MemoryLocationInput {
 	readonly platform: string;
 	/** Merged Claude Code settings values. */
 	readonly values: Readonly<Record<string, unknown>>;
+	/** `pluginConfigs.<id>.options` per plugin id, from the tiers Claude Code reads them from. */
+	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 	/** Tier names from `--setting-sources`. Undefined admits all three file tiers. */
 	readonly settingSources: readonly string[] | undefined;
 	readonly projectTrusted: boolean;
@@ -87,6 +98,7 @@ export function resolveMemoryLocation(input: MemoryLocationInput): MemoryLocatio
 				? { dir: resolveAutoMemoryDir(configDir, cwd, home, values) }
 				: undefined,
 		disabled,
+		instructionFiles: resolveInstructionFiles(values, input.pluginOptions),
 	};
 }
 
@@ -123,7 +135,122 @@ export function discoverMemory(location: MemoryLocation): MemorySnapshot {
 	if (autoMemory !== undefined) {
 		files.push(autoMemory);
 	}
-	return { files, autoMemoryDir: location.autoMemory?.dir, location };
+	return { files: applyInstructionFiles(location, files), autoMemoryDir: location.autoMemory?.dir, location };
+}
+
+function applyInstructionFiles(location: MemoryLocation, files: MemoryFile[]): MemoryFile[] {
+	switch (location.instructionFiles) {
+		case "claude-md":
+			return files;
+		case "managed-only":
+			return files.filter((file) => file.type === "managed" || file.type === "auto");
+		case "claude-md-or-agents-md":
+			return isClaudeProject(location) ? files : insertAgentsFiles(files, loadAgentsFiles(location, files));
+		case "claude-md-and-agents-md":
+			return insertAgentsFiles(files, loadAgentsFiles(location, files));
+	}
+}
+
+/** Whether a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` on the directory walk loads anything. */
+function isClaudeProject(location: MemoryLocation): boolean {
+	if (!location.sources.project) {
+		return false;
+	}
+	const load = createLoad(location, new Set());
+	const shadowed = shadowedDirTest(location.cwd);
+	return ancestorsTopDown(location.cwd).some(
+		(dir) => !shadowed(dir) && CLAUDE_NAMES.some((name) => loadMemoryFile(load, join(dir, name), PROJECT).length > 0),
+	);
+}
+
+/**
+ * The `AGENTS.md` and `.claude/AGENTS.md` files of the directory walk, loaded as project memory,
+ * without any file `files` already holds by path or, for project and local memory, by trimmed text.
+ */
+function loadAgentsFiles(location: MemoryLocation, files: readonly MemoryFile[]): MemoryFile[] {
+	if (!location.sources.project) {
+		return [];
+	}
+	const load = createLoad(location, new Set());
+	const shadowed = shadowedDirTest(location.cwd);
+	const found = ancestorsTopDown(location.cwd)
+		.filter((dir) => !shadowed(dir))
+		.flatMap((dir) => AGENTS_NAMES.flatMap((name) => loadMemoryFile(load, join(dir, name), PROJECT)));
+	const paths = new Set(files.map((file) => file.path));
+	const texts = new Set(files.filter(isProjectOwn).map((file) => file.content.trim()));
+	return found.filter((file) => !paths.has(file.path) && !texts.has(file.content.trim()));
+}
+
+/**
+ * Each directory's `AGENTS.md` files go before the first project or local file of a directory below
+ * it, else after the last project or local file, else before auto memory.
+ */
+function insertAgentsFiles(files: readonly MemoryFile[], agents: readonly MemoryFile[]): MemoryFile[] {
+	const result = [...files];
+	const groups = new Map<string, MemoryFile[]>();
+	for (const file of agents) {
+		const dir = projectDirOf(chainRoot(file, agents));
+		groups.set(dir, [...(groups.get(dir) ?? []), file]);
+	}
+	for (const [dir, group] of groups) {
+		result.splice(insertionIndex(result, dir), 0, ...group);
+	}
+	return result;
+}
+
+function insertionIndex(files: readonly MemoryFile[], dir: string): number {
+	const below = files.findIndex(
+		(file) => isProjectOwn(file) && projectDirOf(chainRoot(file, files)).startsWith(`${dir}${sep}`),
+	);
+	if (below !== -1) {
+		return below;
+	}
+	const last = files.findLastIndex(isProjectOwn);
+	if (last !== -1) {
+		return last + 1;
+	}
+	const auto = files.findIndex((file) => file.type === "auto");
+	return auto === -1 ? files.length : auto;
+}
+
+function isProjectOwn(file: MemoryFile): boolean {
+	return file.type === "project" || file.type === "local";
+}
+
+/** The path at the top of a file's import chain among `files`. */
+function chainRoot(file: MemoryFile, files: readonly MemoryFile[]): string {
+	const seen = new Set([file.path]);
+	let root = file.path;
+	let parent = file.parent;
+	while (parent !== undefined && !seen.has(parent)) {
+		seen.add(parent);
+		root = parent;
+		parent = files.find((candidate) => candidate.path === parent)?.parent;
+	}
+	return root;
+}
+
+/** The project directory a memory file belongs to: the directory holding its `.claude` directory, else its own. */
+function projectDirOf(path: string): string {
+	const claudeDir = path.lastIndexOf(`${sep}.claude${sep}`);
+	const end = claudeDir === -1 ? path.lastIndexOf(sep) : claudeDir;
+	return end <= 0 ? sep : path.slice(0, end);
+}
+
+function resolveInstructionFiles(
+	values: Readonly<Record<string, unknown>>,
+	pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+): InstructionFiles {
+	if (isJsonObject(values.enabledPlugins) && values.enabledPlugins[AGENTS_MD_PLUGIN] === false) {
+		return "claude-md";
+	}
+	const options = pluginOptions[AGENTS_MD_PLUGIN] ?? {};
+	const chosen = INSTRUCTION_FILES.find((mode) => mode === options.instructionFiles) ?? DEFAULT_INSTRUCTION_FILES;
+	if (options.projectInstructions === undefined || chosen !== DEFAULT_INSTRUCTION_FILES) {
+		return chosen;
+	}
+	const legacy = typeof options.projectInstructions === "string" ? options.projectInstructions : "";
+	return LEGACY_INSTRUCTION_FILES.get(legacy) ?? "claude-md";
 }
 
 /**
@@ -202,6 +329,18 @@ const USER: Origin<"user"> = { type: "user", includeExternal: true };
 const NESTED_USER: Origin<"user"> = { type: "user", includeExternal: false };
 const PROJECT: Origin<"project"> = { type: "project", includeExternal: false };
 const LOCAL: Origin = { type: "local", includeExternal: false };
+const INSTRUCTION_FILES = ["claude-md", "claude-md-or-agents-md", "claude-md-and-agents-md", "managed-only"] as const;
+const DEFAULT_INSTRUCTION_FILES: InstructionFiles = "claude-md-or-agents-md";
+// The plugin's older `projectInstructions` option, read only while `instructionFiles` is left at its default.
+const LEGACY_INSTRUCTION_FILES: ReadonlyMap<string, InstructionFiles> = new Map([
+	["none", "managed-only"],
+	["claude", "claude-md"],
+	["agents-fallback", "claude-md-or-agents-md"],
+	["both", "claude-md-and-agents-md"],
+]);
+const AGENTS_MD_PLUGIN = "cc-plugin-agents-md@builtin";
+const AGENTS_NAMES = ["AGENTS.md", join(".claude", "AGENTS.md")];
+const CLAUDE_NAMES = ["CLAUDE.md", join(".claude", "CLAUDE.md"), "CLAUDE.local.md"];
 const MAX_IMPORT_DEPTH = 5;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const EXCLUDABLE: ReadonlySet<MemoryType> = new Set(["user", "project", "local"]);

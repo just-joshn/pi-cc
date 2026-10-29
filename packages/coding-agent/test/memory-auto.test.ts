@@ -131,6 +131,7 @@ describe("MEMORY.md", () => {
 			env: { CLAUDE_CONFIG_DIR: config },
 			platform: "freebsd",
 			values: { autoMemoryDirectory: memoryDir },
+			pluginOptions: {},
 			settingSources: undefined,
 			projectTrusted: true,
 			disabled: false,
