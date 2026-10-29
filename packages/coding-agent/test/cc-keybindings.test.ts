@@ -23,6 +23,8 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	setKeybindings(new KeybindingsManager());
 	vi.unstubAllEnvs();
+	vi.useRealTimers();
+	vi.restoreAllMocks();
 });
 
 function load(file: unknown) {
@@ -179,6 +181,22 @@ describe("CC keybinding file import", () => {
 });
 
 describe("prompt chord dispatch", () => {
+	it("shows pending and timeout feedback in the prompt border", () => {
+		vi.useFakeTimers();
+		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
+		editor.handleInput("\x0b");
+		expect(editor.render(80).join("\n")).toContain("Waiting for next key");
+		vi.advanceTimersByTime(3000);
+		expect(editor.render(80).join("\n")).toContain("Chord cancelled");
+		vi.advanceTimersByTime(3000);
+		expect(editor.render(80).join("\n")).not.toContain("Chord cancelled");
+	});
+
+	it("prints import diagnostics before interactive startup", () => {
+		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+		load(cc({ "ctrl+y": "unknown:action" }));
+		expect(warning).toHaveBeenCalledWith(expect.stringContaining("Unsupported keybinding action: unknown:action"));
+	});
 	it("does not treat object prototype properties as action aliases", () => {
 		const imported = importCcKeybindings(cc({ "ctrl+k": "constructor", "ctrl+s": "__proto__" }), new Set());
 		expect(imported.bindings).toEqual([]);
