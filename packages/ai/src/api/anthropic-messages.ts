@@ -440,6 +440,11 @@ function consumeLine(text: string): { line: string; rest: string } | null {
 		return null;
 	}
 
+	// A trailing CR may be the first half of a CRLF the next chunk completes.
+	if (lineBreakIndex === text.length - 1 && text[lineBreakIndex] === "\r") {
+		return null;
+	}
+
 	let nextIndex = lineBreakIndex + 1;
 	if (text[lineBreakIndex] === "\r" && text[nextIndex] === "\n") {
 		nextIndex += 1;
@@ -484,6 +489,8 @@ async function* iterateSseMessages(
 		}
 
 		buffer += decoder.decode();
+		// No chunk can complete a trailing CR past this point, so one newline closes the last line.
+		buffer += "\n";
 		let consumed = consumeLine(buffer);
 		while (consumed) {
 			buffer = consumed.rest;
@@ -492,13 +499,6 @@ async function* iterateSseMessages(
 				yield event;
 			}
 			consumed = consumeLine(buffer);
-		}
-
-		if (buffer.length > 0) {
-			const event = decodeSseLine(buffer, state);
-			if (event) {
-				yield event;
-			}
 		}
 
 		const trailingEvent = flushSseEvent(state);
