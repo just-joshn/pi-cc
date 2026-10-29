@@ -7,6 +7,8 @@ import type { AnthropicMessageRequest } from "./anthropic-wire.ts";
 const ANTHROPIC_VERSION = "2023-06-01";
 const MESSAGES_PATH = "/v1/messages?beta=true";
 const DEFAULT_TIMEOUT_MS = 600_000;
+/** The beta every token-authenticated request carried while the SDK owned the token cache. */
+export const OAUTH_API_BETA = "oauth-2025-04-20";
 
 /**
  * `status` and `headers` are absent when the request never produced a
@@ -53,6 +55,11 @@ export interface AnthropicTransportConfig {
 	headers?: ProviderHeaders;
 	/** Auth headers. Awaited per request, so a federated bearer can be refreshed. */
 	authHeaders: () => Promise<ProviderHeaders>;
+	/**
+	 * Set when `authHeaders` returns a federation-minted bearer. Token auth carries the
+	 * OAuth beta, and a 401 retires the token.
+	 */
+	federation?: { invalidate(): void };
 	fetch?: FetchFunction;
 }
 
@@ -62,7 +69,8 @@ export function createAnthropicTransport(config: AnthropicTransportConfig): Anth
 
 	return {
 		async postMessages(params, options = {}) {
-			const { betas, ...body } = params;
+			const { betas: configuredBetas, ...body } = params;
+			const betas = requestBetas(configuredBetas, config.federation !== undefined);
 			const headers = providerHeadersToRecord(
 				{
 					accept: "application/json",
@@ -79,11 +87,18 @@ export function createAnthropicTransport(config: AnthropicTransportConfig): Anth
 
 			const response = await send(fetch, url, headers, JSON.stringify(body), options);
 			if (!response.ok) {
+				// The SDK dropped its token cache on a 401 so the next request minted a new token.
+				if (response.status === 401) config.federation?.invalidate();
 				throw await toRequestError(response);
 			}
 			return response;
 		},
 	};
+}
+
+function requestBetas(configured: string[] | undefined, isTokenAuth: boolean): string[] | undefined {
+	if (!isTokenAuth) return configured;
+	return [...new Set([...(configured ?? []), OAUTH_API_BETA])];
 }
 
 async function send(
@@ -98,25 +113,22 @@ async function send(
 		throw new AnthropicRequestError("Request was aborted.");
 	}
 
-	// A merged controller, so the caller's abort and the timeout both cancel the fetch.
-	const controller = new AbortController();
-	const abort = () => controller.abort();
-	callerSignal?.addEventListener("abort", abort, { once: true });
-	let timedOut = false;
-	const timer = setTimeout(() => {
-		timedOut = true;
-		abort();
-	}, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+	// The caller's abort stays linked to the live request until the body settles, so a read
+	// pending on a stalled stream rejects instead of waiting for the next byte.
+	// `AbortSignal.any` keeps no listener on the caller's signal, which outlives requests.
+	const timeout = new AbortController();
+	const timer = setTimeout(() => timeout.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+	const signal = callerSignal === undefined ? timeout.signal : AbortSignal.any([callerSignal, timeout.signal]);
 
 	try {
-		return await fetch(url, { method: "POST", headers, body, signal: controller.signal });
+		// The timeout covers the headers only, as the SDK's did; the body is the caller's to abort.
+		return await fetch(url, { method: "POST", headers, body, signal });
 	} catch (error) {
 		if (callerSignal?.aborted) throw new AnthropicRequestError("Request was aborted.");
-		if (timedOut) throw new AnthropicRequestError("Request timed out.");
+		if (timeout.signal.aborted) throw new AnthropicRequestError("Request timed out.");
 		throw new AnthropicRequestError("Connection error.", { cause: error });
 	} finally {
 		clearTimeout(timer);
-		callerSignal?.removeEventListener("abort", abort);
 	}
 }
 

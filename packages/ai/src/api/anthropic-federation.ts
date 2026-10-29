@@ -52,13 +52,22 @@ export async function getFederationBearerToken(
 	baseUrl: string,
 	fetch: FetchFunction,
 ): Promise<string> {
-	const key = JSON.stringify([baseUrl, config]);
+	const key = cacheKey(baseUrl, config);
 	let access = await exchangeOnce(key, config, baseUrl, fetch);
 	if (access.expiresAt - nowInSeconds() <= REFRESH_BEFORE_EXPIRY_SECONDS) {
 		exchanges.delete(key);
 		access = await exchangeOnce(key, config, baseUrl, fetch);
 	}
 	return access.token;
+}
+
+/** Drops the cached token, so the next request exchanges a new one. */
+export function invalidateFederationToken(config: AnthropicFederationConfig, baseUrl: string): void {
+	exchanges.delete(cacheKey(baseUrl, config));
+}
+
+function cacheKey(baseUrl: string, config: AnthropicFederationConfig): string {
+	return JSON.stringify([baseUrl, config]);
 }
 
 function exchangeOnce(

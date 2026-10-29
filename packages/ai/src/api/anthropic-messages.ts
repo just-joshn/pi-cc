@@ -44,8 +44,17 @@ import {
 	resolveTranscript,
 	type TranscriptContext,
 } from "../utils/transcript.ts";
-import { type AnthropicFederationConfig, getFederationBearerToken } from "./anthropic-federation.ts";
-import { AnthropicRequestError, type AnthropicTransport, createAnthropicTransport } from "./anthropic-http.ts";
+import {
+	type AnthropicFederationConfig,
+	getFederationBearerToken,
+	invalidateFederationToken,
+} from "./anthropic-federation.ts";
+import {
+	AnthropicRequestError,
+	type AnthropicTransport,
+	createAnthropicTransport,
+	OAUTH_API_BETA,
+} from "./anthropic-http.ts";
 import type {
 	AnthropicCacheControl,
 	AnthropicContentBlock,
@@ -1044,6 +1053,10 @@ function createTransport(
 			}
 			return apiKey === undefined ? {} : { "x-api-key": apiKey };
 		},
+		federation:
+			federation === undefined
+				? undefined
+				: { invalidate: () => invalidateFederationToken(federation, model.baseUrl) },
 	});
 
 	return { transport, isOAuthToken: false };
@@ -1075,7 +1088,7 @@ function getBetaFeatures(
 	}
 
 	const features: string[] = [];
-	if (isOAuthToken) features.push("claude-code-20250219", "oauth-2025-04-20");
+	if (isOAuthToken) features.push("claude-code-20250219", OAUTH_API_BETA);
 	if (shouldUseFineGrainedToolStreamingBeta(model, context)) features.push(FINE_GRAINED_TOOL_STREAMING_BETA);
 	if (
 		model.reasoning &&
