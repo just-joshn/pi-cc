@@ -14,6 +14,31 @@ function createSseResponse(events: Array<{ event: string; data: string }>): Resp
 	});
 }
 
+/** The three line endings the SSE spec allows, so each gets the same split coverage. */
+const STREAM_FRAMINGS = [
+	["LF", "\n"],
+	["CRLF", "\r\n"],
+	["CR", "\r"],
+] as const;
+
+/** The same frames with `lineBreak` between lines. */
+function createSseBody(events: Array<{ event: string; data: string }>, lineBreak: string): string {
+	return events.map(({ event, data }) => `event: ${event}${lineBreak}data: ${data}${lineBreak}`).join(lineBreak);
+}
+
+/** A response whose body arrives as two chunks, split at byte `splitAt`. */
+function createSplitSseResponse(body: string, splitAt: number): Response {
+	const bytes = new TextEncoder().encode(body);
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(bytes.slice(0, splitAt));
+			controller.enqueue(bytes.slice(splitAt));
+			controller.close();
+		},
+	});
+	return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
 const minimalAnthropicEvents = [
 	{
 		event: "message_start",
@@ -98,6 +123,46 @@ function createResponseModelSseResponse(model: string, contentBlock: ResponseCon
 }
 
 describe("Anthropic raw SSE parsing", () => {
+	it("parses a stream split at every byte offset, whatever ends its lines", async () => {
+		const failures: string[] = [];
+
+		for (const [name, lineBreak] of STREAM_FRAMINGS) {
+			const body = createSseBody(minimalAnthropicEvents, lineBreak);
+			const byteLength = new TextEncoder().encode(body).length;
+			for (let splitAt = 1; splitAt < byteLength; splitAt += 1) {
+				const result = await streamAnthropic(
+					getModel("anthropic", "claude-haiku-4-5"),
+					normalizeContext({ messages: [{ role: "user", content: "Hello", timestamp: 1 }] }),
+					{ apiKey: "test-key", fetch: responseFetch(createSplitSseResponse(body, splitAt)) },
+				).result();
+				if (result.stopReason !== "stop" || result.errorMessage !== undefined) {
+					failures.push(`${name} split at ${splitAt}: ${result.stopReason} ${result.errorMessage}`);
+				}
+			}
+		}
+
+		expect(failures).toEqual([]);
+	});
+
+	it("dispatches the last event of a stream that ends mid-frame", async () => {
+		for (const [name, lineBreak] of STREAM_FRAMINGS) {
+			const body = createSseBody(minimalAnthropicEvents, lineBreak).slice(0, -lineBreak.length);
+			const response = new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+
+			const result = await streamAnthropic(
+				getModel("anthropic", "claude-haiku-4-5"),
+				normalizeContext({ messages: [{ role: "user", content: "Hello", timestamp: 1 }] }),
+				{ apiKey: "test-key", fetch: responseFetch(response) },
+			).result();
+
+			expect({ framing: name, stopReason: result.stopReason, content: result.content }).toEqual({
+				framing: name,
+				stopReason: "stop",
+				content: [{ type: "text", text: "Hello" }],
+			});
+		}
+	});
+
 	it("forwards parsed provider stream events in order", async () => {
 		const model = getModel("anthropic", "claude-haiku-4-5");
 		const providerEvents: unknown[] = [];
