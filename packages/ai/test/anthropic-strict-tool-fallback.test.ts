@@ -1,8 +1,8 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { BetaTool, MessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/beta/messages/messages.js";
 import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
+import { AnthropicRequestError } from "../src/api/anthropic-http.ts";
 import { type AnthropicOptions, stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
+import type { AnthropicMessageRequest, AnthropicTool } from "../src/api/anthropic-wire.ts";
 import { stream as streamPiMessages } from "../src/api/pi-messages.ts";
 import type { Model, Tool, TranscriptContext } from "../src/types.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
@@ -54,10 +54,10 @@ function successResponse(): Response {
 	});
 }
 
-function harness(respond: (payload: MessageCreateParamsStreaming, attempt: number) => Response) {
-	const payloads: MessageCreateParamsStreaming[] = [];
+function harness(respond: (payload: AnthropicMessageRequest, attempt: number) => Response) {
+	const payloads: AnthropicMessageRequest[] = [];
 	const fetch: NonNullable<AnthropicOptions["fetch"]> = async (_input, init) => {
-		const payload = JSON.parse(init?.body as string) as MessageCreateParamsStreaming;
+		const payload = JSON.parse(init?.body as string) as AnthropicMessageRequest;
 		payloads.push(payload);
 		return respond(payload, payloads.length);
 	};
@@ -77,12 +77,12 @@ describe("Anthropic preferred strict tool fallback", () => {
 		const ordinary = tool("ordinary");
 		const transcript = context([preferred, required, ordinary]);
 		const original = JSON.stringify(transcript);
-		// Use the real SDK's HTTP error parsing, not a synthetic thrown Error.
+		// A real HTTP 400 through the transport, not a synthetic thrown error.
 		const { payloads, options } = harness((_payload, attempt) =>
 			attempt === 1 ? errorResponse(message) : successResponse(),
 		);
 		const onPayload = vi.fn((payload: unknown) => ({
-			...(payload as MessageCreateParamsStreaming),
+			...(payload as AnthropicMessageRequest),
 			inference_geo: "us",
 			stream: false,
 		}));
@@ -97,8 +97,8 @@ describe("Anthropic preferred strict tool fallback", () => {
 		expect(payloads).toHaveLength(2);
 		expect(onPayload).toHaveBeenCalledTimes(2);
 		expect(onResponse).toHaveBeenCalledTimes(1);
-		const first = payloads[0].tools as BetaTool[];
-		const second = payloads[1].tools as BetaTool[];
+		const first = payloads[0].tools as AnthropicTool[];
+		const second = payloads[1].tools as AnthropicTool[];
 		expect(first[0]).toMatchObject({
 			strict: true,
 			input_schema: {
@@ -150,7 +150,7 @@ describe("Anthropic preferred strict tool fallback", () => {
 				Array.isArray(message.content)
 					? message.content.flatMap((block) =>
 							block.type === "tool_addition" && block.tool.type === "tool_definition"
-								? [block.tool.definition as BetaTool]
+								? [block.tool.definition as AnthropicTool]
 								: [],
 						)
 					: [],
@@ -200,7 +200,7 @@ describe("Anthropic preferred strict tool fallback", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("Required grammar is still too large");
 		expect(payloads).toHaveLength(2);
-		expect((payloads[1].tools as BetaTool[])[1].strict).toBe(true);
+		expect((payloads[1].tools as AnthropicTool[])[1].strict).toBe(true);
 	});
 
 	it("does not downgrade a hook exception, even if it looks like the provider rejection", async () => {
@@ -208,12 +208,11 @@ describe("Anthropic preferred strict tool fallback", () => {
 		const result = await streamAnthropic(model, context([tool("lookup", "prefer")]), {
 			...options,
 			onPayload: () => {
-				throw Anthropic.APIError.generate(
-					400,
-					{ error: { type: "invalid_request_error", message: grammarError } },
-					grammarError,
-					new Headers(),
-				);
+				throw new AnthropicRequestError(grammarError, {
+					status: 400,
+					headers: new Headers(),
+					type: "invalid_request_error",
+				});
 			},
 		}).result();
 		expect(result.stopReason).toBe("error");
@@ -255,7 +254,7 @@ describe("Anthropic preferred strict tool fallback", () => {
 		const transcript = context([tool("lookup", "prefer")]);
 		await streamAnthropic(model, transcript, options).result();
 		await streamAnthropic(model, transcript, options).result();
-		expect(payloads.map((payload) => (payload.tools as BetaTool[])[0].strict)).toEqual([true, undefined, true]);
+		expect(payloads.map((payload) => (payload.tools as AnthropicTool[])[0].strict)).toEqual([true, undefined, true]);
 	});
 
 	it("preserves prefer through pi-messages so the gateway's Anthropic adapter can fall back", async () => {
@@ -283,6 +282,6 @@ describe("Anthropic preferred strict tool fallback", () => {
 			},
 		}).result();
 		expect(result.stopReason).toBe("stop");
-		expect(payloads.map((payload) => (payload.tools as BetaTool[])[0].strict)).toEqual([true, undefined]);
+		expect(payloads.map((payload) => (payload.tools as AnthropicTool[])[0].strict)).toEqual([true, undefined]);
 	});
 });

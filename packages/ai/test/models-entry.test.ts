@@ -10,7 +10,6 @@ const preload = `data:text/javascript,${encodeURIComponent(`
 	import { registerHooks } from "node:module";
 	const forbidden = [
 		"/node_modules/typebox/",
-		"/node_modules/@anthropic-ai/sdk/",
 		"/node_modules/openai/",
 		"/node_modules/@google/genai/",
 		"/node_modules/@aws-sdk/",

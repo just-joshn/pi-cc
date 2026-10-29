@@ -21,8 +21,6 @@
  * Then use /model to select custom-anthropic/claude-sonnet-4-5
  */
 
-import Anthropic from "@anthropic-ai/sdk";
-import type { ContentBlockParam, MessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/messages.js";
 import {
 	type Api,
 	type AssistantMessage,
@@ -156,9 +154,94 @@ async function refreshAnthropicToken(credentials: OAuthCredentials, signal: Abor
 	};
 }
 
+// Subset of the wire types this provider sends and reads; the API accepts more.
+
+interface ContentBlockParam {
+	type: "text" | "image" | "thinking" | "redacted_thinking" | "tool_use" | "tool_result";
+	text?: string;
+	thinking?: string;
+	signature?: string;
+	id?: string;
+	name?: string;
+	input?: Record<string, unknown>;
+	tool_use_id?: string;
+	content?: string | ContentBlockParam[];
+	is_error?: boolean;
+	source?: { type: "base64"; media_type: string; data: string };
+	cache_control?: { type: "ephemeral"; ttl?: "1h" };
+}
+
+interface MessageCreateParams {
+	model: string;
+	messages: Array<{ role: string; content: string | ContentBlockParam[] }>;
+	max_tokens: number;
+	stream: true;
+	system?: ContentBlockParam[];
+	tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
+	thinking?: { type: "enabled"; budget_tokens: number };
+	betas?: string[];
+}
+
+interface Usage {
+	input_tokens?: number;
+	output_tokens?: number;
+	cache_read_input_tokens?: number;
+	cache_creation_input_tokens?: number;
+}
+
+type StreamEvent =
+	| { type: "message_start"; message: { usage: Usage } }
+	| {
+			type: "content_block_start";
+			index: number;
+			content_block: { type: "text" } | { type: "thinking" } | { type: "tool_use"; id: string; name: string };
+	  }
+	| {
+			type: "content_block_delta";
+			index: number;
+			delta:
+				| { type: "text_delta"; text: string }
+				| { type: "thinking_delta"; thinking: string }
+				| { type: "input_json_delta"; partial_json: string }
+				| { type: "signature_delta"; signature: string };
+	  }
+	| { type: "content_block_stop"; index: number }
+	| { type: "message_delta"; delta: { stop_reason?: string }; usage?: Usage };
+
 // =============================================================================
 // Streaming Implementation (simplified from packages/ai/src/api/anthropic-messages.ts)
 // =============================================================================
+
+async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: string }> {
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = "";
+	let event = "";
+	let data: string[] = [];
+
+	for (;;) {
+		const { value, done } = await reader.read();
+		buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+
+		let index = buffer.indexOf("\n");
+		while (index !== -1) {
+			const line = buffer.slice(0, index).replace(/\r$/, "");
+			buffer = buffer.slice(index + 1);
+			if (line === "") {
+				if (event || data.length > 0) yield { event, data: data.join("\n") };
+				event = "";
+				data = [];
+			} else if (line.startsWith("event:")) {
+				event = line.slice("event:".length).trim();
+			} else if (line.startsWith("data:")) {
+				data.push(line.slice("data:".length).trimStart());
+			}
+			index = buffer.indexOf("\n");
+		}
+
+		if (done) return;
+	}
+}
 
 // Claude Code tool names for OAuth stealth mode
 const claudeCodeTools = [
@@ -370,36 +453,26 @@ function streamCustomAnthropic(
 			const apiKey = options?.apiKey ?? "";
 			const isOAuth = isOAuthToken(apiKey);
 
-			// Configure client based on auth type
 			const betaFeatures = ["fine-grained-tool-streaming-2025-05-14", "interleaved-thinking-2025-05-14"];
-			const clientOptions: any = {
-				baseURL: model.baseUrl,
-				dangerouslyAllowBrowser: true,
+			const headers: Record<string, string> = {
+				accept: "application/json",
+				"content-type": "application/json",
+				"anthropic-version": "2023-06-01",
+				"anthropic-dangerous-direct-browser-access": "true",
+				"anthropic-beta": isOAuth
+					? `claude-code-20250219,oauth-2025-04-20,${betaFeatures.join(",")}`
+					: betaFeatures.join(","),
+				...(isOAuth
+					? {
+							authorization: `Bearer ${apiKey}`,
+							"user-agent": "claude-cli/2.1.2 (external, cli)",
+							"x-app": "cli",
+						}
+					: { "x-api-key": apiKey }),
 			};
 
-			if (isOAuth) {
-				clientOptions.apiKey = null;
-				clientOptions.authToken = apiKey;
-				clientOptions.defaultHeaders = {
-					accept: "application/json",
-					"anthropic-dangerous-direct-browser-access": "true",
-					"anthropic-beta": `claude-code-20250219,oauth-2025-04-20,${betaFeatures.join(",")}`,
-					"user-agent": "claude-cli/2.1.2 (external, cli)",
-					"x-app": "cli",
-				};
-			} else {
-				clientOptions.apiKey = apiKey;
-				clientOptions.defaultHeaders = {
-					accept: "application/json",
-					"anthropic-dangerous-direct-browser-access": "true",
-					"anthropic-beta": betaFeatures.join(","),
-				};
-			}
-
-			const client = new Anthropic(clientOptions);
-
 			// Build request params
-			const params: MessageCreateParamsStreaming = {
+			const params: MessageCreateParams = {
 				model: model.id,
 				messages: convertMessages(transcript.messages, isOAuth, tools),
 				max_tokens: options?.maxTokens || Math.floor(model.maxTokens / 3),
@@ -451,19 +524,44 @@ function streamCustomAnthropic(
 				};
 			}
 
-			const anthropicStream = client.messages.stream({ ...params }, { signal: options?.signal });
+			// Beta features travel in the header, never in the body.
+			const { betas: betaList, ...body } = params;
+			if (betaList && betaList.length > 0) headers["anthropic-beta"] = betaList.join(",");
+
+			const response = await fetch(`${model.baseUrl.replace(/\/+$/, "")}/v1/messages?beta=true`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify(body),
+				signal: options?.signal,
+			});
+			if (!response.ok) {
+				throw new Error(`${response.status} ${await response.text()}`);
+			}
+			if (!response.body) {
+				throw new Error("Anthropic response has no body");
+			}
+
 			stream.push({ type: "start", partial: output });
 
 			// Stream state per Anthropic block index, kept off the content blocks so it never reaches partial messages.
 			// ToolCallArgumentsStream reads each argument delta once and shows the arguments parsed so far.
 			const openBlocks = new Map<number, { contentIndex: number; arguments?: ToolCallArgumentsStream }>();
 
-			for await (const event of anthropicStream) {
+			for await (const chunk of readEvents(response.body)) {
+				if (chunk.event === "error") throw new Error(chunk.data);
+				if (
+					chunk.event !== "message_start" &&
+					!chunk.event.startsWith("content_block_") &&
+					chunk.event !== "message_delta"
+				) {
+					continue;
+				}
+				const event = JSON.parse(chunk.data) as StreamEvent;
 				if (event.type === "message_start") {
 					output.usage.input = event.message.usage.input_tokens || 0;
 					output.usage.output = event.message.usage.output_tokens || 0;
-					output.usage.cacheRead = (event.message.usage as any).cache_read_input_tokens || 0;
-					output.usage.cacheWrite = (event.message.usage as any).cache_creation_input_tokens || 0;
+					output.usage.cacheRead = event.message.usage.cache_read_input_tokens || 0;
+					output.usage.cacheWrite = event.message.usage.cache_creation_input_tokens || 0;
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);
@@ -515,7 +613,7 @@ function streamCustomAnthropic(
 							partial: output,
 						});
 					} else if (event.delta.type === "signature_delta" && block.type === "thinking") {
-						block.thinkingSignature = (block.thinkingSignature || "") + (event.delta as any).signature;
+						block.thinkingSignature = (block.thinkingSignature || "") + event.delta.signature;
 					}
 				} else if (event.type === "content_block_stop") {
 					const open = openBlocks.get(event.index);
@@ -534,13 +632,13 @@ function streamCustomAnthropic(
 						stream.push({ type: "toolcall_end", contentIndex: index, toolCall: block, partial: output });
 					}
 				} else if (event.type === "message_delta") {
-					if ((event.delta as any).stop_reason) {
-						output.stopReason = mapStopReason((event.delta as any).stop_reason);
+					if (event.delta.stop_reason) {
+						output.stopReason = mapStopReason(event.delta.stop_reason);
 					}
-					output.usage.input = (event.usage as any).input_tokens || 0;
-					output.usage.output = (event.usage as any).output_tokens || 0;
-					output.usage.cacheRead = (event.usage as any).cache_read_input_tokens || 0;
-					output.usage.cacheWrite = (event.usage as any).cache_creation_input_tokens || 0;
+					output.usage.input = event.usage?.input_tokens || 0;
+					output.usage.output = event.usage?.output_tokens || 0;
+					output.usage.cacheRead = event.usage?.cache_read_input_tokens || 0;
+					output.usage.cacheWrite = event.usage?.cache_creation_input_tokens || 0;
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);

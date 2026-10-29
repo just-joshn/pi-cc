@@ -1,17 +1,11 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { getModel, normalizeContext } from "../src/compat.ts";
+import { responseFetch } from "./anthropic-utils.ts";
 
 function createSseResponse(events: Array<{ event: string; data: string }>): Response {
 	const body = events.map(({ event, data }) => `event: ${event}\ndata: ${data}\n`).join("\n");
 	return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
-}
-
-function createFakeAnthropicClient(response: Response): Anthropic {
-	return {
-		beta: { messages: { create: () => ({ asResponse: async () => response }) } },
-	} as unknown as Anthropic;
 }
 
 function eventsWithCacheCreation(
@@ -65,7 +59,8 @@ describe("Anthropic 1h cache write cost", () => {
 			eventsWithCacheCreation({ ephemeral_5m_input_tokens: 600_000, ephemeral_1h_input_tokens: 400_000 }),
 		);
 		const result = await streamAnthropic(model, context, {
-			client: createFakeAnthropicClient(response),
+			apiKey: "test-key",
+			fetch: responseFetch(response),
 		}).result();
 
 		expect(result.usage.cacheWrite).toBe(1_000_000);
@@ -101,7 +96,8 @@ describe("Anthropic 1h cache write cost", () => {
 			{ event: "message_stop", data: JSON.stringify({ type: "message_stop" }) },
 		]);
 		const result = await streamAnthropic(model, context, {
-			client: createFakeAnthropicClient(response),
+			apiKey: "test-key",
+			fetch: responseFetch(response),
 		}).result();
 
 		expect(result.usage.cacheWrite).toBe(6535);
@@ -113,7 +109,8 @@ describe("Anthropic 1h cache write cost", () => {
 		const model = getModel("anthropic", "claude-opus-4-8");
 		const response = createSseResponse(eventsWithCacheCreation(undefined));
 		const result = await streamAnthropic(model, context, {
-			client: createFakeAnthropicClient(response),
+			apiKey: "test-key",
+			fetch: responseFetch(response),
 		}).result();
 
 		expect(result.usage.cacheWrite).toBe(1_000_000);

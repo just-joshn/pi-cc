@@ -132,12 +132,9 @@ try {
 		"openai",
 	];
 	const includedAiSdkPackages = aiSdkPackages.filter((packageName) => includesNodePackage(inputs, packageName));
-	if (
-		includedAiSdkPackages.length !== 1 ||
-		includedAiSdkPackages[0] !== "@anthropic-ai/sdk"
-	) {
+	if (includedAiSdkPackages.length !== 0) {
 		throw new Error(
-			`Agent selective-provider bundle SDKs: expected only @anthropic-ai/sdk, found ${includedAiSdkPackages.join(", ") || "none"}`,
+			`Agent selective-provider bundle SDKs: expected none, found ${includedAiSdkPackages.join(", ")}`,
 		);
 	}
 
