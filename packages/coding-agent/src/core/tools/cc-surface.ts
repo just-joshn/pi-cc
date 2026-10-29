@@ -327,9 +327,10 @@ function validateInput(tool: CcTool, args: Record<string, unknown>): string[] {
 		if (declared === undefined || !(key in args) || value === undefined) continue;
 		const coerced = coerceToDeclaredType(value, declared);
 		if (coerced === undefined) {
-			// Claude Code reads a numeric string as its number before it reports the type.
-			const shown =
-				typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
+			// For a number field, Claude Code reads a numeric string as its number before it reports the type.
+			const types = Array.isArray(declared) ? declared : [declared];
+			const isNumberField = types.includes("number") || types.includes("integer");
+			const shown = (isNumberField ? numericString(value) : undefined) ?? value;
 			issues.push(
 				`The parameter \`${key}\` type is expected as \`${expectedTypeName(declared, shown)}\` but provided as \`${jsonType(shown)}\``,
 			);
@@ -355,18 +356,25 @@ function coerceToDeclaredType(value: unknown, declared: string | string[]): unkn
 	return undefined;
 }
 
+/** The string forms Claude Code reads as a number, measured in the harness: no exponent, hex, or bare dot. */
+const NUMERIC_STRING = /^[+-]?\d+(\.\d+)?$/;
+
+function numericString(value: unknown): number | undefined {
+	return typeof value === "string" && NUMERIC_STRING.test(value.trim()) ? Number(value) : undefined;
+}
+
 function coerceToType(value: unknown, type: string): unknown {
 	switch (type) {
 		case "string":
 			return typeof value === "string" ? value : undefined;
-		case "number":
-			if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-			if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
-			return undefined;
-		case "integer":
-			if (typeof value === "number") return Number.isInteger(value) ? value : undefined;
-			if (typeof value === "string" && value.trim() !== "" && Number.isInteger(Number(value))) return Number(value);
-			return undefined;
+		case "number": {
+			const number = typeof value === "number" ? value : numericString(value);
+			return number !== undefined && Number.isFinite(number) ? number : undefined;
+		}
+		case "integer": {
+			const number = typeof value === "number" ? value : numericString(value);
+			return number !== undefined && Number.isInteger(number) ? number : undefined;
+		}
 		case "boolean":
 			if (typeof value === "boolean") return value;
 			if (value === "true") return true;
