@@ -1608,6 +1608,7 @@ function convertTools(
 			...(supportsEagerToolInputStreaming ? { eager_input_streaming: true } : {}),
 			...(strict === true ? { strict: true } : {}),
 			input_schema: inputSchema,
+			...(tool.deferLoading === true ? { defer_loading: true } : {}),
 			...(cacheControl && index === tools.length - 1 ? { cache_control: cacheControl } : {}),
 		};
 	});

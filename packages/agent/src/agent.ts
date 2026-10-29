@@ -123,7 +123,6 @@ export interface AgentOptions {
 	onProviderStreamEvent?: SimpleStreamOptions["onProviderStreamEvent"];
 	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
 	afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
-	resolveToolName?: (name: string) => string;
 	finishTurn?: FinishTurn;
 	prepareRequest?: PrepareRequest;
 	prepareNextTurn?: (
@@ -213,7 +212,6 @@ export class Agent {
 		context: AfterToolCallContext,
 		signal?: AbortSignal,
 	) => Promise<AfterToolCallResult | undefined>;
-	public resolveToolName?: (name: string) => string;
 	public finishTurn?: FinishTurn;
 	public prepareRequest?: PrepareRequest;
 	public prepareNextTurn?: (
@@ -250,7 +248,6 @@ export class Agent {
 		this.onProviderStreamEvent = runtimeOptions.onProviderStreamEvent;
 		this.beforeToolCall = runtimeOptions.beforeToolCall;
 		this.afterToolCall = runtimeOptions.afterToolCall;
-		this.resolveToolName = runtimeOptions.resolveToolName;
 		this.finishTurn = runtimeOptions.finishTurn;
 		this.prepareRequest = runtimeOptions.prepareRequest;
 		this.prepareNextTurn = runtimeOptions.prepareNextTurn;
@@ -492,7 +489,6 @@ export class Agent {
 			toolExecution: this.toolExecution,
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,
-			resolveToolName: this.resolveToolName,
 			finishTurn: this.finishTurn,
 			prepareRequest: this.prepareRequest,
 			prepareNextTurn:

@@ -173,7 +173,7 @@ describe("context_with_system handlers", () => {
 						return {
 							messages: event.messages.map((message) =>
 								message.role === "system" && message.toolsAdded
-									? { ...message, toolsAdded: message.toolsAdded.filter((tool) => tool.name !== "Bash") }
+									? { ...message, toolsAdded: message.toolsAdded.filter((tool) => tool.name !== "bash") }
 									: message,
 							),
 						};
@@ -195,8 +195,8 @@ describe("context_with_system handlers", () => {
 		const input = seen.at(-1);
 		expect(input?.[0]?.role).toBe("system");
 		expect(input?.[1]?.role).toBe("compactionSummary");
-		expect(harness.session.getActiveToolNames()).toContain("Bash");
-		expect(toolNames(getRequest())).toEqual(harness.session.getActiveToolNames().filter((name) => name !== "Bash"));
+		expect(harness.session.getActiveToolNames()).toContain("bash");
+		expect(toolNames(getRequest())).toEqual(harness.session.getActiveToolNames().filter((name) => name !== "bash"));
 	});
 
 	it("reports a handler that drops the leading system message but honors its output", async () => {

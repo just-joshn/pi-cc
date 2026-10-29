@@ -339,12 +339,6 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
 	afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
-
-	/**
-	 * Resolves a model-emitted tool name before the loop looks it up. Default: the name unchanged.
-	 * Use it to accept legacy spellings of tools whose registered names changed.
-	 */
-	resolveToolName?: (name: string) => string;
 }
 
 /**
@@ -477,8 +471,6 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 	 * Must return an object that matches `TParameters`.
 	 */
 	prepareArguments?: (args: unknown) => Static<TParameters>;
-	/** Set false to validate arguments as received instead of coercing them. Default: true. */
-	coerceArguments?: boolean;
 	/**
 	 * JSON Schema of `structuredContent` in successful results. Tools that declare it should always
 	 * set `structuredContent`.

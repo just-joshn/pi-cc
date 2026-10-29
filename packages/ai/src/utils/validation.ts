@@ -353,15 +353,17 @@ export function validateToolCall(tools: Tool[], toolCall: ToolCall): any {
  */
 export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 	if (toolCall.argumentsError) {
+		// A model boundary that already decided this call's answer hands back a complete
+		// `<tool_use_error>` envelope; anything else is a malformed-JSON report.
+		if (toolCall.argumentsError.startsWith("<tool_use_error>")) throw new Error(toolCall.argumentsError);
 		throw new Error(`Invalid arguments for tool "${toolCall.name}": ${toolCall.argumentsError}`);
 	}
 	const args = structuredClone(toolCall.arguments);
 	normalizeOptionalNulls(args, tool.parameters as JsonSchemaObject);
-	const coerce = tool.coerceArguments !== false;
-	if (coerce) Value.Convert(tool.parameters, args);
+	Value.Convert(tool.parameters, args);
 
 	const validator = getValidator(tool.parameters);
-	if (coerce && !Object.getOwnPropertySymbols(tool.parameters).includes(TYPEBOX_KIND)) {
+	if (!Object.getOwnPropertySymbols(tool.parameters).includes(TYPEBOX_KIND)) {
 		const coerced = coerceWithJsonSchema(args, tool.parameters as JsonSchemaObject);
 		if (coerced !== args) {
 			if (typeof args === "object" && args !== null && typeof coerced === "object" && coerced !== null) {
@@ -385,7 +387,8 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 			.map((error) => formatValidationIssue(error, args))
 			.join("\n") || "Unknown validation error";
 
+	const noun = validator.Errors(args).length === 1 ? "issue" : "issues";
 	throw new Error(
-		`<tool_use_error>InputValidationError: ${tool.name} failed due to the following issue:\n${errors}</tool_use_error>`,
+		`<tool_use_error>InputValidationError: ${tool.name} failed due to the following ${noun}:\n${errors}</tool_use_error>`,
 	);
 }

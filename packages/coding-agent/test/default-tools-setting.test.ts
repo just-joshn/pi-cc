@@ -63,22 +63,8 @@ describe("defaultTools setting", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual([
-			"Bash",
-			"DeferredToolPlaceholder",
-			"Edit",
-			"Read",
-			"Write",
-			"bash",
-			"edit",
-			"find",
-			"grep",
-			"ls",
-			"powershell",
-			"read",
-			"write",
-		]);
-		expect(session.getActiveToolNames()).toEqual(["grep", "find", "DeferredToolPlaceholder"]);
+		).toEqual(["bash", "edit", "find", "grep", "ls", "powershell", "read", "write"]);
+		expect(session.getActiveToolNames()).toEqual(["grep", "find"]);
 		expect(session.systemPrompt).toContain("- grep:");
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
@@ -87,7 +73,7 @@ describe("defaultTools setting", () => {
 	it("can select powershell instead of bash", async () => {
 		const session = await createSession(["read", "powershell", "edit", "write"]);
 
-		expect(session.getActiveToolNames()).toEqual(["Edit", "powershell", "Read", "DeferredToolPlaceholder", "Write"]);
+		expect(session.getActiveToolNames()).toEqual(["read", "powershell", "edit", "write"]);
 		expect(session.systemPrompt).toContain("- powershell: Execute PowerShell commands");
 		expect(session.systemPrompt).not.toContain("- bash:");
 		session.dispose();
@@ -107,13 +93,7 @@ describe("defaultTools setting", () => {
 			},
 		]);
 
-		expect(session.getActiveToolNames().sort()).toEqual([
-			"Bash",
-			"DeferredToolPlaceholder",
-			"Edit",
-			"Read",
-			"inactive_tool",
-		]);
+		expect(session.getActiveToolNames().sort()).toEqual(["bash", "edit", "inactive_tool", "read"]);
 		session.dispose();
 	});
 
@@ -154,13 +134,7 @@ describe("defaultTools setting", () => {
 		);
 		await session.bindExtensions({});
 
-		expect(session.getActiveToolNames().sort()).toEqual([
-			"DeferredToolPlaceholder",
-			"dynamic_tool",
-			"grep",
-			"sdk_tool",
-			"static_tool",
-		]);
+		expect(session.getActiveToolNames().sort()).toEqual(["dynamic_tool", "grep", "sdk_tool", "static_tool"]);
 		expect(session.getAllTools().map((tool) => tool.name)).toEqual(
 			expect.arrayContaining(["read", "dynamic_tool", "sdk_tool", "static_tool"]),
 		);
@@ -169,11 +143,11 @@ describe("defaultTools setting", () => {
 
 	it("preserves explicit tool option precedence", async () => {
 		const allowlistedSession = await createSession(["grep"], { tools: ["read"] });
-		expect(allowlistedSession.getActiveToolNames()).toEqual(["Read"]);
+		expect(allowlistedSession.getActiveToolNames()).toEqual(["read"]);
 		allowlistedSession.dispose();
 
 		const excludedSession = await createSession(["read", "grep"], { excludeTools: ["read"] });
-		expect(excludedSession.getActiveToolNames()).toEqual(["grep", "DeferredToolPlaceholder"]);
+		expect(excludedSession.getActiveToolNames()).toEqual(["grep"]);
 		excludedSession.dispose();
 
 		const toolLessSession = await createSession(["read"], { noTools: "all" });
@@ -203,13 +177,12 @@ describe("defaultTools setting", () => {
 
 		const session = await createSession(["+grep"], { tools: ["+inactive_tool", "-write"] }, [inactiveTool]);
 		expect(session.getActiveToolNames().sort()).toEqual([
-			"Bash",
-			"DeferredToolPlaceholder",
-			"Edit",
-			"Read",
 			"active_tool",
+			"bash",
+			"edit",
 			"grep",
 			"inactive_tool",
+			"read",
 		]);
 		session.dispose();
 
@@ -267,48 +240,29 @@ describe("defaultTools setting", () => {
 		// #10245
 		it("activates only tools newly added to defaultTools", async () => {
 			const session = await createFileSession();
-			expect(session.getActiveToolNames()).toEqual(["Bash", "Edit", "Read", "DeferredToolPlaceholder", "Write"]);
+			expect(session.getActiveToolNames()).toEqual(["read", "bash", "edit", "write"]);
 			session.setActiveToolsByName(["read", "edit", "write"]);
 
 			writeSettings({ defaultTools: ["+inactive_tool", "+grep"] });
 			await session.reload();
 			// bash was disabled during the session and is not newly added, so it stays off.
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Edit",
-				"Read",
-				"Write",
-				"grep",
-				"inactive_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["edit", "grep", "inactive_tool", "read", "write"]);
 
 			// Removing tools from the setting does not disable them.
 			writeSettings({ defaultTools: ["-read"] });
 			await session.reload();
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Edit",
-				"Read",
-				"Write",
-				"grep",
-				"inactive_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["edit", "grep", "inactive_tool", "read", "write"]);
 			session.dispose();
 		});
 
 		it("keeps tools removed by -name tool options removed on reload", async () => {
 			writeSettings({ defaultTools: ["read"] });
 			const session = await createFileSession({ tools: ["-bash", "+grep"] });
-			expect(session.getActiveToolNames()).toEqual(["Read", "grep", "DeferredToolPlaceholder"]);
+			expect(session.getActiveToolNames()).toEqual(["read", "grep"]);
 
 			writeSettings({ defaultTools: ["read", "bash", "inactive_tool"] });
 			await session.reload();
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Read",
-				"grep",
-				"inactive_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["grep", "inactive_tool", "read"]);
 			session.dispose();
 		});
 
@@ -316,7 +270,7 @@ describe("defaultTools setting", () => {
 			const allowlisted = await createFileSession({ tools: ["read"] });
 			writeSettings({ defaultTools: ["+grep"] });
 			await allowlisted.reload();
-			expect(allowlisted.getActiveToolNames()).toEqual(["Read"]);
+			expect(allowlisted.getActiveToolNames()).toEqual(["read"]);
 			allowlisted.dispose();
 
 			writeSettings({});
@@ -330,14 +284,7 @@ describe("defaultTools setting", () => {
 			const excluded = await createFileSession({ excludeTools: ["grep"] });
 			writeSettings({ defaultTools: ["+grep", "+inactive_tool"] });
 			await excluded.reload();
-			expect(excluded.getActiveToolNames().sort()).toEqual([
-				"Bash",
-				"DeferredToolPlaceholder",
-				"Edit",
-				"Read",
-				"Write",
-				"inactive_tool",
-			]);
+			expect(excluded.getActiveToolNames().sort()).toEqual(["bash", "edit", "inactive_tool", "read", "write"]);
 			excluded.dispose();
 		});
 	});
@@ -414,12 +361,7 @@ describe("defaultTools setting", () => {
 
 		it("restores the loadout the transcript records", async () => {
 			const session = await resume(createChangedSession());
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Read",
-				"grep",
-				"inactive_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["grep", "inactive_tool", "read"]);
 			session.dispose();
 		});
 
@@ -427,12 +369,7 @@ describe("defaultTools setting", () => {
 		it("activates extension tools the transcript never added or removed", async () => {
 			// Built-in tools and tools registered inactive stay inactive.
 			const session = await resume(createRecordedSession(["read", "grep"]));
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Read",
-				"active_tool",
-				"grep",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["active_tool", "grep", "read"]);
 			session.dispose();
 		});
 
@@ -441,12 +378,7 @@ describe("defaultTools setting", () => {
 			const kept = sessionManager.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
 			sessionManager.appendCompaction("summary", kept, 1000);
 			const session = await resume(sessionManager);
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Read",
-				"grep",
-				"inactive_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["grep", "inactive_tool", "read"]);
 			session.dispose();
 		});
 
@@ -458,10 +390,10 @@ describe("defaultTools setting", () => {
 			const target = sessionManager.appendMessage({ role: "user", content: "first", timestamp: Date.now() });
 			recordLoadoutChange(sessionManager, ["grep"], ["active_tool"]);
 			const session = await resume(sessionManager);
-			expect(session.getActiveToolNames().sort()).toEqual(["DeferredToolPlaceholder", "Read", "grep"]);
+			expect(session.getActiveToolNames().sort()).toEqual(["grep", "read"]);
 
 			await session.navigateTree(target, { summarize: false });
-			expect(session.getActiveToolNames().sort()).toEqual(["DeferredToolPlaceholder", "Read", "active_tool"]);
+			expect(session.getActiveToolNames().sort()).toEqual(["active_tool", "read"]);
 			session.dispose();
 		});
 
@@ -481,10 +413,10 @@ describe("defaultTools setting", () => {
 					},
 				],
 			});
-			expect(session.getActiveToolNames()).toEqual(["Read"]);
+			expect(session.getActiveToolNames()).toEqual(["read"]);
 
 			await session.navigateTree(target, { summarize: false });
-			expect(session.getActiveToolNames()).toEqual(["Read"]);
+			expect(session.getActiveToolNames()).toEqual(["read"]);
 			session.dispose();
 		});
 
@@ -492,13 +424,13 @@ describe("defaultTools setting", () => {
 			const session = await resume(createChangedSession(), {
 				excludeTools: ["inactive_tool"],
 			});
-			expect(session.getActiveToolNames().sort()).toEqual(["DeferredToolPlaceholder", "Read", "grep"]);
+			expect(session.getActiveToolNames().sort()).toEqual(["grep", "read"]);
 			session.dispose();
 		});
 
 		it("uses explicit tool options instead of the recorded loadout", async () => {
 			const allowlisted = await resume(createChangedSession(), { tools: ["read", "write"] });
-			expect(allowlisted.getActiveToolNames()).toEqual(["Read", "Write"]);
+			expect(allowlisted.getActiveToolNames()).toEqual(["read", "write"]);
 			allowlisted.dispose();
 
 			const builtinless = await resume(createChangedSession(), { noTools: "builtin" });
@@ -510,12 +442,7 @@ describe("defaultTools setting", () => {
 			const session = await resume(createChangedSession(), {
 				tools: ["-grep", "+write"],
 			});
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"DeferredToolPlaceholder",
-				"Read",
-				"Write",
-				"inactive_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["inactive_tool", "read", "write"]);
 			session.dispose();
 		});
 
@@ -523,14 +450,7 @@ describe("defaultTools setting", () => {
 			const sessionManager = SessionManager.inMemory(tempDir);
 			sessionManager.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
 			const session = await resume(sessionManager);
-			expect(session.getActiveToolNames().sort()).toEqual([
-				"Bash",
-				"DeferredToolPlaceholder",
-				"Edit",
-				"Read",
-				"Write",
-				"active_tool",
-			]);
+			expect(session.getActiveToolNames().sort()).toEqual(["active_tool", "bash", "edit", "read", "write"]);
 			session.dispose();
 		});
 	});
@@ -549,22 +469,8 @@ describe("defaultTools setting", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual([
-			"Bash",
-			"DeferredToolPlaceholder",
-			"Edit",
-			"Read",
-			"Write",
-			"bash",
-			"edit",
-			"find",
-			"grep",
-			"ls",
-			"powershell",
-			"read",
-			"write",
-		]);
-		expect(session.getActiveToolNames()).toEqual(["ls", "DeferredToolPlaceholder"]);
+		).toEqual(["bash", "edit", "find", "grep", "ls", "powershell", "read", "write"]);
+		expect(session.getActiveToolNames()).toEqual(["ls"]);
 		session.dispose();
 	});
 });

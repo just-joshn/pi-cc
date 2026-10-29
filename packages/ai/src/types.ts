@@ -771,8 +771,8 @@ export interface Tool<TParameters extends TSchema = TSchema> {
 	description: string;
 	parameters: TParameters;
 	constrainedSampling?: false | ConstrainedSamplingConfig;
-	/** Set false to validate arguments as received instead of coercing them. Default: true. */
-	coerceArguments?: boolean;
+	/** Declare this tool to the provider as loaded on demand rather than up front. */
+	deferLoading?: boolean;
 }
 
 export interface ToolReference {

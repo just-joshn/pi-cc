@@ -80,7 +80,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager).toBe(sessionManager);
 		expect(session.systemPrompt).toContain(`<cwd>\n${sessionCwd}\n</cwd>`);
 
-		const bashTool = session.agent.state.tools.find((tool) => tool.name === "Bash");
+		const bashTool = session.agent.state.tools.find((tool) => tool.name === "bash");
 		expect(bashTool).toBeTruthy();
 		const result = await bashTool!.execute("test", { command: "pwd" });
 		const output = result.content
@@ -108,7 +108,7 @@ describe("createAgentSession session manager defaults", () => {
 			"You can inspect PI_* environment variables for current model and session details.",
 		);
 
-		const bashTool = session.agent.state.tools.find((tool) => tool.name === "Bash");
+		const bashTool = session.agent.state.tools.find((tool) => tool.name === "bash");
 		expect(bashTool).toBeTruthy();
 		const result = await bashTool!.execute("test", {
 			command: `printf '%s\\n' "$PI_SESSION_ID" "$PI_SESSION_FILE" "$PI_PROVIDER" "$PI_MODEL" "$PI_REASONING_LEVEL"`,

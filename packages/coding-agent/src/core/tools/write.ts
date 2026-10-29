@@ -1,10 +1,12 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
-import { dirname } from "path";
+import { mkdir as fsMkdir, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from "fs/promises";
+import { basename, dirname } from "path";
 import { type Static, Type } from "typebox";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { CC_FILE_STATE_SUFFIX, CC_TOOL_TEXT, toolUseError } from "./cc-text.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
+import { normalizeForComparison, type ReadState } from "./read-state.ts";
 import { writeRenderers } from "./renderers/write.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -39,7 +41,16 @@ const defaultWriteOperations: WriteOperations = {
 export interface WriteToolOptions {
 	/** Custom operations for file writing. Default: local filesystem */
 	operations?: WriteOperations;
+	/** What the model has read, for the read-before-write checks. */
+	readState?: ReadState;
+	/** Whether a Read of this absolute path would need approval. Default: never gated. */
+	isReadGated?: (absolutePath: string) => boolean;
+	/** True when this session runs as a subagent, which may not write report files. */
+	agentContext?: boolean;
 }
+
+/** Report filenames a subagent must return as text instead of writing. */
+const SUBAGENT_REPORT_NAME = /^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$/i;
 
 export function createWriteToolDefinition(
 	cwd: string,
@@ -74,6 +85,23 @@ export function createWriteToolDefinition(
 				};
 
 				throwIfAborted();
+
+				if (options?.agentContext === true && SUBAGENT_REPORT_NAME.test(basename(absolutePath))) {
+					throw new Error(toolUseError(CC_TOOL_TEXT.writeReportRefusal));
+				}
+
+				const record = options?.readState?.get(absolutePath);
+				const previous = await readIfPresent(absolutePath);
+				throwIfAborted();
+
+				// Both refusals exist to avoid a prompt, so Claude Code raises them only for a path whose
+				// Read would need approval. In an auto-allowed workspace it overwrites the file.
+				const readGated = previous !== undefined && options?.isReadGated?.(absolutePath) === true;
+				if (readGated && record === undefined) throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
+				if (readGated && record !== undefined && normalizeForComparison(previous) !== record.content) {
+					throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
+				}
+
 				// Create parent directories if needed.
 				await ops.mkdir(dir);
 				throwIfAborted();
@@ -81,11 +109,14 @@ export function createWriteToolDefinition(
 				// Write the file contents.
 				await ops.writeFile(absolutePath, content);
 				throwIfAborted();
+				options?.readState?.record(absolutePath, { content: normalizeForComparison(content), partial: false });
 
-				return {
-					content: [{ type: "text", text: `Successfully wrote to ${path}` }],
-					details: undefined,
-				};
+				// Claude Code calls it a create when the file did not exist or held nothing.
+				const text =
+					previous === undefined || previous === ""
+						? `File created successfully at: ${path} ${CC_FILE_STATE_SUFFIX}`
+						: `The file ${path} has been updated successfully. ${CC_FILE_STATE_SUFFIX}`;
+				return { content: [{ type: "text", text }], details: undefined };
 			});
 		},
 		...writeRenderers,
@@ -94,4 +125,15 @@ export function createWriteToolDefinition(
 
 export function createWriteTool(cwd: string, options?: WriteToolOptions): AgentTool<typeof writeSchema> {
 	return wrapToolDefinition(createWriteToolDefinition(cwd, options));
+}
+
+/** The file's text, or undefined when the path holds no file. */
+async function readIfPresent(absolutePath: string): Promise<string | undefined> {
+	try {
+		const stats = await fsStat(absolutePath);
+		if (!stats.isFile()) return undefined;
+		return (await fsReadFile(absolutePath)).toString("utf-8");
+	} catch {
+		return undefined;
+	}
 }

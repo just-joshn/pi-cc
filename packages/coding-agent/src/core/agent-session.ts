@@ -146,13 +146,8 @@ import {
 	normalizeBuildSystemPromptOptions,
 } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
-import {
-	CC_DECLARED_ORDER,
-	canonicalToolName,
-	createAllToolDefinitions,
-	createReadState,
-	type ReadState,
-} from "./tools/index.ts";
+import { piToolNames } from "./tools/cc-surface.ts";
+import { createAllToolDefinitions, createReadState, type ReadState } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, combineUsage, createUsageTotals } from "./usage-totals.ts";
 import {
@@ -378,16 +373,6 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 	return tokens;
 }
 
-const DEFERRED_TOOL_PLACEHOLDER = "DeferredToolPlaceholder";
-
-/** Place the Claude Code tools in the measured declared order, leaving other names in their slots. */
-function orderCcTools(names: string[]): string[] {
-	const order = new Map<string, number>(CC_DECLARED_ORDER.map((name, index) => [name, index]));
-	const ccNames = names.filter((name) => order.has(name)).sort((a, b) => order.get(a)! - order.get(b)!);
-	let next = 0;
-	return names.map((name) => (order.has(name) ? ccNames[next++] : name));
-}
-
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -518,14 +503,11 @@ export class AgentSession {
 		this._usesDefaultTools = config.usesDefaultTools ?? false;
 		this._defaultToolModifiers = config.defaultToolModifiers ?? [];
 		if (config.allowedToolNames) {
-			const allowedToolNames = config.allowedToolNames.map(canonicalToolName);
-			this._allowedTools = createToolNameMatcher(allowedToolNames);
+			this._allowedTools = createToolNameMatcher(config.allowedToolNames);
 			this._allowlistFiltersMcp =
-				allowedToolNames.length === 0 || allowedToolNames.some((entry) => entry.startsWith("mcp__"));
+				config.allowedToolNames.length === 0 || config.allowedToolNames.some((entry) => entry.startsWith("mcp__"));
 		}
-		this._excludedTools = config.excludedToolNames
-			? createToolNameMatcher(config.excludedToolNames.map(canonicalToolName))
-			: undefined;
+		this._excludedTools = config.excludedToolNames ? createToolNameMatcher(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 
@@ -673,7 +655,6 @@ export class AgentSession {
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = (context) => this._beforeToolCall(context);
 		this.agent.afterToolCall = (context) => this._afterToolCall(context);
-		this.agent.resolveToolName = canonicalToolName;
 	}
 
 	/** `tool_call` handlers. `parentToolCallId` is set for calls another tool made. */
@@ -1577,10 +1558,8 @@ export class AgentSession {
 	 * unless the allowlist filters them (see `_allowlistFiltersMcp`).
 	 */
 	private _isAllowedTool(name: string): boolean {
-		// A legacy spelling names the same tool as its canonical alias, so both spellings are matched.
-		const canonical = canonicalToolName(name);
-		if (this._excludedTools?.(name) || this._excludedTools?.(canonical)) return false;
-		if (!this._allowedTools || this._allowedTools(name) || this._allowedTools(canonical)) return true;
+		if (this._excludedTools?.(name)) return false;
+		if (!this._allowedTools || this._allowedTools(name)) return true;
 		return !this._allowlistFiltersMcp && isMcpToolName(name);
 	}
 
@@ -1620,16 +1599,7 @@ export class AgentSession {
 	 * ones are appended, so reordering the same names does not change the prompt (#11495).
 	 */
 	private _applyToolLoadout(toolNames: string[]): AgentTool[] {
-		// A registered canonical name replaces its legacy spelling, so `--tools read` activates `Read`.
-		// When only the legacy spelling is registered (a base tool override), it stays the exact name.
-		const requested = new Set(
-			orderCcTools(
-				toolNames.map((name) => {
-					const canonical = canonicalToolName(name);
-					return this._toolRegistry.has(canonical) ? canonical : name;
-				}),
-			),
-		);
+		const requested = new Set(toolNames);
 		const kept = this.getActiveToolNames().filter((name) => requested.has(name));
 		const tools = [...new Set([...kept, ...requested])].flatMap((name) => {
 			const tool = this._toolRegistry.get(name);
@@ -1891,7 +1861,6 @@ export class AgentSession {
 			[...getCurrentTools(systemMessages).map((tool) => tool.name), ...newTools],
 			modifiers,
 		);
-		if (this._usesDefaultTools) names.push(DEFERRED_TOOL_PLACEHOLDER);
 		// Recorded tools that are not registered yet, such as MCP tools of servers still connecting, are
 		// activated when they register. Excluded tools never register, so they are not kept pending.
 		this._pendingToolNames = new Set(names.filter((name) => this._isAllowedTool(name)));
@@ -3687,8 +3656,6 @@ export class AgentSession {
 		}
 		// Pending tools that are registered now become active.
 		nextActiveToolNames.push(...this._pendingToolNames);
-		// Claude Code keeps its placeholder in every observed declaration list of the default set.
-		if (this._usesDefaultTools) nextActiveToolNames.push(DEFERRED_TOOL_PLACEHOLDER);
 
 		this._setActiveTools([...new Set(nextActiveToolNames)]);
 	}
@@ -3720,9 +3687,10 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
-					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
-					cc: { readState: this._readState },
+					read: { autoResizeImages, readState: this._readState },
+					edit: { readState: this._readState },
+					write: { readState: this._readState },
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -3767,7 +3735,7 @@ export class AgentSession {
 		const getDefaultTools = () =>
 			this._usesDefaultTools
 				? applyToolModifiers(
-						this.settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES,
+						piToolNames(this.settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES),
 						this._defaultToolModifiers,
 					)
 				: [];

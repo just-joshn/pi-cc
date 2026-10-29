@@ -10,14 +10,6 @@ export {
 	createLocalBashOperations,
 } from "./bash.ts";
 export {
-	CC_DECLARED_ORDER,
-	canonicalToolName,
-	createCcToolDefinition,
-	createCcToolDefinitions,
-	createReadState,
-	type ReadState,
-} from "./cc/index.ts";
-export {
 	createEditTool,
 	createEditToolDefinition,
 	type EditOperations,
@@ -69,6 +61,7 @@ export {
 	type ReadToolInput,
 	type ReadToolOptions,
 } from "./read.ts";
+export { createReadState, normalizeForComparison, type ReadRecord, type ReadState } from "./read-state.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -90,27 +83,17 @@ export {
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
-import {
-	type CcToolName,
-	type CcToolOptions,
-	canonicalToolName,
-	createCcToolDefinition,
-	createCcToolDefinitions,
-	createReadState,
-} from "./cc/index.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
-import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls";
-export type AllToolName = ToolName | CcToolName;
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -131,13 +114,10 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
-	/** Session-scoped state for the Claude Code tools. Default: a fresh in-memory state. */
-	cc?: Pick<CcToolOptions, "readState" | "isReadGated">;
 }
 
-export function createToolDefinition(toolName: AllToolName, cwd: string, options?: ToolsOptions): ToolDef {
-	const name = canonicalToolName(toolName);
-	switch (name) {
+export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
+	switch (toolName) {
 		case "read":
 			return createReadToolDefinition(cwd, options?.read);
 		case "bash":
@@ -154,20 +134,13 @@ export function createToolDefinition(toolName: AllToolName, cwd: string, options
 			return createFindToolDefinition(cwd, options?.find);
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
-		case "Bash":
-		case "Edit":
-		case "Read":
-		case "Write":
-		case "DeferredToolPlaceholder":
-			return createCcToolDefinition(name, cwd, ccToolOptions(options));
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
 }
 
-export function createTool(toolName: AllToolName, cwd: string, options?: ToolsOptions): Tool {
-	const name = canonicalToolName(toolName);
-	switch (name) {
+export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
+	switch (toolName) {
 		case "read":
 			return createReadTool(cwd, options?.read);
 		case "bash":
@@ -184,12 +157,6 @@ export function createTool(toolName: AllToolName, cwd: string, options?: ToolsOp
 			return createFindTool(cwd, options?.find);
 		case "ls":
 			return createLsTool(cwd, options?.ls);
-		case "Bash":
-		case "Edit":
-		case "Read":
-		case "Write":
-		case "DeferredToolPlaceholder":
-			return wrapToolDefinition(createCcToolDefinition(name, cwd, ccToolOptions(options)));
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -213,37 +180,16 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 	];
 }
 
-/** A pi definition whose tool is callable but not declared to the model. */
-function deferred(definition: ToolDef): ToolDef {
-	return { ...definition, exposure: "deferred" };
-}
-
-/** Options for the Claude Code tools, carrying the session's shared read state. */
-function ccToolOptions(options?: ToolsOptions): CcToolOptions {
+export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
-		readState: options?.cc?.readState ?? createReadState(),
-		isReadGated: options?.cc?.isReadGated,
-		read: options?.read,
-		edit: options?.edit,
-		write: options?.write,
-		bash: options?.bash,
-	};
-}
-
-export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<AllToolName, ToolDef> {
-	const cc = Object.fromEntries(
-		createCcToolDefinitions(cwd, ccToolOptions(options)).map((definition) => [definition.name, definition]),
-	) as Record<CcToolName, ToolDef>;
-	return {
-		read: deferred(createReadToolDefinition(cwd, options?.read)),
-		bash: deferred(createBashToolDefinition(cwd, options?.bash)),
+		read: createReadToolDefinition(cwd, options?.read),
+		bash: createBashToolDefinition(cwd, options?.bash),
 		powershell: createPowerShellToolDefinition(cwd, options?.powershell),
-		edit: deferred(createEditToolDefinition(cwd, options?.edit)),
-		write: deferred(createWriteToolDefinition(cwd, options?.write)),
+		edit: createEditToolDefinition(cwd, options?.edit),
+		write: createWriteToolDefinition(cwd, options?.write),
 		grep: createGrepToolDefinition(cwd, options?.grep),
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
-		...cc,
 	};
 }
 

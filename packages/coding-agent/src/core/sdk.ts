@@ -26,6 +26,7 @@ import {
 	SettingsManager,
 } from "./settings-manager.ts";
 import { time } from "./timings.ts";
+import { piToolNames, projectMessagesForModel, wrapStreamFn } from "./tools/cc-surface.ts";
 import {
 	createBashTool,
 	createCodingTools,
@@ -70,6 +71,8 @@ export interface CreateAgentSessionOptions {
 	 *   but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
+	/** Whether the model is offered Claude Code's `DeferredToolPlaceholder`. Default: true. */
+	ccPlaceholder?: boolean;
 	/**
 	 * Optional allowlist of tool names or patterns, where `*` matches any characters.
 	 *
@@ -290,21 +293,28 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		model = { ...model, maxTokens: maxOutputTokens };
 	}
 
-	const toolListError = options.tools ? getToolListError(options.tools) : undefined;
+	const requestedTools = options.tools === undefined ? undefined : piToolNames(options.tools);
+	const toolListError = requestedTools ? getToolListError(requestedTools) : undefined;
 	if (toolListError) throw new Error(`Invalid tools option: ${toolListError}`);
-	const defaultToolNames = options.noTools ? [] : (settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
+	const defaultToolNames = options.noTools ? [] : piToolNames(settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
 	// A `tools` list of only `+name`/`-name` entries changes the default selection instead of
 	// replacing it, like the `defaultTools` setting.
-	const toolModifiers = options.tools?.some(isToolModifier) ? options.tools : undefined;
-	const selectedToolNames = toolModifiers ? applyToolModifiers(defaultToolNames, toolModifiers) : options.tools;
+	const toolModifiers = requestedTools?.some(isToolModifier) ? requestedTools : undefined;
+	const selectedToolNames = toolModifiers ? applyToolModifiers(defaultToolNames, toolModifiers) : requestedTools;
 	const allowedToolNames = toolModifiers
 		? options.noTools === "all"
 			? selectedToolNames
 			: undefined
-		: (options.tools ?? (options.noTools === "all" ? [] : undefined));
-	const excludedToolNames = options.excludeTools;
+		: (requestedTools ?? (options.noTools === "all" ? [] : undefined));
+	const excludedToolNames = options.excludeTools ? piToolNames(options.excludeTools) : undefined;
 	const isExcludedTool = excludedToolNames ? createToolNameMatcher(excludedToolNames) : undefined;
 	const initialActiveToolNames = (selectedToolNames ?? defaultToolNames).filter((name) => !isExcludedTool?.(name));
+
+	// Claude Code's tool names, schemas and result text live only at the provider boundary: the
+	// transcript keeps pi's own tool identity, and this projection is the one place that changes.
+	const ccSurface = { placeholder: options.ccPlaceholder !== false };
+	const convertToLlmForModel = (messages: AgentMessage[]): Message[] =>
+		projectMessagesForModel(convertToLlmWithBlockImages(messages), ccSurface);
 
 	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
 	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
@@ -422,8 +432,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: [],
 			messages: existingSession.messages,
 		},
-		convertToLlm: convertToLlmWithBlockImages,
-		streamFn: async (sessionModel, context, options) => {
+		convertToLlm: convertToLlmForModel,
+		streamFn: wrapStreamFn(async (sessionModel, context, options) => {
 			const model = fixedTools
 				? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
 				: sessionModel;
@@ -437,7 +447,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cacheWarmer.start({ model, context, options: requestOptions }, cacheContextIsCurrent(model));
 			}
 			return modelRuntime.streamSimple(model, context, requestOptions);
-		},
+		}),
 		onPayload: transformProviderPayload,
 		onResponse: handleProviderResponse,
 		onProviderStreamEvent: handleProviderStreamEvent,

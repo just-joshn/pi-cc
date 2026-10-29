@@ -234,7 +234,7 @@ describe("AgentSession MCP integration", () => {
 				allowedToolNames: ["read", "codemode"],
 				resources: true,
 			});
-			expect(harness.session.getActiveToolNames()).toEqual(["Read", "codemode"]);
+			expect(harness.session.getActiveToolNames()).toEqual(["read", "codemode"]);
 			expect(nestedToolNames(harness)).toEqual(
 				expect.arrayContaining(["mcp__docs__search", "mcp__docs__fail", "list_mcp_resources", "read_mcp_resource"]),
 			);
@@ -357,15 +357,7 @@ describe("AgentSession MCP integration", () => {
 		// Exec was activated for the codemode-exposed server; MCP tools are never declared.
 		expect(harness.session.getActiveToolNames()).toEqual(["codemode"]);
 		expect(declaredToolNames(harness)).toEqual(["codemode"]);
-		expect(nestedToolNames(harness)).toEqual([
-			"read",
-			"bash",
-			"edit",
-			"write",
-			searchName,
-			"mcp__docs__fail",
-			"mcp__docs__shot",
-		]);
+		expect(nestedToolNames(harness)).toEqual([searchName, "mcp__docs__fail", "mcp__docs__shot"]);
 		// The description lists neither the server nor its tools; scripts search for them.
 		const codemode = harness.session.agent.state.tools.find((tool) => tool.name === "codemode");
 		expect(codemode?.description).not.toContain("mcp__docs");
@@ -574,14 +566,7 @@ return { uris: listed.resources.map((r) => r.uri), text: read.contents[0].text }
 
 		// `search` is declared, `shot` is only callable from codemode, `fail` keeps the server's `hidden`.
 		expect(declaredToolNames(harness)).toEqual(["codemode", "mcp__docs__search"]);
-		expect(nestedToolNames(harness)).toEqual([
-			"read",
-			"bash",
-			"edit",
-			"write",
-			"mcp__docs__search",
-			"mcp__docs__shot",
-		]);
+		expect(nestedToolNames(harness)).toEqual(["mcp__docs__search", "mcp__docs__shot"]);
 		const codemode = harness.session.agent.state.tools.find((tool) => tool.name === "codemode");
 		expect(codemode?.description).not.toContain("mcp__docs__shot");
 		expect(codemode?.description).not.toContain("mcp__docs__fail");
@@ -945,7 +930,7 @@ return [...new Set(await Promise.all(names.map(async (name) => (await describeNa
 		await harness.session.prompt("start");
 		harness.session.setActiveToolsByName(["codemode", "mcp__docs__search"]);
 
-		expect(nestedToolNames(harness)).toEqual(["read", "bash", "edit", "write", "mcp__docs__search"]);
+		expect(nestedToolNames(harness)).toEqual(["mcp__docs__search"]);
 	});
 
 	it("finds tools from scripts with searchTools() and describeTool()", async () => {

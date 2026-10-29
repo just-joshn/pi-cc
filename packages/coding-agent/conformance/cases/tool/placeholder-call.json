@@ -1,0 +1,23 @@
+{
+	"id": "tool/placeholder-call",
+	"area": "tool",
+	"argv": ["-p", "Call the placeholder", "--output-format", "stream-json", "--verbose"],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{ "tool_use": { "name": "DeferredToolPlaceholder", "input": {} } },
+			{ "text": "PROBE_OK" }
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": ["<tool_use_error>Error: No such tool available: DeferredToolPlaceholder</tool_use_error>"]
+		}
+	},
+	"skip": []
+}

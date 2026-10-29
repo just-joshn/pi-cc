@@ -524,7 +524,7 @@ async function executeToolCalls(
 ): Promise<ExecutedToolCallBatch> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 	const hasSequentialToolCall = toolCalls.some(
-		(tc) => findToolByName(currentContext.tools ?? [], config, tc.name)?.executionMode === "sequential",
+		(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
 	);
 	if (config.toolExecution === "sequential" || hasSequentialToolCall) {
 		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
@@ -690,8 +690,8 @@ type ExecutedToolCallOutcome = {
 
 type FinalizedToolCallOutcome = AgentToolCallOutcome;
 
-/** The `beforeToolCall`, `afterToolCall`, and `resolveToolName` hooks of {@link AgentLoopConfig}. */
-export type ToolCallHooks = Pick<AgentLoopConfig, "beforeToolCall" | "afterToolCall" | "resolveToolName">;
+/** The `beforeToolCall` and `afterToolCall` hooks of {@link AgentLoopConfig}. */
+export type ToolCallHooks = Pick<AgentLoopConfig, "beforeToolCall" | "afterToolCall">;
 
 type ToolUpdateSink = (partialResult: AgentToolResult<any>) => Promise<void> | void;
 
@@ -723,7 +723,7 @@ async function prepareToolCall(
 	signal: AbortSignal | undefined,
 	tools: readonly AgentTool<any>[] = currentContext.tools ?? [],
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
-	const tool = findToolByName(tools, config, toolCall.name);
+	const tool = tools.find((t) => t.name === toolCall.name);
 	if (!tool) {
 		return {
 			kind: "immediate",
@@ -924,24 +924,6 @@ function createErrorToolResult(message: string): AgentToolResult<any> {
 		content: [{ type: "text", text: message }],
 		details: {},
 	};
-}
-
-function resolveToolName(config: ToolCallHooks, name: string): string {
-	return config.resolveToolName?.(name) ?? name;
-}
-
-/** The tool a call names. An exact name wins, so a tool registered under a legacy spelling shadows its alias. */
-function findToolByName(
-	tools: readonly AgentTool<any>[],
-	config: ToolCallHooks,
-	name: string,
-): AgentTool<any> | undefined {
-	const exact = tools.find((tool) => tool.name === name);
-	if (exact) {
-		return exact;
-	}
-	const resolved = resolveToolName(config, name);
-	return resolved === name ? undefined : tools.find((tool) => tool.name === resolved);
 }
 
 /** Claude Code's result for a call that names no registered tool. */
