@@ -22,6 +22,9 @@ export type StdoutSpec =
 export interface RequestSpec {
 	pathStartsWith?: string;
 	count?: number;
+	method?: string;
+	/** A `null` value asserts the header is absent. */
+	headers?: Record<string, string | null>;
 	bodyEquals?: Record<string, unknown>;
 }
 
@@ -107,7 +110,7 @@ const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra
 const JSON_STDOUT_KEYS = ["kind", "records"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
-const REQUEST_KEYS = ["pathStartsWith", "count", "bodyEquals"];
+const REQUEST_KEYS = ["pathStartsWith", "count", "method", "headers", "bodyEquals"];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -325,12 +328,29 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 		const object = asCheckedObject(entry, source, field, REQUEST_KEYS);
 		const body = object.bodyEquals;
 		if (body !== undefined) asObject(body, source, `${field}.bodyEquals`);
+		const method = asOptionalString(object.method, source, "method");
+		if (method !== undefined && method.trim().length === 0) fail(source, "method must not be empty");
 		return {
 			pathStartsWith: asOptionalString(object.pathStartsWith, source, "pathStartsWith"),
 			count: asOptionalNumber(object.count, source, "count"),
+			method,
+			headers: asRequestHeaders(object.headers, source, `${field}.headers`),
 			bodyEquals: body as Record<string, unknown> | undefined,
 		};
 	});
+}
+
+/** A name is what the case compares, so an empty one could never match a recorded header. */
+function asRequestHeaders(value: unknown, source: string, field: string): Record<string, string | null> | undefined {
+	if (value === undefined) return undefined;
+	const object = asObject(value, source, field);
+	const headers: Record<string, string | null> = {};
+	for (const [name, entry] of Object.entries(object)) {
+		if (name.trim().length === 0) fail(source, `${field} has an empty header name`);
+		if (entry !== null && typeof entry !== "string") fail(source, `${field}.${name} must be a string or null`);
+		headers[name] = entry;
+	}
+	return headers;
 }
 
 function asTurns(value: unknown, source: string): Turn[] {

@@ -1,0 +1,34 @@
+{
+	"id": "provider-env/small-fast-is-not-the-session-model",
+	"area": "provider-env",
+	"argv": ["-p", "Reply with exactly PROBE_OK", "--output-format", "json"],
+	"env": {
+		"ANTHROPIC_MODEL": "haiku",
+		"ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"bodyEquals": {
+					"model": "claude-haiku-5-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

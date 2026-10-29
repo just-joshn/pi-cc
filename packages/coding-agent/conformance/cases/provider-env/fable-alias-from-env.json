@@ -1,0 +1,33 @@
+{
+	"id": "provider-env/fable-alias-from-env",
+	"area": "provider-env",
+	"argv": ["-p", "Reply with exactly PROBE_OK", "--output-format", "json"],
+	"env": {
+		"ANTHROPIC_MODEL": "fable",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5-1"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"bodyEquals": {
+					"model": "claude-fable-5-1"
+				}
+			}
+		]
+	},
+	"skip": []
+}

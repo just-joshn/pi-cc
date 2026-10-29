@@ -1,3 +1,13 @@
+/**
+ * The per-case comparison: exit code, stdout, stderr, workspace writes, and recorded requests.
+ *
+ * `method` and every `headers` entry in a request spec must hold for every request the spec matched, so a
+ * case that needs exactly one states `count: 1` alongside; only the names the case names are compared, which
+ * is what keeps a side's unmodelled headers from failing the case. Recorded header names arrive lowercased
+ * from node's http server, and a repeated header arrives as an array joined with ", ".
+ */
+
+import type { IncomingHttpHeaders } from "node:http";
 import type { CompareSpec, ContainmentSpec, FileSpec, StdoutSpec } from "./case.ts";
 import type { Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
@@ -237,6 +247,21 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				actual: `${matched.length} requests (${matched.map((record) => record.path).join(", ") || "none"})`,
 			});
 		}
+		for (const record of matched) {
+			if (request.method !== undefined && record.method !== request.method) {
+				diffs.push({ check: "requests.method", expected: request.method, actual: record.method });
+			}
+			for (const [name, expected] of Object.entries(request.headers ?? {})) {
+				const actual = recordedHeader(record.headers, name);
+				if ((expected === null && actual !== undefined) || (expected !== null && actual !== expected)) {
+					diffs.push({
+						check: "requests.headers",
+						expected: `${name}: ${expected === null ? "(absent)" : expected}`,
+						actual: actual === undefined ? "(absent)" : `${name}: ${actual}`,
+					});
+				}
+			}
+		}
 		if (request.bodyEquals !== undefined) {
 			const hit = matched.find((record) => matchesSubset(record.body, request.bodyEquals));
 			if (hit === undefined) {
@@ -248,6 +273,11 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 			}
 		}
 	}
+}
+
+function recordedHeader(headers: IncomingHttpHeaders, name: string): string | undefined {
+	const value = headers[name.toLowerCase()];
+	return Array.isArray(value) ? value.join(", ") : value;
 }
 
 function parseHelpNames(text: string): { flags: Set<string>; commands: Set<string> } {
