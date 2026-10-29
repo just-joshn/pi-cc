@@ -94,6 +94,17 @@ describe("loadCases", () => {
 			PI_CONFORMANCE_PROBE: "1",
 		});
 	});
+
+	test("rejects a timeout that is not a positive integer", () => {
+		for (const value of [0, -1, 1.5]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, timeout_ms: value })).toThrow(/timeout_ms must be a positive integer/);
+		}
+	});
+
+	test("keeps a positive integer timeout and the default", () => {
+		expect(loadOne({ ...MINIMAL_CASE, timeout_ms: 1500 }).timeout_ms).toBe(1500);
+		expect(loadOne(MINIMAL_CASE).timeout_ms).toBe(60000);
+	});
 });
 
 describe("turn shapes", () => {
