@@ -187,6 +187,27 @@ describe("Claude Code tool surface", () => {
 		]);
 	});
 
+	it("folds the partial-view notice into the tool result when the model takes no mid-conversation system messages", () => {
+		const read = {
+			role: "toolResult" as const,
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text" as const, text: "1\tfirst" }],
+			isError: false,
+			timestamp: 0,
+			details: { ccNotice: "[Truncated: PARTIAL view]" },
+		};
+		const history = projectMessagesForModel([read], { midConversationSystemMessages: false });
+		expect(history).toEqual([
+			{
+				...read,
+				content: [
+					{ type: "text", text: "1\tfirst\n\n<system-reminder>\n[Truncated: PARTIAL view]\n</system-reminder>" },
+				],
+			},
+		]);
+	});
+
 	it("sorts a resumed session's merged tool list", () => {
 		const tool = (name: string) => ({ name, description: name, parameters: Type.Object({}) });
 		const history = projectMessagesForModel([

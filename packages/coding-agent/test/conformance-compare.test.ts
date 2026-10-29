@@ -199,3 +199,20 @@ describe("compare.requests", () => {
 		expect(checks(includes, { requests: [posted] })).toEqual(["requests.bodyIncludes"]);
 	});
 });
+
+describe("compare.requests body patterns", () => {
+	const request = (body: unknown) => ({ index: 0, path: "/v1/messages", method: "POST", headers: {}, body });
+	const requests = [request({ system: "first" }), request({ messages: [{ content: "1\tx\n<system-reminder>" }] })];
+
+	test("reads the last matched request's serialized body", () => {
+		const spec: CompareSpec = {
+			requests: [{ pathStartsWith: "/v1/messages", bodyMatch: ["\\\\n<system-reminder>"] }],
+		};
+		expect(checks(spec, { requests })).toEqual([]);
+	});
+
+	test("fails a pattern that must not match", () => {
+		const spec: CompareSpec = { requests: [{ bodyMatch: ["first"], bodyNotMatch: ["system-reminder"] }] };
+		expect(checks(spec, { requests })).toEqual(["requests.bodyMatch", "requests.bodyNotMatch"]);
+	});
+});

@@ -30,6 +30,10 @@ interface ProbeResult {
 	agentDir: string;
 	declared: Array<{ name: string; defer_loading?: boolean }>;
 	system: string;
+	/** Every system block of the last request, so a notice folded into the prompt names itself. */
+	lastSystemTexts: string[];
+	/** Contents of system-role messages inside the last request's conversation. */
+	midConversationSystem: string[];
 	results: Array<{ name: string; input: Record<string, unknown>; text: string; isError: boolean }>;
 	stream: string;
 }
@@ -87,10 +91,24 @@ async function probe(spec: Probe): Promise<ProbeResult> {
 	const requests = mock.requests.filter(
 		(request) => request.path.startsWith("/v1/messages") && !request.path.includes("count"),
 	);
-	const body = requests.at(-1)?.body as { messages?: Array<{ content?: unknown }>; system?: unknown } | undefined;
+	const body = requests.at(-1)?.body as
+		| {
+				messages?: Array<{ role?: string; content?: unknown }>;
+				system?: unknown;
+		  }
+		| undefined;
 	const uses = new Map<string, { name: string; input: Record<string, unknown> }>();
 	const results: ProbeResult["results"] = [];
+	const midConversationSystem: string[] = [];
 	for (const message of body?.messages ?? []) {
+		if (message.role === "system") {
+			const blocks = Array.isArray(message.content) ? message.content : [];
+			midConversationSystem.push(
+				blocks
+					.map((part) => (typeof part === "object" && part && "text" in part ? String(part.text) : ""))
+					.join(""),
+			);
+		}
 		const blocks = Array.isArray(message.content) ? message.content : [];
 		for (const block of blocks as Array<Record<string, unknown>>) {
 			if (block.type === "tool_use")
@@ -108,11 +126,17 @@ async function probe(spec: Probe): Promise<ProbeResult> {
 		}
 	}
 	const system = JSON.stringify((requests[0]?.body as { system?: unknown } | undefined)?.system ?? "");
+	const lastSystem = (requests.at(-1)?.body as { system?: unknown } | undefined)?.system;
+	const lastSystemTexts = (Array.isArray(lastSystem) ? lastSystem : [lastSystem]).map((block) =>
+		typeof block === "object" && block !== null && "text" in block ? String((block as { text: unknown }).text) : "",
+	);
 	return {
 		workspace,
 		agentDir,
 		declared: (requests[0]?.body as { tools?: ProbeResult["declared"] } | undefined)?.tools ?? [],
 		system,
+		lastSystemTexts,
+		midConversationSystem,
 		results,
 		stream,
 	};
@@ -283,5 +307,47 @@ describe("pi tool identity stays inside the process", () => {
 		expect(result.results[0]?.text.startsWith("1\tline1\n")).toBe(true);
 		expect(result.results[0]?.text.endsWith("2500\tline2500\n2501\t")).toBe(true);
 		expect(result.results[0]?.text).not.toContain("PARTIAL view");
+	});
+
+	it("answers a partial read on a model without mid-conversation system messages inside the tool result", async () => {
+		const wide = `${Array.from({ length: 2600 }, (_, index) => `${index + 1} ${"x".repeat(40)}`).join("\n")}\n`;
+		const result = await probe({
+			argv: ["-p", "go"],
+			files: { "wide.txt": wide },
+			turns: [
+				{ tool_use: { name: "Read", input: { file_path: "wide.txt" } } },
+				{ tool_use: { name: "Read", input: { file_path: "wide.txt", limit: 2 } } },
+			],
+		});
+		roots.push(join(result.workspace, ".."));
+		expect(result.midConversationSystem).toEqual([]);
+		expect(result.lastSystemTexts.join("\n")).not.toContain("PARTIAL view");
+		const partial = result.results.find(
+			(read) => read.name === "Read" && read.input.file_path === "wide.txt" && read.input.limit === undefined,
+		);
+		expect(partial?.text).toContain("\n\n<system-reminder>\n[Truncated: PARTIAL view");
+		expect(partial?.text.endsWith("\n</system-reminder>")).toBe(true);
+	});
+
+	it("answers a partial read on a model with mid-conversation system messages as its own message", async () => {
+		const wide = `${Array.from({ length: 2600 }, (_, index) => `${index + 1} ${"x".repeat(40)}`).join("\n")}\n`;
+		const result = await probe({
+			argv: ["-p", "go"],
+			settings: { defaultModel: "claude-opus-5-5" },
+			files: { "wide.txt": wide },
+			turns: [
+				{ tool_use: { name: "Read", input: { file_path: "wide.txt" } } },
+				{ tool_use: { name: "Read", input: { file_path: "wide.txt", limit: 2 } } },
+			],
+		});
+		roots.push(join(result.workspace, ".."));
+		expect(result.lastSystemTexts.join("\n")).not.toContain("PARTIAL view");
+		expect(result.midConversationSystem).toEqual(
+			expect.arrayContaining([expect.stringContaining("[Truncated: PARTIAL view")]),
+		);
+		const partial = result.results.find(
+			(read) => read.name === "Read" && read.input.file_path === "wide.txt" && read.input.limit === undefined,
+		);
+		expect(partial?.text).not.toContain("system-reminder");
 	});
 });
