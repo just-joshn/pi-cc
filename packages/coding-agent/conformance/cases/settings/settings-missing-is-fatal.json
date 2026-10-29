@@ -1,0 +1,37 @@
+{
+	"id": "settings/settings-missing-is-fatal",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--settings",
+		"nope.json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"Error: Settings file not found: ",
+				"nope.json"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 0
+			}
+		]
+	},
+	"skip": []
+}

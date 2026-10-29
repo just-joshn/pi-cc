@@ -1,0 +1,40 @@
+{
+	"id": "settings/permissions-non-string-rule",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "{\"model\": \"claude-sonnet-4-5\", \"permissions\": {\"allow\": [\"Read\", 1]}}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"contains": [
+				"These settings entries were skipped",
+				"Non-string value in allow array was removed"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-sonnet-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

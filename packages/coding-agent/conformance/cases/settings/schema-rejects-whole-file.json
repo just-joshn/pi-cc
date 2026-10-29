@@ -1,0 +1,41 @@
+{
+	"id": "settings/schema-rejects-whole-file",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "{\"model\": \"claude-opus-4-5\", \"permissions\": {\"allow\": \"Read\"}}\n",
+		".claude/settings.json": "{\"model\": \"claude-sonnet-4-5\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"contains": [
+				"did not load",
+				"(permissions.allow): Expected array, but received string"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-sonnet-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

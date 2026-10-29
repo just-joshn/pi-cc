@@ -1,0 +1,36 @@
+{
+	"id": "settings/model-flag-beats-env-model",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--model",
+		"claude-haiku-4-5"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "{\"env\": {\"ANTHROPIC_MODEL\": \"claude-sonnet-4-5\"}}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-haiku-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

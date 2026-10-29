@@ -1,0 +1,38 @@
+{
+	"id": "settings/empty-file-is-silent",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "",
+		".claude/settings.json": "{\"model\": \"claude-sonnet-4-5\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"equals": ""
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-sonnet-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}
