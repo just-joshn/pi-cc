@@ -2,15 +2,15 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { loadCases } from "../conformance/case.ts";
+import { type ConformanceCase, loadCases } from "../conformance/case.ts";
 
 const CASES_DIR = join(import.meta.dirname, "..", "conformance", "cases");
 
-function loadOne(caseJson: Record<string, unknown>): void {
+function loadOne(caseJson: Record<string, unknown>): ConformanceCase {
 	const root = mkdtempSync(join(tmpdir(), "pi-cc-case-"));
 	mkdirSync(join(root, "cli"), { recursive: true });
 	writeFileSync(join(root, "cli", "probe.json"), JSON.stringify({ area: "cli", ...caseJson }));
-	loadCases(root);
+	return loadCases(root)[0];
 }
 
 const MINIMAL_CASE = {
@@ -64,5 +64,57 @@ describe("loadCases", () => {
 		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hi", "--update=now"] })).toThrow(
 			/argv must not contain "--update=now"/,
 		);
+	});
+});
+
+describe("turn shapes", () => {
+	test("rejects a turn that sets two kinds", () => {
+		expect(() =>
+			loadOne({
+				...MINIMAL_CASE,
+				model: { turns: [{ text: "a", tool_use: { name: "Read", input: {} } }] },
+			}),
+		).toThrow(/model\.turns\[0\] must set exactly one of .* found text, tool_use/);
+	});
+
+	test("rejects a non-string text even when another kind is present", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, model: { turns: [{ text: 5, sse: [] }] } })).toThrow(
+			/model\.turns\[0\] must set exactly one of .* found text, sse/,
+		);
+	});
+
+	test("rejects a non-string text", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, model: { turns: [{ text: 5 }] } })).toThrow(
+			/model\.turns\[0\]\.text must be a string/,
+		);
+	});
+
+	test("rejects a turn that sets no kind", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, model: { turns: [{}] } })).toThrow(
+			/model\.turns\[0\] must set exactly one of .* found none/,
+		);
+	});
+
+	test("loads each turn kind", () => {
+		const turns = [
+			{ text: "hello" },
+			{ tool_use: { name: "Read", input: { path: "a" } } },
+			{ tool_uses: [{ name: "Read", input: { path: "a" } }] },
+			{ sse: [{ event: "message" }] },
+		];
+		expect(loadOne({ ...MINIMAL_CASE, model: { turns } }).model?.turns).toEqual(turns);
+	});
+});
+
+describe("stdout allowExtra", () => {
+	test("loads a boolean allowExtra", () => {
+		const loaded = loadOne({ ...MINIMAL_CASE, compare: { exit: 0, stdout: { kind: "help", allowExtra: false } } });
+		expect(loaded.compare.stdout).toMatchObject({ kind: "help", allowExtra: false });
+	});
+
+	test("rejects a non-boolean allowExtra", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, stdout: { kind: "help", allowExtra: "yes" } } }),
+		).toThrow(/compare\.stdout\.allowExtra must be a boolean/);
 	});
 });
