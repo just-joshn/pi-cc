@@ -114,6 +114,14 @@ import {
 } from "./extensions/index.ts";
 import { type BeforeAgentStartTrigger, emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { createToolNameMatcher, isMcpToolName } from "./mcp-servers.ts";
+import { ensureAutoMemoryDir } from "./memory/auto-memory.ts";
+import { memoryForFileAccess } from "./memory/discover.ts";
+import {
+	autoMemoryPromptSection,
+	nestedReminderPath,
+	renderMemoryReminder,
+	renderNestedReminder,
+} from "./memory/wrapper.ts";
 import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -244,6 +252,9 @@ export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
 // ============================================================================
 // Types
 // ============================================================================
+
+/** File tools whose successful calls bring in the memory around the file they touched. */
+const FILE_ACCESS_TOOLS: ReadonlySet<string> = new Set(["read", "edit", "write", "Read", "Edit", "Write"]);
 
 function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<string, string> | undefined {
 	return headers
@@ -521,6 +532,7 @@ export class AgentSession {
 		this._installAgentBoundaryHooks();
 		this._installHiddenDeclarationsProjection();
 		this._installAgentForcedPromptProjection();
+		this._installMemoryProjection();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -712,14 +724,15 @@ export class AgentSession {
 			autoResizeImages: this.settingsManager.getImageAutoResize(),
 			...(resizeOptions ? { resizeOptions } : {}),
 		});
+		const memoryBlocks = (hookResult?.isError ?? isError) ? [] : this._memoryForToolCall(toolCall.name, args);
 
-		if (!hookResult && normalizedContent === content) {
+		if (!hookResult && normalizedContent === content && memoryBlocks.length === 0) {
 			return undefined;
 		}
 
 		// The hook result already dropped structured content that replaced content no longer matches.
 		return {
-			content: normalizedContent,
+			content: [...normalizedContent, ...memoryBlocks],
 			details: hookResult?.details,
 			structuredContent: hookResult ? hookResult.structuredContent : result.structuredContent,
 			isError: hookResult?.isError ?? isError,
@@ -1726,6 +1739,50 @@ export class AgentSession {
 		return Array.from(unique);
 	}
 
+	/**
+	 * Show the startup memory as the first block of the first user message on every request. It is
+	 * projected, not stored, so it always reflects the last reload.
+	 */
+	private _installMemoryProjection(): void {
+		const previousTransformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
+			const reminder = renderMemoryReminder(this._resourceLoader.getMemory().files);
+			const index = transformed.findIndex((message) => message.role === "user");
+			if (!reminder || index === -1) return transformed;
+			const first = transformed[index] as Extract<AgentMessage, { role: "user" }>;
+			const content: Array<TextContent | ImageContent> =
+				typeof first.content === "string" ? [{ type: "text", text: first.content }] : first.content;
+			const projected = transformed.slice();
+			projected[index] = { ...first, content: [{ type: "text", text: reminder }, ...content] };
+			return projected;
+		};
+	}
+
+	/**
+	 * Memory files a successful file tool call brings in, as text blocks for its result. A file the
+	 * model already has in context, from startup or an earlier result, is left out; compaction drops
+	 * earlier results, so their files can come back.
+	 */
+	private _memoryForToolCall(toolName: string, args: unknown): TextContent[] {
+		const memory = this._resourceLoader.getMemory();
+		const input = args as { path?: unknown; file_path?: unknown } | undefined;
+		const path = input?.path ?? input?.file_path;
+		if (memory.location === undefined || !FILE_ACCESS_TOOLS.has(toolName) || typeof path !== "string") return [];
+		const loaded = new Set(memory.files.map((file) => file.path));
+		for (const message of this.agent.state.messages) {
+			if (message.role !== "toolResult") continue;
+			for (const block of message.content) {
+				const injected = block.type === "text" ? nestedReminderPath(block.text) : undefined;
+				if (injected !== undefined) loaded.add(injected);
+			}
+		}
+		return memoryForFileAccess(path, memory.location, loaded).map((file) => ({
+			type: "text",
+			text: renderNestedReminder(file),
+		}));
+	}
+
 	private _rebuildSystemPrompt(toolNames: string[]): void {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
@@ -1740,6 +1797,8 @@ export class AgentSession {
 		const appendSystemPrompt = loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : "";
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+		const autoMemoryDir = this._resourceLoader.getMemory().autoMemoryDir;
+		if (autoMemoryDir !== undefined) ensureAutoMemoryDir(autoMemoryDir);
 
 		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
 			cwd: this._cwd,
@@ -1751,6 +1810,7 @@ export class AgentSession {
 			hiddenTools: [...this._hiddenDeclarations],
 			toolSnippets,
 			toolGuidelines: Object.fromEntries(this._toolPromptGuidelines),
+			sections: autoMemoryDir === undefined ? undefined : { memory: autoMemoryPromptSection(autoMemoryDir) },
 		});
 	}
 

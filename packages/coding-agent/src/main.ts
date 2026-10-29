@@ -211,6 +211,7 @@ export function ccResourceSuppression(parsed: Args): {
 	noSkills: boolean;
 	noPromptTemplates: boolean;
 	noContextFiles: boolean;
+	noMemory: boolean;
 	noMcp: boolean;
 } {
 	const bare = parsed.bare === true;
@@ -220,6 +221,8 @@ export function ccResourceSuppression(parsed: Args): {
 		noSkills: parsed.noSkills === true || bare || safeMode,
 		noPromptTemplates: parsed.noPromptTemplates === true || safeMode,
 		noContextFiles: parsed.noContextFiles === true || bare,
+		// --safe-mode drops Claude Code memory but keeps pi's AGENTS.md context files.
+		noMemory: bare || safeMode,
 		// --safe-mode names MCP servers among the customizations it disables; --bare does not.
 		noMcp: parsed.noMcp === true || parsed.safeMode === true,
 	};
@@ -993,6 +996,10 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
 				...ccResources,
+				memorySettings: () => ({
+					values: ccAdmission.run.settings.values,
+					settingSources: toSettingSources(parsed.settingSources),
+				}),
 				disabledBuiltinExtensions: ccResources.noMcp ? ["mcp"] : undefined,
 				noThemes: parsed.noThemes,
 				systemPrompt: parsed.systemPrompt,

@@ -1964,6 +1964,7 @@ export class InteractiveMode {
 				...(systemPromptSource ? [systemPromptSource] : []),
 				...this.session.resourceLoader.getAppendSystemPromptSources(),
 				...this.session.resourceLoader.getAgentsFiles().agentsFiles,
+				...this.session.resourceLoader.getMemory().files,
 			];
 			if (contextFiles.length > 0) {
 				this.loadedResourcesContainer.addChild(new Spacer(1));

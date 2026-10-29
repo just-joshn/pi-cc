@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { detectCapabilities, getTerminalColorMode, type TerminalColorMode } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -25,6 +26,7 @@ import type {
 	LoadExtensionsResult,
 } from "./extensions/types.ts";
 import { findGitPaths } from "./footer-data-provider.ts";
+import { discoverMemory, type MemorySnapshot, resolveMemoryLocation } from "./memory/discover.ts";
 import {
 	DefaultPackageManager,
 	type PackageInstallFailure,
@@ -183,6 +185,8 @@ export interface ResourceLoader {
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
+	/** Claude Code memory (CLAUDE.md files, rules, auto memory) found by the last reload. */
+	getMemory(): MemorySnapshot;
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
 	getAppendSystemPrompt(): string[];
@@ -209,7 +213,8 @@ function resolvePromptInput(input: string | undefined, description: string): str
 }
 
 function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
-	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+	// CLAUDE.md belongs to the memory loader (core/memory), which sends it with the first user message.
+	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD"];
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
@@ -300,6 +305,11 @@ export function loadProjectContextFiles(options: {
 	return contextFiles;
 }
 
+export interface MemorySettings {
+	readonly values: Readonly<Record<string, unknown>>;
+	readonly settingSources: readonly string[] | undefined;
+}
+
 export interface DefaultResourceLoaderOptions {
 	cwd: string;
 	agentDir: string;
@@ -317,6 +327,10 @@ export interface DefaultResourceLoaderOptions {
 	noPromptTemplates?: boolean;
 	noThemes?: boolean;
 	noContextFiles?: boolean;
+	/** Load no Claude Code memory. `noContextFiles` implies it. */
+	noMemory?: boolean;
+	/** The merged Claude Code settings values and `--setting-sources`, read at each reload. */
+	memorySettings?: () => MemorySettings;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
@@ -357,6 +371,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private noPromptTemplates: boolean;
 	private noThemes: boolean;
 	private noContextFiles: boolean;
+	private noMemory: boolean;
+	private memorySettings: () => MemorySettings;
 	private systemPromptSource?: string;
 	private appendSystemPromptSource?: string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
@@ -386,6 +402,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private themes: Theme[];
 	private themeDiagnostics: ResourceDiagnostic[];
 	private agentsFiles: Array<{ path: string; content: string }>;
+	private memory: MemorySnapshot;
 	private systemPrompt?: string;
 	private systemPromptSourcePath?: string;
 	private appendSystemPrompt: string[];
@@ -423,6 +440,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.noPromptTemplates = options.noPromptTemplates ?? false;
 		this.noThemes = options.noThemes ?? false;
 		this.noContextFiles = options.noContextFiles ?? false;
+		this.noMemory = options.noMemory ?? false;
+		this.memorySettings = options.memorySettings ?? (() => ({ values: {}, settingSources: undefined }));
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
 		this.extensionsOverride = options.extensionsOverride;
@@ -441,6 +460,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.themes = [];
 		this.themeDiagnostics = [];
 		this.agentsFiles = [];
+		this.memory = { files: [], autoMemoryDir: undefined };
 		this.appendSystemPrompt = [];
 		this.appendSystemPromptSourcePaths = [];
 		this.lastSkillPaths = [];
@@ -471,6 +491,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> } {
 		return { agentsFiles: this.agentsFiles };
+	}
+
+	getMemory(): MemorySnapshot {
+		return this.memory;
 	}
 
 	getSystemPrompt(): string | undefined {
@@ -684,6 +708,20 @@ export class DefaultResourceLoader implements ResourceLoader {
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+
+		const memorySettings = this.memorySettings();
+		this.memory = discoverMemory(
+			resolveMemoryLocation({
+				cwd: this.cwd,
+				home: homedir(),
+				env: process.env,
+				platform: process.platform,
+				values: memorySettings.values,
+				settingSources: memorySettings.settingSources,
+				projectTrusted: this.settingsManager.isProjectTrusted(),
+				disabled: this.noContextFiles || this.noMemory,
+			}),
+		);
 
 		const systemPromptSource = this.systemPromptSource ?? this.discoverSystemPromptFile();
 		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");

@@ -543,16 +543,12 @@ Content`,
 		it("should ignore context file candidates that are directories", async () => {
 			mkdirSync(join(cwd, "AGENTS.override.md"));
 			mkdirSync(join(cwd, "AGENTS.md"));
-			writeFileSync(join(cwd, "CLAUDE.md"), "Fallback instructions");
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getAgentsFiles().agentsFiles).toContainEqual({
-				path: join(cwd, "CLAUDE.md"),
-				content: "Fallback instructions",
-			});
+			expect(loader.getAgentsFiles().agentsFiles.some((file) => file.path.startsWith(cwd))).toBe(false);
 			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(cwd, "AGENTS.md")));
 			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(cwd, "AGENTS.override.md")));
 			consoleError.mockRestore();
@@ -1360,11 +1356,10 @@ export default function(pi: ExtensionAPI) {
 		});
 
 		it("should only skip the same filename, not a differently named context file", () => {
-			// The repo tracks CLAUDE.md; the worktree adds an AGENTS.md, which
-			// loadContextFileFromDir prefers. The main repo's CLAUDE.md is nobody's
-			// duplicate, so dropping it would lose its content entirely.
+			// The repo tracks AGENTS.override.md; the worktree adds an AGENTS.md. The main
+			// repo's override is nobody's duplicate, so dropping it would lose its content.
 			const { main, worktree, worktreeSrc } = setupNestedWorktree();
-			writeFileSync(join(main, "CLAUDE.md"), "main repo instructions");
+			writeFileSync(join(main, "AGENTS.override.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
 			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
