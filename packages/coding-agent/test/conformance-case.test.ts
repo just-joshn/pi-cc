@@ -89,6 +89,22 @@ describe("loadCases", () => {
 		}
 	});
 
+	test("rejects env the harness keeps unset", () => {
+		for (const key of [
+			"NODE_OPTIONS",
+			"NODE_EXTRA_CA_CERTS",
+			"DYLD_INSERT_LIBRARIES",
+			"ANTHROPIC_AUTH_TOKEN",
+			"ANTHROPIC_CUSTOM_HEADERS",
+			"CLAUDE_CODE_OAUTH_TOKEN",
+			"HTTPS_PROXY",
+		]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, env: { [key]: "probe" } })).toThrow(
+				new RegExp(`env cannot set "${key}"`),
+			);
+		}
+	});
+
 	test("keeps env a case owns", () => {
 		expect(loadOne({ ...MINIMAL_CASE, env: { PI_CONFORMANCE_PROBE: "1" } }).env).toEqual({
 			PI_CONFORMANCE_PROBE: "1",
@@ -188,6 +204,54 @@ describe("denied argv tokens", () => {
 			/argv must not run "login": the harness never runs a claude subcommand that authenticates, installs, or mutates/,
 		);
 		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--login"] })).toThrow(/argv must not run "--login"/);
+	});
+});
+
+/** Each of these writes to the machine or drives a background session, so the harness must never run one. */
+const MUTATING_ARGV: string[][] = [
+	["stop", "probe-id"],
+	["kill", "probe-id"],
+	["attach", "probe-id"],
+	["--verbose", "attach", "probe-id"],
+	["agents"],
+	["agents", "--cwd", "."],
+	["auto-mode", "reset", "-y"],
+	["auto-mode"],
+	["mcp", "add", "probe", "probe-command"],
+	["--verbose", "mcp", "add", "probe", "probe-command"],
+	["mcp", "remove", "probe"],
+	["mcp", "add-json", "probe", "{}"],
+	["mcp", "add-from-claude-desktop"],
+	["mcp", "reset-project-choices"],
+];
+
+/** Read-only argv that must keep loading, including `--agents`, the flag the `agents` command word would otherwise swallow. */
+const READ_ONLY_ARGV: string[][] = [
+	["mcp", "list"],
+	["mcp", "list", "add"],
+	["mcp", "get", "probe"],
+	["agents", "--json"],
+	["agents", "--json", "--all"],
+	["agents", "--help"],
+	["auto-mode", "config"],
+	["auto-mode", "defaults"],
+	["--agents", "{}"],
+	["-p", "hello"],
+];
+
+describe("denied argv commands", () => {
+	test.each(MUTATING_ARGV.map((argv) => [argv]))("rejects %j", (argv) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/argv must not run "/);
+	});
+
+	test.each(READ_ONLY_ARGV.map((argv) => [argv]))("allows %j", (argv) => {
+		expect(loadOne({ ...MINIMAL_CASE, argv }).argv).toEqual(argv);
+	});
+
+	test("names a multi-word command as written", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["mcp", "add", "probe", "probe-command"] })).toThrow(
+			/argv must not run "mcp add"/,
+		);
 	});
 });
 
