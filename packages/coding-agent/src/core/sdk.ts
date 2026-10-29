@@ -26,7 +26,7 @@ import {
 	SettingsManager,
 } from "./settings-manager.ts";
 import { time } from "./timings.ts";
-import { piToolNames, projectMessagesForModel, wrapStreamFn } from "./tools/cc-surface.ts";
+import { type CcSurfaceOptions, piToolNames, projectMessagesForModel, wrapStreamFn } from "./tools/cc-surface.ts";
 import {
 	createBashTool,
 	createCodingTools,
@@ -154,6 +154,14 @@ export {
 };
 
 // Helper Functions
+
+/** Whether the transport sends later system messages as their own messages, per the model's compat. */
+function midConversationSystemMessages(model: Model<any>): boolean {
+	const compat = model.compat;
+	return compat !== undefined && "supportsMidConvoSystemMessages" in compat
+		? compat.supportsMidConvoSystemMessages === true
+		: false;
+}
 
 function getDefaultAgentDir(): string {
 	return getAgentDir();
@@ -312,9 +320,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Claude Code's tool names, schemas and result text live only at the provider boundary: the
 	// transcript keeps pi's own tool identity, and this projection is the one place that changes.
-	const ccSurface = { placeholder: options.ccPlaceholder !== false };
+	// Read per request, because the model can change mid-session and the notice placement follows
+	// the model's own capability: a model the transport folds system messages for gets the notice
+	// inside its tool result, the way Claude Code answers it there.
+	const ccSurface = (): CcSurfaceOptions => ({
+		placeholder: options.ccPlaceholder !== false,
+		midConversationSystemMessages: midConversationSystemMessages(agent.state.model),
+	});
 	const convertToLlmForModel = (messages: AgentMessage[]): Message[] =>
-		projectMessagesForModel(convertToLlmWithBlockImages(messages), ccSurface);
+		projectMessagesForModel(convertToLlmWithBlockImages(messages), ccSurface());
 
 	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
 	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {

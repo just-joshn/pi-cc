@@ -415,6 +415,12 @@ export function piToolNames(names: readonly string[]): string[] {
 export interface CcSurfaceOptions {
 	/** Whether the model is offered `DeferredToolPlaceholder`. Default: true. */
 	placeholder?: boolean;
+	/**
+	 * Whether the model accepts system messages after the conversation starts. Default: true. When
+	 * false, the transport folds every later system message into the leading one, so a tool-result
+	 * notice rides inside its own tool result, wrapped the way Claude Code wraps it.
+	 */
+	midConversationSystemMessages?: boolean;
 }
 
 /**
@@ -447,6 +453,7 @@ export function projectMessagesForModel(messages: readonly Message[], options?: 
 		if (message.role === "toolResult") {
 			const notice = noticeOf(message);
 			if (!notice) return [message];
+			if (options?.midConversationSystemMessages === false) return [withNoticeInResult(message, notice)];
 			return [message, { role: "system", content: notice, timestamp: message.timestamp }];
 		}
 		return [message];
@@ -535,6 +542,23 @@ function noticeOf(message: Message): string | undefined {
 	if (typeof message.details !== "object" || Array.isArray(message.details)) return undefined;
 	const notice = (message.details as { ccNotice?: unknown }).ccNotice;
 	return typeof notice === "string" && notice.length > 0 ? notice : undefined;
+}
+
+/**
+ * The notice as Claude Code answers a model that cannot take mid-conversation system messages:
+ * appended to the tool result it explains, inside `<system-reminder>` tags (measured on
+ * claude-haiku-4-5, which answers a model that can with its own system message).
+ */
+function withNoticeInResult(message: Message & { role: "toolResult" }, notice: string): Message {
+	const reminder = `<system-reminder>\n${notice}\n</system-reminder>`;
+	const content = [...message.content];
+	const last = content[content.length - 1];
+	if (last !== undefined && last.type === "text") {
+		content[content.length - 1] = { ...last, text: `${last.text}\n\n${reminder}` };
+	} else {
+		content.push({ type: "text", text: reminder });
+	}
+	return { ...message, content };
 }
 
 /**
