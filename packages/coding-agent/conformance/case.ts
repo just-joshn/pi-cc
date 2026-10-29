@@ -1,8 +1,9 @@
 /** The on-disk conformance case format and its validating loader. */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { argvProblem, envProblem, unsetProblem } from "./allowlist.ts";
+import { toRegExp } from "./compare.ts";
 import { PROBES, type ProbeName, type SideName, VIOLATION_KINDS, type ViolationKind } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
@@ -34,6 +35,19 @@ export interface RequestSpec {
 	bodyMatch?: string[];
 	/** Patterns the serialized body of the last matched request must not match. */
 	bodyNotMatch?: string[];
+	/**
+	 * Patterns keyed by a dotted body path such as `messages.0.content.0.text` (a negative index counts
+	 * from the end), checked on one matched request, so a case can pin where text lands, not only that
+	 * it was sent. A string value is tested as is, anything else as its JSON.
+	 */
+	bodyAt?: Record<string, BodyTextSpec>;
+	/** Which matched request `bodyAt` reads. Negative counts from the end; the default is the last. */
+	index?: number;
+}
+
+export interface BodyTextSpec {
+	match?: string[];
+	notMatch?: string[];
 }
 
 /**
@@ -89,6 +103,8 @@ export interface ConformanceCase {
 	 * name `$REAL_HOME` and prove it cannot write there.
 	 */
 	files: Record<string, string>;
+	/** Workspace-relative directory the side starts in, so a case can observe a walk above its cwd. */
+	cwd: string | undefined;
 	/** Non-null starts the mock model server and points both sides at it. */
 	model: { turns: Turn[] } | null;
 	timeout_ms: number;
@@ -112,6 +128,7 @@ const CASE_KEYS = [
 	"unset",
 	"stdin",
 	"files",
+	"cwd",
 	"model",
 	"timeout_ms",
 	"compare",
@@ -137,7 +154,10 @@ const REQUEST_KEYS = [
 	"bodyExcludes",
 	"bodyMatch",
 	"bodyNotMatch",
+	"bodyAt",
+	"index",
 ];
+const BODY_TEXT_KEYS = ["match", "notMatch"];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -194,12 +214,27 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		unset,
 		stdin: asStdin(object.stdin, source),
 		files: asStringRecord(object.files, source, "files"),
+		cwd: asWorkspaceDir(object.cwd, source),
 		model: model === null ? null : { turns: asTurns(model.turns, source) },
 		timeout_ms,
 		compare: asCompareSpec(object.compare, source),
 		skip,
 		notApplicable,
 	};
+}
+
+/** A relative path that stays inside the workspace. A cwd outside it would run the side in a tree the harness does not hash. */
+function asWorkspaceDir(value: unknown, source: string): string | undefined {
+	const dir = asOptionalString(value, source, "cwd");
+	if (dir === undefined) return undefined;
+	if (
+		dir.length === 0 ||
+		isAbsolute(dir) ||
+		dir.split(/[\\/]/).some((part) => part === ".." || part.startsWith("$"))
+	) {
+		fail(source, "cwd must be a relative path inside the workspace");
+	}
+	return dir;
 }
 
 /** Resolves the case's probe name into the program it runs. Case data names a probe, never a path. */
@@ -372,8 +407,40 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 			bodyExcludes: asOptionalStringArray(object.bodyExcludes, source, `${field}.bodyExcludes`),
 			bodyMatch: asOptionalStringArray(object.bodyMatch, source, `${field}.bodyMatch`),
 			bodyNotMatch: asOptionalStringArray(object.bodyNotMatch, source, `${field}.bodyNotMatch`),
+			bodyAt: asBodyAt(object.bodyAt, source, `${field}.bodyAt`),
+			index: asOptionalInteger(object.index, source, `${field}.index`),
 		};
 	});
+}
+
+function asBodyAt(value: unknown, source: string, field: string): Record<string, BodyTextSpec> | undefined {
+	if (value === undefined) return undefined;
+	const object = asObject(value, source, field);
+	const specs: Record<string, BodyTextSpec> = {};
+	for (const [path, entry] of Object.entries(object)) {
+		if (path.length === 0 || path.split(".").some((segment) => segment.length === 0)) {
+			fail(source, `${field} has an empty path segment in "${path}"`);
+		}
+		const spec = asCheckedObject(entry, source, `${field}.${path}`, BODY_TEXT_KEYS);
+		const match = asOptionalStringArray(spec.match, source, `${field}.${path}.match`);
+		const notMatch = asOptionalStringArray(spec.notMatch, source, `${field}.${path}.notMatch`);
+		if (match === undefined && notMatch === undefined) fail(source, `${field}.${path} must set match or notMatch`);
+		for (const pattern of [...(match ?? []), ...(notMatch ?? [])]) {
+			try {
+				toRegExp(pattern);
+			} catch (error) {
+				fail(source, `${field}.${path} has an invalid pattern ${JSON.stringify(pattern)}: ${String(error)}`);
+			}
+		}
+		specs[path] = { match, notMatch };
+	}
+	return specs;
+}
+
+function asOptionalInteger(value: unknown, source: string, field: string): number | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "number" || !Number.isInteger(value)) fail(source, `${field} must be an integer`);
+	return value;
 }
 
 /** A name is what the case compares, so an empty one could never match a recorded header. */

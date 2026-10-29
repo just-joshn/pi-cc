@@ -141,6 +141,40 @@ describe("loadCases", () => {
 	});
 });
 
+describe("memory case fields", () => {
+	test("loads a workspace-relative cwd and refuses one that leaves the workspace", () => {
+		expect(loadOne({ ...MINIMAL_CASE, cwd: "a/b" }).cwd).toBe("a/b");
+		expect(loadOne(MINIMAL_CASE).cwd).toBeUndefined();
+		for (const cwd of ["", "/tmp", "../up", "a/../../up", "$HOME"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, cwd })).toThrow(/cwd must be a relative path inside the workspace/);
+		}
+	});
+
+	test("loads bodyAt patterns and a request index", () => {
+		const loaded = loadOne({
+			...MINIMAL_CASE,
+			compare: {
+				requests: [{ index: 1, bodyAt: { "messages.0.content.0.text": { match: ["A"], notMatch: ["B"] } } }],
+			},
+		});
+		expect(loaded.compare.requests?.[0]).toMatchObject({
+			index: 1,
+			bodyAt: { "messages.0.content.0.text": { match: ["A"], notMatch: ["B"] } },
+		});
+	});
+
+	test("refuses a bodyAt entry that asserts nothing, an empty path segment, a bad pattern, or a fractional index", () => {
+		const request = (entry: Record<string, unknown>) => ({ ...MINIMAL_CASE, compare: { requests: [entry] } });
+		expect(() => loadOne(request({ bodyAt: { system: {} } }))).toThrow(/must set match or notMatch/);
+		expect(() => loadOne(request({ bodyAt: { "messages..0": { match: ["x"] } } }))).toThrow(/empty path segment/);
+		expect(() => loadOne(request({ bodyAt: { system: { match: ["("] } } }))).toThrow(/invalid pattern/);
+		expect(() => loadOne(request({ bodyAt: { system: { mtch: ["x"] } } }))).toThrow(/unknown key "mtch"/);
+		expect(() => loadOne(request({ index: 0.5, bodyAt: { system: { match: ["x"] } } }))).toThrow(
+			/must be an integer/,
+		);
+	});
+});
+
 describe("turn shapes", () => {
 	test("rejects a turn that sets two kinds", () => {
 		expect(() =>

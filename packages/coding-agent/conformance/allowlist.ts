@@ -111,6 +111,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-opus-4-7",
 		"gpt-5",
 		"openai/gpt-5",
+		// a value of `--setting-sources` in the memory cases, which narrows memory with the settings tiers
+		"user",
 	],
 };
 
@@ -172,6 +174,8 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
 	"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
 	"DO_NOT_TRACK",
+	// The memory cases switch CLAUDE.md loading off. It only removes context from the request.
+	"CLAUDE_CODE_DISABLE_CLAUDE_MDS",
 ];
 
 /**

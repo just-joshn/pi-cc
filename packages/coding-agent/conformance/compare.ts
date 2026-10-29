@@ -10,7 +10,7 @@
  */
 
 import type { IncomingHttpHeaders } from "node:http";
-import type { CompareSpec, ContainmentSpec, FileSpec, HeaderValueSpec, StdoutSpec } from "./case.ts";
+import type { BodyTextSpec, CompareSpec, ContainmentSpec, FileSpec, HeaderValueSpec, StdoutSpec } from "./case.ts";
 import type { Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
@@ -281,6 +281,19 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				});
 			}
 		}
+		if (request.bodyAt !== undefined) {
+			const index = request.index ?? -1;
+			const record = matched.at(index);
+			for (const [path, spec] of Object.entries(request.bodyAt)) {
+				diffs.push(
+					...bodyTextDiffs(
+						`request ${index} ${path}`,
+						spec,
+						record === undefined ? undefined : bodyText(record.body, path),
+					),
+				);
+			}
+		}
 		const bodies = matched.map((record) => serializeBody(record.body));
 		for (const text of request.bodyIncludes ?? []) {
 			if (!bodies.some((body) => body.includes(text))) {
@@ -333,7 +346,42 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 
 function serializeBody(body: unknown): string {
 	return typeof body === "string" ? body : JSON.stringify(body);
+/** The text at a dotted path, or undefined when the path leads nowhere. */
+function bodyText(body: unknown, path: string): string | undefined {
+	let value = body;
+	for (const segment of path.split(".")) {
+		if (Array.isArray(value) && /^-?\d+$/.test(segment)) {
+			value = value.at(Number(segment));
+		} else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+			value = (value as Record<string, unknown>)[segment];
+		} else {
+			return undefined;
+		}
+		if (value === undefined) return undefined;
+	}
+	return typeof value === "string" ? value : JSON.stringify(value);
 }
+
+function bodyTextDiffs(where: string, spec: BodyTextSpec, text: string | undefined): Diff[] {
+	const diffs: Diff[] = [];
+	for (const pattern of spec.match ?? []) {
+		if (text === undefined || !toRegExp(pattern).test(text)) {
+			diffs.push({ check: "requests.bodyAt", expected: `${where} matches /${pattern}/`, actual: excerpt(text) });
+		}
+	}
+	for (const pattern of spec.notMatch ?? []) {
+		const hit = text === undefined ? null : toRegExp(pattern).exec(text);
+		if (hit !== null) {
+			diffs.push({
+				check: "requests.bodyAt",
+				expected: `${where} does not match /${pattern}/`,
+				actual: excerpt(hit[0]),
+			});
+		}
+	}
+	return diffs;
+}
+
 
 function recordedHeader(headers: IncomingHttpHeaders, name: string): string | undefined {
 	const value = headers[name.toLowerCase()];
@@ -407,13 +455,14 @@ function matchesSubset(actual: unknown, expected: unknown): boolean {
 }
 
 /** Case files spell the case-insensitive flag inline, which JavaScript regular expressions do not support. */
-function toRegExp(pattern: string): RegExp {
+export function toRegExp(pattern: string): RegExp {
 	const inline = /^\(\?([ims]+)\)/.exec(pattern);
 	if (inline === null) return new RegExp(pattern, "m");
 	return new RegExp(pattern.slice(inline[0].length), `${inline[1]}m`);
 }
 
-function excerpt(text: string): string {
+function excerpt(text: string | undefined): string {
+	if (text === undefined) return "(no value at this path)";
 	return text.length > 200 ? `${text.slice(0, 200)}...` : text;
 }
 
