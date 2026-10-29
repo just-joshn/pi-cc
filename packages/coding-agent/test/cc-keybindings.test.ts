@@ -3,14 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setKeybindings, TuiMainScreen } from "@earendil-works/pi-tui";
 import { Compile } from "typebox/compile";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
+import { AuthStorage } from "../src/core/auth-storage.ts";
+import { createEventBus } from "../src/core/event-bus.ts";
+import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
+import { ExtensionRunner } from "../src/core/extensions/runner.ts";
 import { ChordResolver } from "../src/core/keybindings/chords.ts";
 import { importCcKeybindings, parseKeySequence, resolveBindings } from "../src/core/keybindings/import-cc.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { KeybindingsSchema } from "../src/core/keybindings-schema.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
 import { CustomEditor } from "../src/modes/interactive/components/custom-editor.ts";
+import { createInMemoryModelRegistry } from "./model-runtime-test-utils.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -37,6 +43,17 @@ describe("CC keybinding file import", () => {
 		expect(
 			importCcKeybindings({ bindings: [{ context: "Chat", bindings: { enter: 4 } }] }, new Set()).bindings,
 		).toEqual([]);
+	});
+
+	it("rejects mixed native and CC root fields with diagnostics", () => {
+		const mixed = { ...cc({ "ctrl+y": "chat:submit" }), "app.model.select": "ctrl+b" };
+		expect(Compile(KeybindingsSchema).Check(mixed)).toBe(false);
+		const { manager } = load(mixed);
+		expect(manager.getImportDiagnostics()).toEqual([
+			"Unsupported CC keybinding root field: app.model.select. Native and CC file formats cannot be mixed",
+		]);
+		expect(manager.getPromptKeys("tui.input.submit")).not.toContain("ctrl+y");
+		expect(manager.getPromptKeys("app.model.select")).not.toContain("ctrl+b");
 	});
 
 	it("normalizes aliases and validates each stroke", () => {
@@ -73,6 +90,20 @@ describe("CC keybinding file import", () => {
 		);
 		expect(resolveBindings([], imported.bindings, "Global")[0]?.action).toBe("tui.input.submit");
 		expect(resolveBindings([], imported.bindings, "Chat")[0]?.action).toBeNull();
+	});
+
+	it.each([
+		["esc", "escape"],
+		["escape", "esc"],
+		["return", "enter"],
+		["enter", "return"],
+	] as const)("unbinds native %s with CC %s", (native, imported) => {
+		const overrides = importCcKeybindings(cc({ [imported]: null }), new Set()).bindings;
+		expect(
+			resolveBindings([{ context: "Global", keys: [native], action: "tui.input.submit" }], overrides, "Chat"),
+		).toEqual([
+			{ context: "Chat", keys: [imported === "esc" || imported === "escape" ? "escape" : "enter"], action: null },
+		]);
 	});
 
 	it("publishes schemas for native sequences and the CC envelope", () => {
@@ -154,6 +185,49 @@ describe("prompt chord dispatch", () => {
 	it("matches modifier permutations when unbinding a default", () => {
 		const { manager } = load(cc({ "ctrl+shift+p": null }));
 		expect(manager.getPromptKeys("app.model.cycleBackward")).not.toContain("shift+ctrl+p");
+	});
+
+	it("exposes imported prompt keys and chord prefixes to extension conflict checks", () => {
+		const { manager } = load(cc({ "ctrl+y": "chat:submit", "ctrl+b ctrl+s": "chat:modelPicker", "ctrl+l": null }));
+		const config = manager.getEffectiveConfig();
+		expect(config["tui.input.submit"]).toContain("ctrl+y");
+		expect(config["app.model.select"]).toContain("ctrl+b");
+		expect(config["app.model.select"]).not.toContain("ctrl+l");
+		expect(manager.matches("\x0c", "app.model.select")).toBe(true);
+		expect(manager.getKeys("tui.input.submit")).toEqual(["enter"]);
+	});
+
+	it("blocks extension shortcuts for imported reserved keys and chord prefixes", async () => {
+		const { manager } = load(cc({ "ctrl+y": "chat:submit", "ctrl+b ctrl+s": "chat:modelPicker", "ctrl+l": null }));
+		const runtime = createExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			(pi) => {
+				for (const key of ["ctrl+y", "ctrl+b", "ctrl+l", "ctrl+c", "ctrl+f"] as const) {
+					pi.registerShortcut(key, { handler: async () => {} });
+				}
+			},
+			process.cwd(),
+			createEventBus(),
+			runtime,
+		);
+		const runner = new ExtensionRunner(
+			[extension],
+			runtime,
+			process.cwd(),
+			SessionManager.inMemory(),
+			await createInMemoryModelRegistry(AuthStorage.inMemory()),
+		);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const shortcuts = runner.getShortcuts(manager.getEffectiveConfig());
+			expect(shortcuts.has("ctrl+y")).toBe(false);
+			expect(shortcuts.has("ctrl+b")).toBe(false);
+			expect(shortcuts.has("ctrl+c")).toBe(false);
+			expect(shortcuts.has("ctrl+l")).toBe(true);
+			expect(shortcuts.has("ctrl+f")).toBe(true);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	it("expires pending prefixes without treating a late suffix as completion", () => {

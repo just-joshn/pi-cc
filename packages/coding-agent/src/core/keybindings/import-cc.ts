@@ -4,15 +4,18 @@ import { Compile } from "typebox/compile";
 import { KeyIdSchema } from "../key-id-schema.ts";
 import type { Binding } from "./chords.ts";
 
-export const CcKeybindingsSchema = Type.Object({
-	$schema: Type.Optional(Type.String()),
-	bindings: Type.Array(
-		Type.Object({
-			context: Type.String(),
-			bindings: Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()])),
-		}),
-	),
-});
+export const CcKeybindingsSchema = Type.Object(
+	{
+		$schema: Type.Optional(Type.String()),
+		bindings: Type.Array(
+			Type.Object({
+				context: Type.String(),
+				bindings: Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()])),
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
 
 const validateFile = Compile(CcKeybindingsSchema);
 const validateKey = Compile(KeyIdSchema);
@@ -58,6 +61,16 @@ export function parseKeySequence(value: string): [KeyId, ...KeyId[]] | undefined
 /** Imports supported CC contexts without inventing equivalents for unknown actions. */
 export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<string>): ImportedBindings {
 	const result: ImportedBindings = { bindings: [], diagnostics: [] };
+	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+		for (const field of Object.keys(value)) {
+			if (field !== "$schema" && field !== "bindings") {
+				result.diagnostics.push(
+					`Unsupported CC keybinding root field: ${field}. Native and CC file formats cannot be mixed`,
+				);
+			}
+		}
+		if (result.diagnostics.length > 0) return result;
+	}
 	if (!validateFile.Check(value)) {
 		result.diagnostics.push("CC keybindings must contain a bindings array of context and bindings records");
 		return result;
@@ -108,5 +121,14 @@ export function resolveBindings(
 }
 
 function sequenceIdentity(keys: readonly KeyId[]): string {
-	return keys.map((key) => key.split("+").sort().join("+")).join(" ");
+	return keys
+		.map((key) =>
+			key
+				.toLowerCase()
+				.split("+")
+				.map((part) => aliases[part] ?? part)
+				.sort()
+				.join("+"),
+		)
+		.join(" ");
 }

@@ -416,7 +416,8 @@
             }
           }
         }
-      }
+      },
+      "additionalProperties": false
     }
   ],
   "$defs": {

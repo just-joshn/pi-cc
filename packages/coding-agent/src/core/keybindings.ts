@@ -392,8 +392,15 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		this.setUserBindings(singles);
 	}
 
+	/** Returns prompt conflict keys, reserving the first stroke of imported chords for their action. */
 	getEffectiveConfig(): KeybindingsConfig {
-		return this.getResolvedBindings();
+		const native = this.getResolvedBindings();
+		if (this.importedBindings.length === 0) return native;
+		const config: Record<string, KeyId[]> = Object.fromEntries(Object.keys(native).map((action) => [action, []]));
+		for (const binding of this.getContextBindings("Chat")) {
+			if (binding.action !== null) config[binding.action].push(binding.keys[0]);
+		}
+		return config;
 	}
 
 	getImportDiagnostics(): readonly string[] {
