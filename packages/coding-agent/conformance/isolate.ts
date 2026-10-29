@@ -170,10 +170,12 @@ export function seedFiles(roots: Roots, files: Record<string, string>): void {
 		if (!subtree) {
 			throw new Error(`seeded path escapes the side root: ${path}`);
 		}
-		const parent = realpathSync(mkdirp(dirname(target)));
-		if (!isInside(roots[subtree], parent) || lstatOrNull(target)?.isSymbolicLink()) {
+		let existing = dirname(target);
+		while (lstatOrNull(existing) === null) existing = dirname(existing);
+		if (!isInside(roots[subtree], realpathSync(existing)) || lstatOrNull(target)?.isSymbolicLink()) {
 			throw new Error(`seeded path escapes the side root: ${path}`);
 		}
+		mkdirp(dirname(target));
 		writeFileSync(target, expandPlaceholders(content, roots));
 	}
 }
