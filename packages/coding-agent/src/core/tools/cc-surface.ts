@@ -26,6 +26,9 @@ import type {
 } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { type TSchema, Type } from "typebox";
+import { CC_READ_MAX_BYTES, CC_READ_MAX_TOKENS } from "./cc-text.ts";
+import { editToolSystemPromptContribution } from "./edit.ts";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./truncate.ts";
 
 /** The declaration Claude Code keeps in every list to hold deferred loading open (measured). */
 export const CC_PLACEHOLDER_NAME = "DeferredToolPlaceholder";
@@ -94,6 +97,8 @@ interface CcTool {
 	/** The name Claude Code declares. */
 	readonly name: string;
 	readonly parameters: TSchema;
+	/** The description sent with {@link parameters}, when pi's own names fields the model does not have. */
+	readonly description?: string;
 	/** Claude Code's input property names, in declaration order. */
 	readonly fields: readonly string[];
 	/** pi's input property names, so a validation message can be mapped back. */
@@ -107,6 +112,7 @@ const CC_TOOLS: readonly CcTool[] = [
 		pi: "bash",
 		name: "Bash",
 		parameters: bashSchema,
+		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in milliseconds.`,
 		fields: ["command", "timeout", "description", "run_in_background", "dangerouslyDisableSandbox"],
 		piFields: ["command", "timeout"],
 		toPi: (args) => ({
@@ -118,6 +124,8 @@ const CC_TOOLS: readonly CcTool[] = [
 		pi: "edit",
 		name: "Edit",
 		parameters: editSchema,
+		description:
+			"Edit a single file using exact text replacement. old_string must match a unique region of the file exactly, including whitespace and indentation, unless replace_all is set; a failed match is not retried with normalization. An empty old_string creates the file with new_string.",
 		fields: ["file_path", "old_string", "new_string", "replace_all"],
 		piFields: ["path", "edits", "replaceAll"],
 		// An empty old_string is Claude Code's file creation, which pi's edit writes verbatim.
@@ -131,6 +139,7 @@ const CC_TOOLS: readonly CcTool[] = [
 		pi: "read",
 		name: "Read",
 		parameters: readSchema,
+		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. A file larger than ${CC_READ_MAX_BYTES / 1024}KB is refused unless allow_large is set. Text output is capped at about ${CC_READ_MAX_TOKENS} tokens; page through a larger file with offset and limit.`,
 		fields: ["file_path", "offset", "limit", "pages", "allow_large"],
 		piFields: ["path", "offset", "limit", "allowLarge"],
 		toPi: (args) => ({
@@ -193,7 +202,7 @@ export function projectDeclarations(tools: readonly Tool[], includePlaceholder: 
 		return [
 			{
 				name: covered.name,
-				description: tool.description,
+				description: covered.description ?? tool.description,
 				parameters: covered.parameters,
 				// Claude Code sends its schemas verbatim and marks no tool strict, so no strict rewrite.
 				constrainedSampling: false as const,
@@ -443,16 +452,15 @@ export function projectMessagesForModel(messages: readonly Message[], options?: 
 	const includePlaceholder = options?.placeholder !== false;
 	const projected = messages.flatMap((message): Message[] => {
 		if (message.role === "system") {
-			const { tools, rules } = message.sections ?? {};
-			if (typeof tools === "string" || typeof rules === "string") {
-				message = {
-					...message,
-					sections: {
-						...message.sections,
-						...(typeof tools === "string" ? { tools: projectToolList(tools) } : {}),
-						...(typeof rules === "string" ? { rules: projectToolList(rules) } : {}),
-					},
-				};
+			if (message.sections !== undefined) {
+				const sections = Object.fromEntries(
+					Object.entries(message.sections).map(([name, text]) => {
+						if (typeof text !== "string") return [name, text];
+						const lines = projectPromptLines(text);
+						return [name, name === "tools" || name === "rules" ? projectToolList(lines) : lines];
+					}),
+				);
+				message = { ...message, sections };
 			}
 			const toolsAdded = message.toolsAdded;
 			if (toolsAdded === undefined) return [message];
@@ -516,6 +524,47 @@ export function sortMergedDeclarations(messages: readonly Message[], includePlac
  * The system prompt's tool list and tool rules, with each covered tool under the name the model
  * calls it by: a `- read: ...` entry and a `- Use read ...` rule.
  */
+/**
+ * System prompt lines that describe pi's input shape or tool names, and the line the model gets
+ * instead. `null` drops a line that has no counterpart for a one-edit schema.
+ */
+const [editExact, editMany, editOriginal, editSmall, editApprox] = editToolSystemPromptContribution.guidelines;
+const MODEL_PROMPT_LINES: ReadonlyMap<string, string | null> = new Map([
+	[editToolSystemPromptContribution.snippet, "Make precise file edits with exact text replacement"],
+	[editExact, "Use Edit for precise changes (old_string must match exactly)"],
+	[editMany, "To change several separate locations in one file, make one Edit call for each"],
+	[editOriginal, null],
+	[
+		editSmall,
+		"Keep old_string as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+	],
+	[
+		editApprox,
+		"An old_string that matches the file only approximately is not applied. Re-read the file and copy the exact text.",
+	],
+	[
+		"Use the read tool to load a skill's file when the task matches its description.",
+		"Use the Read tool to load a skill's file when the task matches its description.",
+	],
+	[
+		"Use bash to load a skill's file when the task matches its description.",
+		"Use Bash to load a skill's file when the task matches its description.",
+	],
+]);
+
+/** Each line of a prompt section as the model reads it, a bullet's marker and a tool list's `name: ` kept. */
+function projectPromptLines(text: string): string {
+	return text
+		.split("\n")
+		.flatMap((line) => {
+			const [, prefix = "", body = line] = /^(- (?:[A-Za-z_]+: )?)?(.*)$/.exec(line) ?? [];
+			const replaced = MODEL_PROMPT_LINES.get(body);
+			if (replaced === undefined) return [line];
+			return replaced === null ? [] : [`${prefix}${replaced}`];
+		})
+		.join("\n");
+}
+
 function projectToolList(text: string): string {
 	return text.replace(/^- (Use )?([A-Za-z_]+)(?=[: ])/gm, (line, use: string | undefined, name: string) => {
 		const covered = ccTool(name);
