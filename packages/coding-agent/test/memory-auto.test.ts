@@ -74,7 +74,7 @@ describe("directory", () => {
 	test("autoMemoryDirectory wins when it is a usable absolute path", () => {
 		expect(resolveAutoMemoryDir("/cfg", "/w", "/home/u", { autoMemoryDirectory: "~/notes" })).toBe("/home/u/notes/");
 		expect(resolveAutoMemoryDir("/cfg", "/w", "/home/u", { autoMemoryDirectory: "/mem//" })).toBe("/mem/");
-		for (const bad of ["relative/dir", "/", "/a\0b", 42]) {
+		for (const bad of ["relative/dir", "/", "/a\0b", 42, "~/..", "~/", "~/a/../..", "~/../x"]) {
 			expect(resolveAutoMemoryDir("/cfg", "/w", "/home/u", { autoMemoryDirectory: bad })).toBe(
 				"/cfg/projects/-w/memory/",
 			);
@@ -95,9 +95,8 @@ describe("MEMORY.md", () => {
 		const result = truncateMemoryIndex(lines.join("\n"));
 		const [kept, note] = result.split("\n\n> ");
 		expect(kept).toBe(lines.slice(0, 200).join("\n"));
-		expect(note).toMatch(/259 lines/);
-		expect(note).toMatch(/200 lines/);
-		expect(note).toMatch(/59 lines from line 201/);
+		expect(note).toMatch(/200-line limit/);
+		expect(note).toMatch(/59 of 259 lines were left out, starting at line 201\./);
 		expect(note).not.toContain("\n");
 		expect(result).not.toContain("AM_LINE_201");
 	});
@@ -107,7 +106,21 @@ describe("MEMORY.md", () => {
 		const result = truncateMemoryIndex(lines.join("\n"));
 		const [kept, note] = result.split("\n\n> ");
 		expect(kept).toBe(lines.slice(0, 83).join("\n"));
-		expect(note).toMatch(/17 lines from line 84/);
+		expect(note).toMatch(/17 of 100 lines were left out, starting at line 84\./);
+	});
+
+	test("one line left out is singular", () => {
+		const lines = Array.from({ length: 201 }, (_, index) => `L${index + 1}`);
+		expect(truncateMemoryIndex(lines.join("\n"))).toMatch(/1 of 201 lines was left out, starting at line 201\./);
+	});
+
+	test("a first line over 25000 characters is cut inside the line", () => {
+		const result = truncateMemoryIndex(`${"x".repeat(30000)}\nsecond`);
+		const [kept, note] = result.split("\n\n> ");
+		expect(kept).toBe("x".repeat(25000));
+		expect(note).toMatch(/25000-character limit/);
+		expect(note).toMatch(/only the first 25000 characters of line 1 were loaded and the other 1 line was left out\./);
+		expect(truncateMemoryIndex("y".repeat(26000))).toMatch(/only the first 25000 characters of line 1 were loaded\./);
 	});
 
 	test("short content is only trimmed", () => {
