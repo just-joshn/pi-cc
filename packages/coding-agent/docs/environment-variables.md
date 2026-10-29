@@ -109,8 +109,8 @@ The Anthropic provider reads the endpoint and model variables Claude Code reads:
 |----------|-------------|
 | `ANTHROPIC_BASE_URL` | Endpoint for Anthropic Messages requests, such as a gateway or proxy |
 | `ANTHROPIC_CUSTOM_HEADERS` | Extra request headers, one `Name: value` per line |
-| `ANTHROPIC_MODEL` | Session model, preferred over the saved default |
+| `ANTHROPIC_MODEL` | Session model, preferred over the saved default and over a resumed session's model |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` | What the `opus`, `sonnet`, `haiku`, and `fable` aliases resolve to |
 | `ANTHROPIC_SMALL_FAST_MODEL` | Accepted for compatibility; it does not select the session model, `ANTHROPIC_DEFAULT_HAIKU_MODEL` does |
 
-A `baseUrl` configured for the provider in `models.json` wins over `ANTHROPIC_BASE_URL`.
+A bare alias names the current model for that family, and any other value is a model id sent as written. The environment outranks saved configuration for this provider: `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` take precedence over a credential in `auth.json`, and `ANTHROPIC_BASE_URL` takes precedence over a `baseUrl` in `models.json`. A custom `anthropic-beta` header is ignored, because the request's beta list is computed from the features in use.
