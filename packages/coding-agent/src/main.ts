@@ -953,7 +953,10 @@ export async function main(args: string[], options?: MainOptions) {
 		process.exit(1);
 	}
 
-	if (appMode !== "interactive" && (!session.model || !modelRuntime.hasConfiguredAuth(session.model.provider))) {
+	if (
+		(appMode === "print" || appMode === "json") &&
+		(!session.model || !modelRuntime.hasConfiguredAuth(session.model.provider))
+	) {
 		writeRawStdout(`${NOT_LOGGED_IN_MESSAGE}\n`);
 		await flushRawStdout();
 		console.error(
