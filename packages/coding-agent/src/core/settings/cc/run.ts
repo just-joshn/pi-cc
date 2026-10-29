@@ -91,3 +91,45 @@ export function openCcRunSettings(location: CcRunLocation, trust: CcRepoTierTrus
 		},
 	};
 }
+
+/** One directory's settings, and the trust decision that admitted or withheld its repo tiers. */
+export interface CcDirectoryAdmission {
+	readonly cwd: string;
+	readonly run: CcRunSettings;
+}
+
+export interface CcDirectoryAdmitResult {
+	readonly admission: CcDirectoryAdmission;
+	/** Set when an already-open directory was settled. A fresh open carries its own report. */
+	readonly settled: CcSettleResult | undefined;
+	readonly opened: boolean;
+}
+
+/**
+ * Admit or withhold the repo tiers of `cwd` on `trust`, which must be that directory's own decision.
+ *
+ * A different directory does not reuse the previous load. Settling one directory's files with another
+ * directory's boolean is the bug this function exists to make unrepresentable.
+ */
+export function admitCcDirectory(
+	previous: CcDirectoryAdmission | undefined,
+	location: CcRunLocation,
+	cwd: string,
+	trust: CcRepoTierTrust,
+): CcDirectoryAdmitResult {
+	if (previous !== undefined && trust !== "pending") {
+		return {
+			admission: previous,
+			settled: previous.run.settleRepoTiers(trust),
+			opened: false,
+		};
+	}
+	if (previous !== undefined && previous.cwd === cwd) {
+		return { admission: previous, settled: undefined, opened: false };
+	}
+	return {
+		admission: { cwd, run: openCcRunSettings({ ...location, cwd }, trust) },
+		settled: undefined,
+		opened: true,
+	};
+}

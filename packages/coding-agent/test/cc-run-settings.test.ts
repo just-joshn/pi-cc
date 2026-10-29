@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
-import { type CcRunLocation, openCcRunSettings } from "../src/core/settings/cc/run.ts";
+import { admitCcDirectory, type CcRunLocation, openCcRunSettings } from "../src/core/settings/cc/run.ts";
 
 const tempDirs: string[] = [];
 
@@ -154,5 +154,45 @@ describe("failures that never depend on trust", () => {
 		const parts = side();
 		const run = openCcRunSettings(location(parts, { flagSettings: "nope.json" }), false);
 		expect(run.flagError).toMatch(/^Settings file not found: /);
+	});
+});
+
+describe("a trust decision admits only that directory", () => {
+	test("trusting the session directory does not admit the startup directory's proxy", () => {
+		const startup = side();
+		const session = side();
+		projectSettings(startup, '{"env":{"HTTPS_PROXY":"http://127.0.0.1:9"}}');
+		projectSettings(session, '{"model":"claude-sonnet-4-5"}');
+		const pending = admitCcDirectory(undefined, location(startup), startup.workspace, "pending");
+		expect(pending.admission.run.settings.env.HTTPS_PROXY).toBeUndefined();
+
+		const admitted = admitCcDirectory(pending.admission, location(session), session.workspace, true);
+
+		expect(admitted.admission.cwd).toBe(session.workspace);
+		expect(admitted.admission.run.settings.env.HTTPS_PROXY).toBeUndefined();
+		expect(admitted.admission.run.settings.model).toBe("claude-sonnet-4-5");
+	});
+
+	test("an untrusted switch does not admit the new directory's env", () => {
+		const current = side();
+		const next = side();
+		projectSettings(current, '{"env":{"HTTPS_PROXY":"http://127.0.0.1:9"}}');
+		projectSettings(next, '{"env":{"HTTPS_PROXY":"http://127.0.0.1:1"}}');
+		const trusted = admitCcDirectory(undefined, location(current), current.workspace, true);
+		const denied = admitCcDirectory(trusted.admission, location(next), next.workspace, false);
+
+		expect(denied.admission.cwd).toBe(next.workspace);
+		expect(denied.admission.run.settings.env.HTTPS_PROXY).toBeUndefined();
+		expect(denied.admission.run.ignored).toEqual([join(next.workspace, ".claude", "settings.json")]);
+	});
+
+	test("the same directory still admits when its own answer is yes", () => {
+		const parts = side();
+		projectSettings(parts, '{"env":{"HTTPS_PROXY":"http://127.0.0.1:9"}}');
+		const pending = admitCcDirectory(undefined, location(parts), parts.workspace, "pending");
+		const admitted = admitCcDirectory(pending.admission, location(parts), parts.workspace, true);
+
+		expect(admitted.admission.cwd).toBe(parts.workspace);
+		expect(admitted.settled?.settings.env.HTTPS_PROXY).toBe("http://127.0.0.1:9");
 	});
 });
