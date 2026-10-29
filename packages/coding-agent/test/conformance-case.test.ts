@@ -105,6 +105,13 @@ describe("loadCases", () => {
 		expect(loadOne({ ...MINIMAL_CASE, timeout_ms: 1500 }).timeout_ms).toBe(1500);
 		expect(loadOne(MINIMAL_CASE).timeout_ms).toBe(60000);
 	});
+
+	test("rejects a timeout Node cannot honor", () => {
+		for (const value of [2 ** 31, 2 ** 60]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, timeout_ms: value })).toThrow(/timeout_ms must be at most 2147483647/);
+		}
+		expect(loadOne({ ...MINIMAL_CASE, timeout_ms: 2 ** 31 - 1 }).timeout_ms).toBe(2 ** 31 - 1);
+	});
 });
 
 describe("turn shapes", () => {
