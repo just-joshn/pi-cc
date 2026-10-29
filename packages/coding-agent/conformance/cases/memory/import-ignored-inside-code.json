@@ -1,0 +1,55 @@
+{
+	"id": "memory/import-ignored-inside-code",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "P ``x @a.md y`` and `@a2.md`\n```\n@b.md\n```\n~~~\n@b2.md\n~~~\n\n    @c.md\n\n<!-- @k.md -->\n\n> quote @d.md\n- list @e.md\n# head @f.md\n[link](@g.md) *@h.md* mail@j.md \\@l.md\n",
+		"a.md": "A_IMPORT\n",
+		"a2.md": "A2_IMPORT\n",
+		"b.md": "B_IMPORT\n",
+		"b2.md": "B2_IMPORT\n",
+		"c.md": "C_IMPORT\n",
+		"d.md": "D_IMPORT\n",
+		"e.md": "E_IMPORT\n",
+		"f.md": "F_IMPORT\n",
+		"g.md": "G_IMPORT\n",
+		"h.md": "H_IMPORT\n",
+		"j.md": "J_IMPORT\n",
+		"k.md": "K_IMPORT\n",
+		"l.md": "L_IMPORT\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nP [\\s\\S]*Contents of [^\\n]*/workspace/d\\.md \\([^\\n]*\\):\\n\\nD_IMPORT[\\s\\S]*Contents of [^\\n]*/workspace/e\\.md \\([^\\n]*\\):\\n\\nE_IMPORT[\\s\\S]*Contents of [^\\n]*/workspace/f\\.md \\([^\\n]*\\):\\n\\nF_IMPORT[\\s\\S]*Contents of [^\\n]*/workspace/h\\.md \\([^\\n]*\\):\\n\\nH_IMPORT"
+						],
+						"notMatch": [
+							"\\b(A|A2|B|B2|C|G|J|K|L)_IMPORT"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

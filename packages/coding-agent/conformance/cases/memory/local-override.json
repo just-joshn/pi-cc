@@ -1,0 +1,42 @@
+{
+	"id": "memory/local-override",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "PROJECT_L\n",
+		".claude/rules/r.md": "RULE_L\n",
+		"CLAUDE.local.md": "LOCAL_L @local-import.md\n",
+		"local-import.md": "LOCAL_IMPORT_L\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md (\\([^\\n]*\\)):\\n\\nPROJECT_L[\\s\\S]*Contents of [^\\n]*/workspace/\\.claude/rules/r\\.md \\1:\\n\\nRULE_L[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.local\\.md (?!\\1)(\\([^\\n]*\\)):\\n\\nLOCAL_L[^\\n]*\\n\\nContents of [^\\n]*/workspace/local-import\\.md \\2:\\n\\nLOCAL_IMPORT_L\\n</system-reminder>$"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,91 @@
+{
+	"id": "memory/rules-paths-scoping",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "PROJ\n",
+		".claude/rules/always.md": "RULE_ALWAYS\n",
+		".claude/rules/ts.md": "---\npaths:\n  - \"src/**/*.ts\"\n---\nRULE_SCOPED_TS\n",
+		".claude/rules/md.md": "---\npaths: lib/*.md\n---\nRULE_SCOPED_MD\n",
+		"src/a.ts": "export const a = 1;\n",
+		"sub/CLAUDE.md": "NESTED_MEMO\n",
+		"sub/deeper/x.txt": "x\n",
+		"sub/deeper/CLAUDE.local.md": "NESTED_LOCAL\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_uses": [
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "src/a.ts"
+						}
+					},
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "sub/deeper/x.txt"
+						}
+					}
+				]
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"index": 0,
+				"bodyAt": {
+					"messages": {
+						"notMatch": [
+							"RULE_SCOPED",
+							"NESTED_"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"RULE_ALWAYS"
+						],
+						"notMatch": [
+							"RULE_SCOPED",
+							"NESTED_"
+						]
+					},
+					"messages": {
+						"match": [
+							"Contents of [^\\n]*/workspace/\\.claude/rules/ts\\.md:\\\\n\\\\nRULE_SCOPED_TS[\\s\\S]*Contents of [^\\n]*/workspace/sub/CLAUDE\\.md:\\\\n\\\\nNESTED_MEMO[\\s\\S]*Contents of [^\\n]*/workspace/sub/deeper/CLAUDE\\.local\\.md:\\\\n\\\\nNESTED_LOCAL"
+						],
+						"notMatch": [
+							"RULE_SCOPED_MD",
+							"(RULE_ALWAYS[\\s\\S]*){2}"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"pi-cc": "needs the Read tool, which lands with P03 (PR #7); proven locally on main merged with #7"
+	}
+}

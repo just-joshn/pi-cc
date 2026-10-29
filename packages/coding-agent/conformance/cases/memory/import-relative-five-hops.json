@@ -1,0 +1,49 @@
+{
+	"id": "memory/import-relative-five-hops",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "H0 @imp/h1.md\n",
+		"imp/h1.md": "H1_X @h2.md\n",
+		"imp/h2.md": "H2_X @./h3.md\n",
+		"imp/h3.md": "H3_X @deeper/../h4.md @h1.md\n",
+		"imp/h4.md": "H4_X @h5.md @../CLAUDE.md\n",
+		"imp/h5.md": "H5_X\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nH0[\\s\\S]*Contents of [^\\n]*/workspace/imp/h1\\.md \\([^\\n]*\\):\\n\\nH1_X[\\s\\S]*Contents of [^\\n]*/workspace/imp/h2\\.md \\([^\\n]*\\):\\n\\nH2_X[\\s\\S]*Contents of [^\\n]*/workspace/imp/h3\\.md \\([^\\n]*\\):\\n\\nH3_X[\\s\\S]*Contents of [^\\n]*/workspace/imp/h4\\.md \\([^\\n]*\\):\\n\\nH4_X[^\\n]*\\n</system-reminder>"
+						],
+						"notMatch": [
+							"H5_X",
+							"(Contents of [^\\n]*/imp/h1\\.md[\\s\\S]*){2}",
+							"(Contents of [^\\n]*/workspace/CLAUDE\\.md[\\s\\S]*){2}"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

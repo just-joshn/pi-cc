@@ -1,0 +1,48 @@
+{
+	"id": "memory/disable-env",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {
+		"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"
+	},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/CLAUDE.md": "USER_E\n",
+		"CLAUDE.md": "PROJECT_E\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0": {
+						"notMatch": [
+							"Contents of",
+							"_E\\b"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"USER_E|PROJECT_E"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

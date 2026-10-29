@@ -1,0 +1,77 @@
+{
+	"id": "memory/injected-as-user-context-not-system",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "PROJ_EVERY_REQUEST\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "NoSuchToolProbe",
+					"input": {}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"index": 0,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"^<system-reminder>\\n[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nPROJ_EVERY_REQUEST"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"PROJ_EVERY_REQUEST"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"(PROJ_EVERY_REQUEST[\\s\\S]*){2}"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"^<system-reminder>\\n[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nPROJ_EVERY_REQUEST"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"PROJ_EVERY_REQUEST"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"(PROJ_EVERY_REQUEST[\\s\\S]*){2}"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}
