@@ -211,6 +211,7 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 			workspaceAfter: hashTree(roots.workspace),
 			fileText: readExpectedFileText(testCase, roots),
 			forbiddenPathsFound: findForbiddenPaths(testCase, roots),
+			violations: [],
 		};
 		writeFileSync(join(roots.out, "stdout.txt"), result.stdout);
 		writeFileSync(join(roots.out, "stderr.txt"), result.stderr);

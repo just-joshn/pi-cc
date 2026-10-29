@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { argvProblem, envProblem } from "./allowlist.ts";
-import { PROBES, type ProbeName, type SideName } from "./isolate.ts";
+import { PROBES, type ProbeName, type SideName, VIOLATION_KINDS, type ViolationKind } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
@@ -32,7 +32,20 @@ export interface CompareSpec {
 	files?: FileSpec[];
 	/** Absolute paths, expanded like argv, that must not exist after the run. */
 	absent?: string[];
+	/**
+	 * Violations the case planted and the harness must report. A violation the harness reports and the
+	 * case does not name fails the case, so an isolation case can prove the harness caught an escape
+	 * attempt instead of trusting that it would.
+	 */
+	containment?: ContainmentSpec[];
 	requests?: RequestSpec[];
+}
+
+/** One escape attempt a case plants: what the harness must report, and where it was planted. */
+export interface ContainmentSpec {
+	kind: ViolationKind;
+	/** Workspace-relative. Omitted when the violation is the workspace itself, as in a swapped anchor. */
+	path?: string;
 }
 
 /** A workspace file the run must write, and optionally a fragment its text must contain. */
@@ -85,8 +98,9 @@ const CASE_KEYS = [
 	"skip",
 	"not_applicable",
 ];
-const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "absent", "requests"];
+const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "absent", "containment", "requests"];
 const FILE_SPEC_KEYS = ["path", "contains"];
+const CONTAINMENT_KEYS = ["kind", "path"];
 const SIDE_NAMES: readonly SideName[] = ["claude", "pi-cc"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
 const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
@@ -173,6 +187,7 @@ function asCompareSpec(value: unknown, source: string): CompareSpec {
 		stderr: asStderrSpec(object.stderr, source),
 		files: asFileSpecs(object.files, source),
 		absent: asAbsentPaths(object.absent, source),
+		containment: asContainmentSpecs(object.containment, source),
 		requests: asOptionalRequestSpecs(object.requests, source),
 	};
 }
@@ -209,6 +224,26 @@ function asAbsentPaths(value: unknown, source: string): string[] | undefined {
 		}
 	}
 	return paths;
+}
+
+function asContainmentSpecs(value: unknown, source: string): ContainmentSpec[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) fail(source, "compare.containment must be an array");
+	return value.map((entry, index): ContainmentSpec => {
+		const field = `compare.containment[${index}]`;
+		const object = asCheckedObject(entry, source, field, CONTAINMENT_KEYS);
+		const kind = asString(object.kind, source, `${field}.kind`);
+		if (!VIOLATION_KINDS.includes(kind as ViolationKind)) {
+			fail(source, `${field}.kind "${kind}" is not a violation kind (${VIOLATION_KINDS.join(", ")})`);
+		}
+		const path = asOptionalString(object.path, source, `${field}.path`);
+		if (kind === "survivor") {
+			if (path !== undefined) fail(source, `${field}.path is a process, not a path, so it cannot be named`);
+			return { kind: kind as ViolationKind };
+		}
+		if (path !== undefined) assertWorkspaceRelative(path, source, `${field}.path`);
+		return { kind: kind as ViolationKind, path };
+	});
 }
 
 function asNotApplicable(value: unknown, source: string): Partial<Record<SideName, string>> {

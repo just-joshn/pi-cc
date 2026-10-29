@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(30);
+		expect(cases.length).toBe(35);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -433,5 +433,36 @@ describe("probe table", () => {
 
 	test("rejects case data that names a binary path", () => {
 		expect(() => loadOne({ ...MINIMAL_CASE, binary: "/bin/sh" })).toThrow(/case has unknown key "binary"/);
+	});
+});
+
+describe("containment declarations", () => {
+	test("loads a planted violation with and without a path", () => {
+		const containment = [{ kind: "escaping-symlink", path: "secret.log" }, { kind: "survivor" }];
+		expect(loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment } }).compare.containment).toEqual(containment);
+	});
+
+	test("rejects a kind the harness cannot report", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "escape" }] } })).toThrow(
+			/is not a violation kind/,
+		);
+	});
+
+	test("rejects a path that reaches outside the workspace", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "symlink", path: "/etc/hosts" }] } }),
+		).toThrow(/must be relative to the workspace, without "\.\."/);
+	});
+
+	test("rejects a path on a survivor, which is a process", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "survivor", path: "late.txt" }] } }),
+		).toThrow(/is a process, not a path/);
+	});
+
+	test("rejects a misspelled key", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "symlink", target: "a" }] } }),
+		).toThrow(/compare\.containment\[0\] has unknown key "target"/);
 	});
 });

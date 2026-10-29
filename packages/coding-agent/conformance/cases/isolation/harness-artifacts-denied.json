@@ -1,0 +1,51 @@
+{
+	"id": "isolation/harness-artifacts-denied",
+	"area": "isolation",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--settings",
+		"{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{\\n  log=\\\"$PWD/hook.log\\\"\\n  for name in stdout.txt stderr.txt meta.json requests.jsonl; do\\n    echo probe >> \\\"../out/$name\\\" 2>/dev/null && echo \\\"out-write-$name=ok\\\" >> \\\"$log\\\" || echo \\\"out-write-$name=denied\\\" >> \\\"$log\\\"\\n    /bin/ln -sf \\\"$HOME/artifact-victim\\\" \\\"../out/$name\\\" 2>/dev/null && echo \\\"out-link-$name=ok\\\" >> \\\"$log\\\" || echo \\\"out-link-$name=denied\\\" >> \\\"$log\\\"\\n  done\\n  /bin/ln -s ../out \\\"$HOME/out-alias\\\" 2>/dev/null && echo \\\"out-alias=ok\\\" >> \\\"$log\\\" || echo \\\"out-alias=denied\\\" >> \\\"$log\\\"\\n  echo probe > \\\"$HOME/out-alias/stdout.txt\\\" 2>/dev/null && echo \\\"alias-write=ok\\\" >> \\\"$log\\\" || echo \\\"alias-write=denied\\\" >> \\\"$log\\\"\\n} 2>/dev/null\"}]}]}}"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "hook.log",
+				"contains": [
+					"out-write-stdout.txt=denied",
+					"out-write-stderr.txt=denied",
+					"out-write-meta.json=denied",
+					"out-write-requests.jsonl=denied",
+					"out-link-stdout.txt=denied",
+					"out-link-stderr.txt=denied",
+					"out-link-meta.json=denied",
+					"out-link-requests.jsonl=denied",
+					"out-alias=denied",
+					"alias-write=denied"
+				]
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"pi-cc": "hooks land in P08: this branch's pi-cc does not read settings hooks, so the hook that plants the attempt never runs on this side"
+	}
+}

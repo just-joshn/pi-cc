@@ -1,4 +1,5 @@
-import type { CompareSpec, FileSpec, StdoutSpec } from "./case.ts";
+import type { CompareSpec, ContainmentSpec, FileSpec, StdoutSpec } from "./case.ts";
+import type { Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
 import { normalizeText, normalizeWhitespace } from "./normalize/stdout.ts";
@@ -15,6 +16,8 @@ export interface Observation {
 	fileText: Map<string, string>;
 	/** `compare.absent` paths that exist after the run, which is a containment failure. */
 	forbiddenPathsFound: string[];
+	/** What the side left in its own tree that the harness refused to follow, plus a live descendant. */
+	violations: Violation[];
 }
 
 export interface Diff {
@@ -32,6 +35,7 @@ export function compare(spec: CompareSpec, observation: Observation, context: No
 	checkStderr(spec.stderr, observation, diffs);
 	checkFiles(spec.files, observation, diffs);
 	checkAbsent(observation, diffs);
+	checkContainment(spec.containment, observation, diffs);
 	checkRequests(spec.requests, observation, diffs);
 	return diffs;
 }
@@ -192,6 +196,33 @@ function checkAbsent(observation: Observation, diffs: Diff[]): void {
 	for (const path of observation.forbiddenPathsFound) {
 		diffs.push({ check: "files.absent", expected: `${path} absent`, actual: "present" });
 	}
+}
+
+/**
+ * A violation the case did not plant is a containment failure, and a violation the case planted but the
+ * harness did not report fails too: an isolation case then proves the harness caught the attempt rather
+ * than assuming it would.
+ */
+function checkContainment(spec: ContainmentSpec[] | undefined, observation: Observation, diffs: Diff[]): void {
+	const unclaimed = [...(spec ?? [])];
+	for (const violation of observation.violations) {
+		const index = unclaimed.findIndex(
+			(entry) => entry.kind === violation.kind && (entry.path ?? null) === violation.path,
+		);
+		if (index === -1) {
+			diffs.push({ check: "containment", expected: "no side violation", actual: describeViolation(violation) });
+			continue;
+		}
+		unclaimed.splice(index, 1);
+	}
+	for (const entry of unclaimed) {
+		diffs.push({ check: "containment", expected: describeViolation(entry), actual: "not reported" });
+	}
+}
+
+function describeViolation(violation: ContainmentSpec | Violation): string {
+	const path = violation.path ?? null;
+	return path === null ? violation.kind : `${violation.kind} at ${path}`;
 }
 
 function checkRequests(spec: CompareSpec["requests"], observation: Observation, diffs: Diff[]): void {

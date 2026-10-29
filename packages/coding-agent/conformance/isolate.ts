@@ -113,7 +113,14 @@ const HARNESS_ENV: Readonly<Record<string, (roots: Roots, port: number | null) =
 	NO_PROXY: (_roots, port) => (port === null ? undefined : "127.0.0.1,localhost"),
 };
 
-export const HARNESS_ENV_KEYS: readonly string[] = Object.keys(HARNESS_ENV);
+/**
+ * Set on every side run so a descendant that outlives its side can be found and killed before the
+ * workspace is hashed. The harness owns the key: a case cannot replace it. The value is a fresh token
+ * per run, so a process from another run never matches it.
+ */
+export const RUN_MARKER_KEY = "PI_CC_CONFORMANCE_RUN";
+
+export const HARNESS_ENV_KEYS: readonly string[] = [...Object.keys(HARNESS_ENV), RUN_MARKER_KEY];
 
 export function baseEnv(roots: Roots, port: number | null): Record<string, string> {
 	const env: Record<string, string> = {};
@@ -136,6 +143,24 @@ export function seedFiles(roots: Roots, files: Record<string, string>): void {
 		mkdirp(dirname(target));
 		writeFileSync(target, expandPlaceholders(content, roots));
 	}
+}
+
+/** Every violation the harness can report against a side. Case data names one of these. */
+export const VIOLATION_KINDS = [
+	"symlink",
+	"escaping-symlink",
+	"dangling-symlink",
+	"not-regular-file",
+	"unreadable",
+	"survivor",
+] as const;
+
+export type ViolationKind = (typeof VIOLATION_KINDS)[number];
+
+export interface Violation {
+	kind: ViolationKind;
+	/** A workspace-relative path, or null for the workspace itself and for a live descendant. */
+	path: string | null;
 }
 
 export function hashTree(dir: string): Map<string, string> {

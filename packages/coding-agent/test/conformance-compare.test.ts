@@ -16,6 +16,7 @@ function observation(overrides: Partial<Observation> = {}): Observation {
 		workspaceAfter: new Map([["hook.log", "written"]]),
 		fileText: new Map([["hook.log", "inside=ok\nescape=denied\n"]]),
 		forbiddenPathsFound: [],
+		violations: [],
 		...overrides,
 	};
 }
@@ -76,5 +77,53 @@ describe("compare.absent", () => {
 			CONTEXT,
 		);
 		expect(diffs).toEqual([{ check: "files.absent", expected: "/Users/probe/marker.txt absent", actual: "present" }]);
+	});
+});
+
+describe("compare.containment", () => {
+	test("passes when the harness reports the violation the case planted", () => {
+		expect(
+			checks(
+				{ containment: [{ kind: "escaping-symlink", path: "secret.log" }, { kind: "survivor" }] },
+				{
+					violations: [
+						{ kind: "escaping-symlink", path: "secret.log" },
+						{ kind: "survivor", path: null },
+					],
+				},
+			),
+		).toEqual([]);
+	});
+
+	test("fails on a violation the case did not plant", () => {
+		const diffs = compare(
+			{ containment: [] },
+			observation({ violations: [{ kind: "escaping-symlink", path: "secret.log" }] }),
+			CONTEXT,
+		);
+		expect(diffs).toEqual([
+			{ check: "containment", expected: "no side violation", actual: "escaping-symlink at secret.log" },
+		]);
+	});
+
+	test("fails when the harness did not report the planted violation", () => {
+		expect(checks({ containment: [{ kind: "dangling-symlink", path: "dangling.log" }] })).toEqual(["containment"]);
+		expect(checks({ containment: [{ kind: "survivor" }] }, { violations: [] })).toEqual(["containment"]);
+	});
+
+	test("matches the workspace anchor by kind alone", () => {
+		expect(checks({ containment: [{ kind: "symlink" }] }, { violations: [{ kind: "symlink", path: null }] })).toEqual(
+			[],
+		);
+		expect(
+			compare(
+				{ containment: [{ kind: "symlink" }] },
+				observation({ violations: [{ kind: "symlink", path: "a.log" }] }),
+				CONTEXT,
+			),
+		).toEqual([
+			{ check: "containment", expected: "no side violation", actual: "symlink at a.log" },
+			{ check: "containment", expected: "symlink", actual: "not reported" },
+		]);
 	});
 });
