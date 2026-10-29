@@ -69,7 +69,13 @@ const DENIED_ARGV_TOKENS = new Set([
 	"purge",
 	"respawn",
 	"plugin",
+	"plugins",
 	"migrate-installer",
+	"import",
+	"gateway",
+	"ultrareview",
+	"rm",
+	"bg",
 ]);
 
 const CASE_KEYS = ["id", "area", "probe", "argv", "env", "stdin", "files", "model", "timeout_ms", "compare", "skip"];
