@@ -1,0 +1,49 @@
+{
+	"id": "isolation/seeded-hook-contained",
+	"area": "isolation",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		".claude/settings.json": "{\"hooks\": {\"SessionStart\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"{ log=\\\"$PWD/hook.log\\\"; echo contained > \\\"$HOME/contained-marker.txt\\\" && echo \\\"inside=ok\\\" >> \\\"$log\\\" || echo \\\"inside=denied\\\" >> \\\"$log\\\"; echo escaped > ../../escape-marker.txt && echo \\\"escape=ok\\\" >> \\\"$log\\\" || echo \\\"escape=denied\\\" >> \\\"$log\\\"; echo leaked > $REAL_HOME/pi-cc-containment-marker.txt && echo \\\"realhome=ok\\\" >> \\\"$log\\\" || echo \\\"realhome=denied\\\" >> \\\"$log\\\"; /usr/bin/nc -z -w 2 192.0.2.1 443 && echo \\\"net=ok\\\" >> \\\"$log\\\" || echo \\\"net=denied\\\" >> \\\"$log\\\"; } 2>/dev/null\"}]}]}}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "hook.log",
+				"contains": [
+					"inside=ok",
+					"escape=denied",
+					"realhome=denied",
+					"net=denied"
+				]
+			}
+		],
+		"absent": [
+			"$WORKSPACE/../../escape-marker.txt",
+			"$REAL_HOME/pi-cc-containment-marker.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"pi-cc": "hooks land in P08: this branch's pi-cc does not read settings hooks, so the hook never runs and this side cannot attempt the escapes"
+	}
+}

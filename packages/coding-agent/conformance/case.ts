@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { argvProblem, envProblem } from "./allowlist.ts";
-import { PROBES, type ProbeName } from "./isolate.ts";
+import { PROBES, type ProbeName, type SideName } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
@@ -29,9 +29,14 @@ export interface CompareSpec {
 	exit?: number | number[];
 	stdout?: StdoutSpec;
 	stderr?: { contains?: string[]; equals?: string };
-	files?: string[];
+	files?: FileSpec[];
+	/** Absolute paths, expanded like argv, that must not exist after the run. */
+	absent?: string[];
 	requests?: RequestSpec[];
 }
+
+/** A workspace file the run must write, and optionally a fragment its text must contain. */
+export type FileSpec = string | { path: string; contains?: string[] };
 
 export type StdinSpec = null | { kind: "text"; data: string } | { kind: "stream-json"; lines: string[] };
 
@@ -47,19 +52,42 @@ export interface ConformanceCase {
 	argv: string[];
 	env: Record<string, string>;
 	stdin: StdinSpec;
-	/** Seeded into `workspace/`, relative paths. */
+	/**
+	 * Seeded into `workspace/`, relative paths. Content expands like argv, so a seeded settings hook can
+	 * name `$REAL_HOME` and prove it cannot write there.
+	 */
 	files: Record<string, string>;
 	/** Non-null starts the mock model server and points both sides at it. */
 	model: { turns: Turn[] } | null;
 	timeout_ms: number;
 	compare: CompareSpec;
 	skip: string[];
+	/**
+	 * Sides this case cannot run, with the reason. A side named here is reported as not applicable and
+	 * never as a pass, so a case that only one side can execute says so out loud.
+	 */
+	notApplicable: Partial<Record<SideName, string>>;
 }
 
 const SKIP_REASONS = new Set(["macos-only", "needs-tty", "claude-binary-absent", "spec-gap"]);
 
-const CASE_KEYS = ["id", "area", "probe", "argv", "env", "stdin", "files", "model", "timeout_ms", "compare", "skip"];
-const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "requests"];
+const CASE_KEYS = [
+	"id",
+	"area",
+	"probe",
+	"argv",
+	"env",
+	"stdin",
+	"files",
+	"model",
+	"timeout_ms",
+	"compare",
+	"skip",
+	"not_applicable",
+];
+const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "absent", "requests"];
+const FILE_SPEC_KEYS = ["path", "contains"];
+const SIDE_NAMES: readonly SideName[] = ["claude", "pi-cc"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
 const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
 const JSON_STDOUT_KEYS = ["kind", "records"];
@@ -121,6 +149,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		timeout_ms,
 		compare: asCompareSpec(object.compare, source),
 		skip,
+		notApplicable: asNotApplicable(object.not_applicable, source),
 	};
 }
 
@@ -142,9 +171,62 @@ function asCompareSpec(value: unknown, source: string): CompareSpec {
 		exit: exit as number | number[] | undefined,
 		stdout: asStdoutSpec(object.stdout, source),
 		stderr: asStderrSpec(object.stderr, source),
-		files: asOptionalStringArray(object.files, source, "compare.files"),
+		files: asFileSpecs(object.files, source),
+		absent: asAbsentPaths(object.absent, source),
 		requests: asOptionalRequestSpecs(object.requests, source),
 	};
+}
+
+function asFileSpecs(value: unknown, source: string): FileSpec[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) fail(source, "compare.files must be an array");
+	return value.map((entry, index): FileSpec => {
+		const field = `compare.files[${index}]`;
+		if (typeof entry === "string") {
+			assertWorkspaceRelative(entry, source, field);
+			return entry;
+		}
+		const object = asCheckedObject(entry, source, field, FILE_SPEC_KEYS);
+		const path = asString(object.path, source, `${field}.path`);
+		assertWorkspaceRelative(path, source, `${field}.path`);
+		return { path, contains: asOptionalStringArray(object.contains, source, `${field}.contains`) };
+	});
+}
+
+/** A file assertion names a path inside the workspace, so it cannot read the host through `..`. */
+function assertWorkspaceRelative(path: string, source: string, field: string): void {
+	if (path.length === 0) fail(source, `${field} must not be empty`);
+	if (path.startsWith("/") || path.split("/").includes("..")) {
+		fail(source, `${field} must be relative to the workspace, without ".."`);
+	}
+}
+
+function asAbsentPaths(value: unknown, source: string): string[] | undefined {
+	const paths = asOptionalStringArray(value, source, "compare.absent");
+	for (const path of paths ?? []) {
+		if (!path.startsWith("/") && !path.startsWith("$")) {
+			fail(source, `compare.absent path "${path}" must be absolute or start with a $ placeholder`);
+		}
+	}
+	return paths;
+}
+
+function asNotApplicable(value: unknown, source: string): Partial<Record<SideName, string>> {
+	if (value === undefined) return {};
+	const object = asObject(value, source, "not_applicable");
+	const result: Partial<Record<SideName, string>> = {};
+	for (const [key, reason] of Object.entries(object)) {
+		if (!SIDE_NAMES.includes(key as SideName)) {
+			fail(source, `not_applicable key "${key}" is not a side (${SIDE_NAMES.join(", ")})`);
+		}
+		const text = asString(reason, source, `not_applicable.${key}`);
+		if (text.trim().length === 0) fail(source, `not_applicable.${key} needs a reason`);
+		result[key as SideName] = text;
+	}
+	if (Object.keys(result).length === SIDE_NAMES.length) {
+		fail(source, "not_applicable names every side, so the case would assert nothing");
+	}
+	return result;
 }
 
 function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {

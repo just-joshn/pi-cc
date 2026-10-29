@@ -1,9 +1,9 @@
 /** Runs each case against the pinned claude binary and the built pi-cc CLI, then prints a scoreboard. */
 
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -26,6 +26,8 @@ interface SideRun {
 	ran: boolean;
 	diffs: Diff[];
 	stderr: string;
+	/** The case's reason when it declares this side not applicable. */
+	notApplicable: string | null;
 }
 
 interface CaseRun {
@@ -161,11 +163,22 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 
 async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string): Promise<CaseRun> {
 	const runs: SideRun[] = [];
-	// The verdict is only PASS when every side ran, so a claude side that was not selected still reports here.
-	if (!sides.some((side) => side.name === "claude")) runs.push({ side: "claude", ran: false, diffs: [], stderr: "" });
-	for (const side of sides) runs.push(await runSide(testCase, side, runRoot));
+	// The verdict is only PASS when every applicable side ran, so a claude side that was not selected reports here.
+	if (!sides.some((side) => side.name === "claude")) {
+		runs.push({ side: "claude", ran: false, diffs: [], stderr: "", notApplicable: null });
+	}
+	for (const side of sides) {
+		const reason = testCase.notApplicable[side.name];
+		if (reason !== undefined) {
+			runs.push({ side: side.name, ran: false, diffs: [], stderr: "", notApplicable: reason });
+			continue;
+		}
+		runs.push(await runSide(testCase, side, runRoot));
+	}
 	const failed = runs.some((run) => run.diffs.length > 0);
-	const verdict: Verdict = failed ? "FAIL" : runs.some((run) => !run.ran) ? "UNVERIFIED" : "PASS";
+	const applicable = runs.filter((run) => run.notApplicable === null);
+	const verified = applicable.length > 0 && applicable.every((run) => run.ran);
+	const verdict: Verdict = failed ? "FAIL" : verified ? "PASS" : "UNVERIFIED";
 	return { id: testCase.id, area: testCase.area, verdict, runs, skip: null };
 }
 
@@ -196,6 +209,8 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 			requests: mock?.requests ?? [],
 			workspaceBefore,
 			workspaceAfter: hashTree(roots.workspace),
+			fileText: readExpectedFileText(testCase, roots),
+			forbiddenPathsFound: findForbiddenPaths(testCase, roots),
 		};
 		writeFileSync(join(roots.out, "stdout.txt"), result.stdout);
 		writeFileSync(join(roots.out, "stderr.txt"), result.stderr);
@@ -204,10 +219,31 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 			`${JSON.stringify({ argv, env, ...summarize(result, observation.requests) }, null, "\t")}\n`,
 		);
 		const diffs = compare(testCase.compare, observation, { sideRoot: roots.root, realHome: REAL_HOME });
-		return { side: side.name, ran: true, diffs, stderr: result.stderr };
+		return { side: side.name, ran: true, diffs, stderr: result.stderr, notApplicable: null };
 	} finally {
 		if (mock !== null) await mock.close();
 	}
+}
+
+/** The text of the files a case asserts on, so a `contains` check never reads a path it was not given. */
+function readExpectedFileText(testCase: ConformanceCase, roots: Roots): Map<string, string> {
+	const text = new Map<string, string>();
+	for (const spec of testCase.compare.files ?? []) {
+		const path = typeof spec === "string" ? spec : spec.path;
+		const absolute = join(roots.workspace, path);
+		if (existsSync(absolute)) text.set(path, readFileSync(absolute, "utf8"));
+	}
+	return text;
+}
+
+/** A `compare.absent` path that exists after the run is a containment failure, so the harness looks itself. */
+function findForbiddenPaths(testCase: ConformanceCase, roots: Roots): string[] {
+	const found: string[] = [];
+	for (const spec of testCase.compare.absent ?? []) {
+		const expanded = resolve(expandPlaceholders(spec, roots));
+		if (existsSync(expanded)) found.push(expanded);
+	}
+	return found;
 }
 
 function summarize(result: ProcessResult, requests: RecordedRequest[]) {
@@ -303,12 +339,16 @@ function printHeader(selected: number, total: number, claude: ClaudeIdentity | n
 }
 
 function printRow(run: CaseRun, drift: string | null): void {
-	const cells = run.runs.map((side) =>
-		side.ran ? `${side.side} ${side.diffs.length === 0 ? "PASS" : "FAIL"}` : `${side.side} unverified`,
-	);
+	const cells = run.runs.map((side) => {
+		if (side.notApplicable !== null) return `${side.side} n/a`;
+		return side.ran ? `${side.side} ${side.diffs.length === 0 ? "PASS" : "FAIL"}` : `${side.side} unverified`;
+	});
 	const label = drift === null ? "" : `  [${drift}]`;
 	console.log(`${run.verdict.padEnd(10)} ${run.id.padEnd(38)} ${cells.join("  ")}${label}`);
 	if (run.skip !== null) console.log(`           skipped: ${run.skip}`);
+	for (const side of run.runs) {
+		if (side.notApplicable !== null) console.log(`           ${side.side} not applicable: ${side.notApplicable}`);
+	}
 	printDiffs(run);
 }
 
@@ -328,10 +368,16 @@ function printDiffs(run: CaseRun): void {
 function printTotals(runs: CaseRun[]): void {
 	const count = (verdict: Verdict) => runs.filter((run) => run.verdict === verdict).length;
 	for (const side of ["claude", "pi-cc"] as SideName[]) {
-		const sideRuns = runs.flatMap((run) => run.runs.filter((entry) => entry.side === side));
+		const sideRuns = runs.flatMap((run) =>
+			run.runs.filter((entry) => entry.side === side && entry.notApplicable === null),
+		);
 		const pass = sideRuns.filter((entry) => entry.ran && entry.diffs.length === 0).length;
 		const fail = sideRuns.filter((entry) => entry.diffs.length > 0).length;
-		console.log(`${side.padEnd(7)} side: ${pass} pass, ${fail} fail`);
+		const notApplicable = runs.filter((run) =>
+			run.runs.some((entry) => entry.side === side && entry.notApplicable !== null),
+		).length;
+		const na = notApplicable === 0 ? "" : `, ${notApplicable} not applicable`;
+		console.log(`${side.padEnd(7)} side: ${pass} pass, ${fail} fail${na}`);
 	}
 	console.log(
 		`totals: ${count("PASS")} pass, ${count("FAIL")} fail, ${count("SKIP")} skip, ${count("UNVERIFIED")} unverified (of ${runs.length} cases)`,
@@ -371,6 +417,13 @@ function writeReport(
 			verdict: run.verdict,
 			skip: run.skip,
 			...(drift === null ? {} : { claude_version: drift }),
+			...(run.runs.some((side) => side.notApplicable !== null)
+				? {
+						not_applicable: run.runs
+							.filter((side) => side.notApplicable !== null)
+							.map((side) => `${side.side}: ${side.notApplicable}`),
+					}
+				: {}),
 			diffs: run.runs.flatMap((side) =>
 				side.diffs.map((diff) => `${side.side} ${diff.check}: ${diff.expected} != ${diff.actual}`),
 			),

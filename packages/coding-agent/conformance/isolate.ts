@@ -124,12 +124,17 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 	return env;
 }
 
+/**
+ * Writes the case's files into `workspace/`. Content is expanded like argv, because a seeded
+ * `settings.json` hook command needs an absolute host path that the sandboxed process cannot learn
+ * from its own environment, such as `$REAL_HOME`.
+ */
 export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const target = join(roots.workspace, path);
 		if (relative(roots.workspace, target).startsWith("..")) throw new Error(`seeded path escapes workspace: ${path}`);
 		mkdirp(dirname(target));
-		writeFileSync(target, content);
+		writeFileSync(target, expandPlaceholders(content, roots));
 	}
 }
 
