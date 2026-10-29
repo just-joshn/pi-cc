@@ -67,8 +67,8 @@ describe("ccModelAlias", () => {
 		const bare = parseAnthropicModelEnv({});
 
 		expect(ccModelAlias("opus", bare)).toBe("claude-opus-5-5");
-		expect(ccModelAlias("sonnet", bare)).toBe("claude-sonnet-4-6");
-		expect(ccModelAlias("haiku", bare)).toBe("claude-haiku-4-5");
+		expect(ccModelAlias("sonnet", bare)).toBe("claude-sonnet-5-5");
+		expect(ccModelAlias("haiku", bare)).toBe("claude-haiku-5-5");
 		expect(ccModelAlias("fable", bare)).toBe("claude-fable-5-1");
 	});
 });
