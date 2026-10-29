@@ -1,0 +1,54 @@
+{
+	"id": "tool/input-schema-type",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Edit the fixture file",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"type_fixture.txt": "PROBE_TYPE_OLD\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "type_fixture.txt",
+						"old_string": 42,
+						"new_string": "PROBE_TYPE_NEW"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"InputValidationError: Edit failed due to the following issue:",
+				"The parameter `old_string` type is expected as `string` but provided as `number`"
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			}
+		]
+	},
+	"skip": []
+}

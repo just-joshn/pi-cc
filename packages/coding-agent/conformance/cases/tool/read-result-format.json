@@ -1,0 +1,50 @@
+{
+	"id": "tool/read-result-format",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Read the fixture file",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"tool_fixture.txt": "PROBE_TOOL_FIXTURE_CONTENT_7f3a\nPROBE_SECOND_LINE_5d1b\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "tool_fixture.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"1\\\\tPROBE_TOOL_FIXTURE_CONTENT_7f3a",
+				"2\\\\tPROBE_SECOND_LINE_5d1b",
+				"3\\\\t"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			}
+		]
+	},
+	"skip": []
+}

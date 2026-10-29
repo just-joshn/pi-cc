@@ -1,0 +1,61 @@
+{
+	"id": "tool/edit-multi-match-refused",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Edit the fixture",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"two.txt": "PROBE_DUP_LINE\nPROBE_DUP_LINE\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "two.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "two.txt",
+						"old_string": "PROBE_DUP_LINE",
+						"new_string": "PROBE_DUP_NEW"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"<tool_use_error>Found 2 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance."
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3
+			}
+		]
+	},
+	"skip": []
+}

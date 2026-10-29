@@ -1,0 +1,47 @@
+{
+	"id": "tool/unknown-tool-error",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Call the missing tool",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "NonexistentTool",
+					"input": {
+						"probe": true
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"<tool_use_error>Error: No such tool available: NonexistentTool</tool_use_error>"
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			}
+		]
+	},
+	"skip": []
+}
