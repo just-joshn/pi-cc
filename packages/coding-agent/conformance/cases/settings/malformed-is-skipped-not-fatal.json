@@ -10,6 +10,11 @@
 	"model": null,
 	"timeout_ms": 60000,
 	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"match": ["login"]
+		},
 		"stderr": {
 			"contains": ["broken-settings.json", "did not load", "Invalid or malformed JSON"]
 		}
