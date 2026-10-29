@@ -154,14 +154,14 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 	return env;
 }
 
-const SEED_SUBTREES = ["workspace", "agent", "config", "home"] as const;
+const SEED_SUBTREES = ["workspace", "agent", "config", "home", "tmp"] as const;
 
 function isInside(root: string, target: string): boolean {
 	const rel = relative(root, target);
 	return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-/** A seeded path must land in the side's workspace, agent, config, or home tree. */
+/** A seeded path must land in a side-owned tree. */
 export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const expanded = expandPlaceholders(path, roots);

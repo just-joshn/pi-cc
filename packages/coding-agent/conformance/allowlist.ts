@@ -65,8 +65,6 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--setting-sources",
 		"--bare",
 		"--safe-mode",
-		// PR #5's model case. PR #6 adds the same flag; keep one entry.
-		"--model",
 		// a token that exists to be rejected, so a case can pin the unknown-flag error
 		"--no-such-flag-probe",
 	],

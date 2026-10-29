@@ -304,17 +304,17 @@ describe("seeding a case's files", () => {
 
 	test("a root path that escapes the side root is refused", () => {
 		const { roots } = seedRoot();
-		expect(() => seedFiles(roots, { "$HOME/../../escape.json": "{}" })).toThrow(/escapes the case root/);
+		expect(() => seedFiles(roots, { "$HOME/../../escape.json": "{}" })).toThrow(/escapes the side root/);
 	});
 
 	test("the real home is refused", () => {
 		const { roots } = seedRoot();
-		expect(() => seedFiles(roots, { "$REAL_HOME/escape.json": "{}" })).toThrow(/escapes the case root/);
+		expect(() => seedFiles(roots, { "$REAL_HOME/escape.json": "{}" })).toThrow(/escapes the side root/);
 	});
 
 	test("a workspace path that escapes the workspace is refused", () => {
 		const { roots } = seedRoot();
-		expect(() => seedFiles(roots, { "../escape.json": "{}" })).toThrow(/escapes workspace/);
+		expect(() => seedFiles(roots, { "../escape.json": "{}" })).toThrow(/escapes the side root/);
 	});
 
 	test("expands the config placeholder in argv as well", () => {
