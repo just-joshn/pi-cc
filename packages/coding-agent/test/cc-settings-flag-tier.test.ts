@@ -43,7 +43,7 @@ describe("inline JSON", () => {
 	});
 
 	test("malformed inline JSON is fatal, not a failure", () => {
-		expect(parseFlagSettings('{"model":', "/irrelevant")).toEqual({ kind: "invalid-json" });
+		expect(parseFlagSettings('{"model":}', "/irrelevant")).toEqual({ kind: "invalid-json" });
 	});
 
 	test("an empty object is a valid empty document", () => {

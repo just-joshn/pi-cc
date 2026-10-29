@@ -71,7 +71,11 @@ import { SessionManager } from "./core/session-manager.ts";
 import { ccEffectiveEnv } from "./core/settings/cc/env.ts";
 import { ccProjectTrusted, loadCcSettings } from "./core/settings/cc/load.ts";
 import { withAdditionalDirectories } from "./core/settings/cc/merge.ts";
-import { formatIgnoredProjectSettings, formatSettingsFailures } from "./core/settings/cc/report.ts";
+import {
+	formatIgnoredProjectSettings,
+	formatSettingsFailures,
+	formatSkippedSettings,
+} from "./core/settings/cc/report.ts";
 import type { CcSettings } from "./core/settings/cc/types.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { type DefaultProjectTrust, SettingsManager } from "./core/settings-manager.ts";
@@ -159,7 +163,17 @@ function loadCcSettingsForRun(
 		}),
 		flagSettings: parsed.settings,
 	});
-	for (const line of [...formatIgnoredProjectSettings(loaded.ignored), ...formatSettingsFailures(loaded.failures)]) {
+	if (loaded.flagError !== undefined) {
+		console.error(chalk.red(`Error: ${loaded.flagError}`));
+		process.exit(1);
+	}
+	const blocks = [
+		...formatSettingsFailures(loaded.failures),
+		...formatSkippedSettings(loaded.skipped),
+		// Trust suppression is pi's own line, so it stays next to the two blocks Claude Code prints.
+		...formatIgnoredProjectSettings(loaded.ignored),
+	];
+	for (const line of blocks) {
 		console.error(chalk.dim(line));
 	}
 	if (loaded.refusal !== undefined) {
@@ -176,11 +190,12 @@ function loadCcSettingsForRun(
 }
 
 /** R7 drops hooks, plugins, skills, memory and LSP; R8 drops extensions, skills, prompt templates and MCP. */
-function ccResourceSuppression(parsed: Args): {
+export function ccResourceSuppression(parsed: Args): {
 	noExtensions: boolean;
 	noSkills: boolean;
 	noPromptTemplates: boolean;
 	noContextFiles: boolean;
+	noMcp: boolean;
 } {
 	const bare = parsed.bare === true;
 	const safeMode = parsed.safeMode === true;
@@ -189,6 +204,8 @@ function ccResourceSuppression(parsed: Args): {
 		noSkills: parsed.noSkills === true || bare || safeMode,
 		noPromptTemplates: parsed.noPromptTemplates === true || safeMode,
 		noContextFiles: parsed.noContextFiles === true || bare,
+		// --safe-mode names MCP servers among the customizations it disables; --bare does not.
+		noMcp: parsed.noMcp === true || parsed.safeMode === true,
 	};
 }
 
@@ -784,7 +801,9 @@ export async function main(args: string[], options?: MainOptions) {
 	// over the inherited process environment and every later resolution reads it.
 	const trustStore = new ProjectTrustStore(agentDir);
 	const ccSettings = loadCcSettingsForRun(parsed, cwd, trustStore, bootstrapSettingsManager.getDefaultProjectTrust());
-	const ccModel = ccSettings.model ?? ccSettings.env.ANTHROPIC_MODEL;
+	// loadCcSettingsForRun applied every tier's env block over process.env, so this one read covers the
+	// inherited environment and every tier. --model still wins over it in buildSessionOptions.
+	const ccModel = process.env.ANTHROPIC_MODEL ?? ccSettings.model;
 	time("ccSettings");
 
 	// Run migrations (pass cwd for project-local migrations)
@@ -870,6 +889,7 @@ export async function main(args: string[], options?: MainOptions) {
 				parsed.projectTrustOverride ??
 				(!hasTrustRequiringResources || trustStore.get(cwd) === true));
 		const runtimeSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
+		const ccResources = ccResourceSuppression(parsed);
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,
@@ -905,8 +925,8 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalSkillPaths: resolvedSkillPaths,
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
-				...ccResourceSuppression(parsed),
-				disabledBuiltinExtensions: parsed.noMcp ? ["mcp"] : undefined,
+				...ccResources,
+				disabledBuiltinExtensions: ccResources.noMcp ? ["mcp"] : undefined,
 				noThemes: parsed.noThemes,
 				systemPrompt: parsed.systemPrompt,
 				appendSystemPrompt: parsed.appendSystemPrompt,

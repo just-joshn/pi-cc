@@ -8,7 +8,11 @@ import {
 	ccProjectTrusted,
 	loadCcSettings,
 } from "../src/core/settings/cc/load.ts";
-import { formatIgnoredProjectSettings, formatSettingsFailures, formatSkippedSettings } from "../src/core/settings/cc/report.ts";
+import {
+	formatIgnoredProjectSettings,
+	formatSettingsFailures,
+	formatSkippedSettings,
+} from "../src/core/settings/cc/report.ts";
 
 const tempDirs: string[] = [];
 
@@ -325,7 +329,9 @@ describe("flag tier", () => {
 	test("a missing --settings path is fatal", () => {
 		const parts = side();
 		const path = join(parts.workspace, "absent.json");
-		expect(loadCcSettings(location(parts, { flagSettings: path })).flagError).toBe(`Settings file not found: ${path}`);
+		expect(loadCcSettings(location(parts, { flagSettings: path })).flagError).toBe(
+			`Settings file not found: ${path}`,
+		);
 	});
 
 	test("a directory passed to --settings is fatal", () => {

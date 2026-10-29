@@ -33,6 +33,14 @@ export type CcSettingsFailure =
 			readonly detail: string;
 	  };
 
+/** One entry a file kept while the rest of it loaded. */
+export interface CcSettingsSkip {
+	readonly source: CcSettingsSource;
+	readonly path: string;
+	readonly key: string;
+	readonly detail: string;
+}
+
 /** One tier that parsed, with the tier it came from. */
 export interface CcSettingsDocument {
 	readonly source: CcSettingsSource;
@@ -44,10 +52,14 @@ export interface CcLoadResult {
 	readonly settings: CcSettings;
 	/** Malformed and shape failures only. A missing file is the normal case, not a failure. */
 	readonly failures: readonly CcSettingsFailure[];
+	/** Entries a file kept while the rest of it loaded. */
+	readonly skipped: readonly CcSettingsSkip[];
 	/** Every path the loader considered, in `CC_SETTINGS_ORDER`, for attribution in a report. */
 	readonly searched: readonly string[];
 	/** Project and local files that exist but were skipped because the project is not trusted. */
 	readonly ignored: readonly string[];
 	/** Set when the managed policy forbids this run. The message names the policy file. */
 	readonly refusal: string | undefined;
+	/** Set when `--settings` cannot be used at all. Claude Code exits instead of running without it. */
+	readonly flagError: string | undefined;
 }

@@ -5,16 +5,26 @@
  * mentioned.
  */
 
-import type { CcSettingsFailure } from "./types.ts";
+import type { CcSettingsFailure, CcSettingsSkip } from "./types.ts";
 
 const DID_NOT_LOAD_HEADER =
 	"These settings files did not load, so nothing in them is in effect, including hooks and permission rules. Each loads again once the problem listed for it is fixed:";
+
+const SKIPPED_HEADER = "These settings entries were skipped; the rest of each file is in effect:";
 
 export function formatSettingsFailures(failures: readonly CcSettingsFailure[]): string[] {
 	if (failures.length === 0) {
 		return [];
 	}
 	return [DID_NOT_LOAD_HEADER, ...failures.map((failure) => `  ${formatFailure(failure)}`)];
+}
+
+/** One line per entry a file kept, under the measured header Claude Code prints for them. */
+export function formatSkippedSettings(skipped: readonly CcSettingsSkip[]): string[] {
+	if (skipped.length === 0) {
+		return [];
+	}
+	return [SKIPPED_HEADER, ...skipped.map((entry) => `  ${entry.path} (${entry.key}): ${entry.detail}`)];
 }
 
 /** One line per ignored file, so a user can see which project settings the trust decision suppressed. */
