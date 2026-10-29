@@ -87,8 +87,9 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"project",
 		// the model id PR #5's `--model` case writes
 		"claude-haiku-4-5",
-		// a value of `--permission-mode` in PR #7's cases
+		// values `--permission-mode` and `--tools` write in PR #7's cases
 		"acceptEdits",
+		"Read",
 	],
 };
 

@@ -1,0 +1,22 @@
+{
+  "id": "tool/edit-curly-quotes",
+  "area": "tool",
+  "argv": ["-p", "Edit the fixture", "--permission-mode", "acceptEdits", "--output-format", "stream-json", "--verbose"],
+  "env": {},
+  "stdin": null,
+  "files": { "q.txt": "say ‘hi’ and “bye”\n" },
+  "model": {
+    "turns": [
+      { "tool_use": { "name": "Edit", "input": { "file_path": "q.txt", "old_string": "say 'hi' and \"bye\"", "new_string": "say 'yo' and \"bye\"" } } },
+      { "text": "PROBE_OK" }
+    ]
+  },
+  "timeout_ms": 60000,
+  "compare": {
+    "exit": 0,
+    "stdout": { "kind": "text", "match": ["The file q.txt has been updated successfully."] },
+    "files": ["q.txt"],
+    "requests": [{ "pathStartsWith": "/v1/messages", "count": 2 }]
+  },
+  "skip": []
+}

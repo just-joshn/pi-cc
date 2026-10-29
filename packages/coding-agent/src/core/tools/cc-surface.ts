@@ -4,18 +4,26 @@
  * pi's tools keep their own names, input fields and results everywhere inside the process: the
  * registry, tool-call and tool-result events, extension hooks and overrides, compaction, the
  * system prompt's tool detection, and the session transcript. This module is the one place that
- * knows Claude Code's spelling of those tools, so that is also the one place a Claude Code name,
- * input field or result text exists:
+ * owns the conversion between pi's names and the model's names. Stored calls retain the model's
+ * original input only for replay; execution and extension hooks still use pi's arguments:
  *
  * - {@link projectDeclarations} renames the declared tools the model sees and replaces their
  *   schemas with Claude Code's.
  * - {@link projectToolCall} turns a tool call the model emitted into the pi tool and arguments
- *   that execute it, or into the validation error Claude Code answers it with.
- * - {@link projectToolResult} turns a pi tool result into the text Claude Code's model reads.
+ *   that execute it, or into the validation error Claude Code answers it with. The model's
+ *   original call is kept on the block for replay after input coercion and defaults.
  */
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, AssistantMessageEvent, Message, Tool } from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	AssistantMessageEvent,
+	JsonObject,
+	Message,
+	Model,
+	Tool,
+	ToolCall,
+} from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { type TSchema, Type } from "typebox";
 
@@ -175,17 +183,23 @@ function ccToolByDeclaredName(name: string): CcTool | undefined {
  * second to last.
  */
 export function projectDeclarations(tools: readonly Tool[], includePlaceholder: boolean): Tool[] {
-	const projected = tools.map((tool) => {
+	// An extension registered under a Claude Code name owns that name. pi's tool is not also
+	// declared as it, or the model sees two tools with one name and calls land on pi's.
+	const owned = new Set(tools.filter((tool) => ccToolByDeclaredName(tool.name)).map((tool) => tool.name));
+	const projected = tools.flatMap((tool) => {
 		const covered = ccTool(tool.name);
-		if (!covered) return tool;
-		return {
-			name: covered.name,
-			description: tool.description,
-			parameters: covered.parameters,
-			// Claude Code sends its schemas verbatim and marks no tool strict, so no strict rewrite.
-			constrainedSampling: false as const,
-			...(tool.deferLoading === true ? { deferLoading: true } : {}),
-		};
+		if (covered && owned.has(covered.name)) return [];
+		if (!covered) return [tool];
+		return [
+			{
+				name: covered.name,
+				description: tool.description,
+				parameters: covered.parameters,
+				// Claude Code sends its schemas verbatim and marks no tool strict, so no strict rewrite.
+				constrainedSampling: false as const,
+				...(tool.deferLoading === true ? { deferLoading: true } : {}),
+			},
+		];
 	});
 	if (includePlaceholder && projected.length > 0 && !projected.some((tool) => tool.name === CC_PLACEHOLDER_NAME)) {
 		projected.push({
@@ -211,6 +225,8 @@ export interface ProjectedToolCall {
 	arguments: Record<string, unknown>;
 	/** Claude Code's rejection of this call's input; set instead of arguments when input is invalid. */
 	inputError?: string;
+	/** The call the model issued, coerced, with Claude Code's defaults filled. History replays this. */
+	modelCall?: { name: string; arguments: JsonObject };
 }
 
 /**
@@ -226,16 +242,65 @@ export function projectToolCall(call: {
 	/** Registered tools whose name is already a Claude Code name. They own that name. */
 	ownedNames?: ReadonlySet<string>;
 }): ProjectedToolCall {
-	const covered = ccToolByDeclaredName(call.name);
-	if (!covered) return { name: call.name, arguments: (call.arguments ?? {}) as Record<string, unknown> };
-	if (call.argumentsError !== undefined) {
-		return { name: covered.pi, arguments: {}, inputError: `<tool_use_error>${call.argumentsError}</tool_use_error>` };
+	const received = copyArgs(call.arguments);
+	const modelCall = { name: call.name, arguments: received };
+	if (call.ownedNames?.has(call.name)) return { name: call.name, arguments: received, modelCall };
+	const wrongCase = CC_TOOLS.find(
+		(tool) => tool.name.toLowerCase() === call.name.toLowerCase() && tool.name !== call.name,
+	);
+	if (wrongCase) {
+		return {
+			name: call.name,
+			arguments: {},
+			inputError: unavailableToolText(call.name, `Tool names are case-sensitive: call ${wrongCase.name} instead.`),
+			modelCall,
+		};
 	}
-	const args = (call.arguments ?? {}) as Record<string, unknown>;
+	const covered = ccToolByDeclaredName(call.name);
+	if (!covered) return { name: call.name, arguments: received, modelCall };
+	if (call.active && !call.active.has(covered.pi)) {
+		return {
+			name: call.name,
+			arguments: {},
+			inputError: unavailableToolText(
+				call.name,
+				`${call.name} is disabled for this session, in subagents as well as here.`,
+			),
+			modelCall,
+		};
+	}
+	if (call.argumentsError !== undefined) {
+		return {
+			name: covered.pi,
+			arguments: {},
+			inputError: `<tool_use_error>${call.argumentsError}</tool_use_error>`,
+			modelCall,
+		};
+	}
+	const args = copyArgs(call.arguments);
 	const issues = validateInput(covered, args);
-	if (issues.length > 0)
-		return { name: covered.pi, arguments: {}, inputError: inputValidationText(covered.name, issues) };
-	return { name: covered.pi, arguments: covered.toPi(args) };
+	if (issues.length > 0) {
+		return { name: covered.pi, arguments: {}, inputError: inputValidationText(covered.name, issues), modelCall };
+	}
+	return {
+		name: covered.pi,
+		arguments: covered.toPi(args),
+		modelCall: { name: covered.name, arguments: echoedArgs(covered, args) },
+	};
+}
+
+function unavailableToolText(name: string, suffix: string): string {
+	return `<tool_use_error>Error: No such tool available: ${name}. ${suffix}</tool_use_error>`;
+}
+
+function copyArgs(value: unknown): JsonObject {
+	const args = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+	return structuredClone(args) as JsonObject;
+}
+
+function echoedArgs(tool: CcTool, coerced: Record<string, unknown>): JsonObject {
+	if (tool.name !== "Edit") return coerced as JsonObject;
+	return { ...coerced, replace_all: coerced.replace_all === true };
 }
 
 /**
@@ -262,7 +327,7 @@ function validateInput(tool: CcTool, args: Record<string, unknown>): string[] {
 		const coerced = coerceToDeclaredType(value, declared);
 		if (coerced === undefined) {
 			issues.push(
-				`The parameter \`${key}\` type is expected as \`${Array.isArray(declared) ? declared.join(" | ") : declared}\` but provided as \`${jsonType(value)}\``,
+				`The parameter \`${key}\` type is expected as \`${expectedTypeName(declared, value)}\` but provided as \`${jsonType(value)}\``,
 			);
 		}
 	}
@@ -299,7 +364,10 @@ function coerceToType(value: unknown, type: string): unknown {
 			if (typeof value === "string" && value.trim() !== "" && Number.isInteger(Number(value))) return Number(value);
 			return undefined;
 		case "boolean":
-			return typeof value === "boolean" ? value : undefined;
+			if (typeof value === "boolean") return value;
+			if (value === "true") return true;
+			if (value === "false") return false;
+			return undefined;
 		case "null":
 			return value === null ? value : undefined;
 		case "array":
@@ -309,6 +377,13 @@ function coerceToType(value: unknown, type: string): unknown {
 		default:
 			return value;
 	}
+}
+
+/** Claude Code reports an integer field as `number` until the value is a number, then as `int`. */
+function expectedTypeName(declared: string | string[], value: unknown): string {
+	const type = Array.isArray(declared) ? declared.join(" | ") : declared;
+	if (type !== "integer") return type;
+	return typeof value === "number" ? "int" : "number";
 }
 
 function jsonType(value: unknown): string {
@@ -348,55 +423,180 @@ export interface CcSurfaceOptions {
  */
 export function projectMessagesForModel(messages: readonly Message[], options?: CcSurfaceOptions): Message[] {
 	const includePlaceholder = options?.placeholder !== false;
-	return messages.map((message) => {
+	const projected = messages.flatMap((message): Message[] => {
 		if (message.role === "system") {
 			const toolsAdded = message.toolsAdded;
-			if (toolsAdded === undefined) return message;
+			if (toolsAdded === undefined) return [message];
 			const projected = projectDeclarations(toolsAdded, includePlaceholder);
 			// A removal names a pi tool; the model knows the tool by its Claude Code name.
 			const toolsRemoved = message.toolsRemoved?.map((tool) => ({
 				...tool,
 				name: ccTool(tool.name)?.name ?? tool.name,
 			}));
-			return {
-				...message,
-				toolsAdded: projected,
-				...(toolsRemoved === undefined ? {} : { toolsRemoved }),
-			};
+			return [
+				{
+					...message,
+					toolsAdded: projected,
+					...(toolsRemoved === undefined ? {} : { toolsRemoved }),
+				},
+			];
 		}
-		return message;
+		if (message.role === "assistant") {
+			return [{ ...message, content: message.content.map(projectHistoryBlock) }];
+		}
+		if (message.role === "toolResult") {
+			const notice = noticeOf(message);
+			if (!notice) return [message];
+			return [message, { role: "system", content: notice, timestamp: message.timestamp }];
+		}
+		return [message];
 	});
+	return sortMergedDeclarations(projected, includePlaceholder);
+}
+
+/**
+ * The provider merges every `toolsAdded` in arrival order. Sort that merge onto the first
+ * declaration so a resumed session does not keep the order tools were registered in.
+ */
+export function sortMergedDeclarations(messages: readonly Message[], includePlaceholder: boolean): Message[] {
+	const merged = new Map<string, Tool>();
+	for (const message of messages) {
+		if (message.role !== "system") continue;
+		for (const tool of message.toolsRemoved ?? []) merged.delete(tool.name);
+		for (const tool of message.toolsAdded ?? []) merged.set(tool.name, tool);
+	}
+	if (merged.size === 0) return [...messages];
+	const sorted = projectDeclarations([...merged.values()], includePlaceholder);
+	let placed = false;
+	return messages.map((message) => {
+		if (message.role !== "system" || (message.toolsAdded === undefined && message.toolsRemoved === undefined)) {
+			return message;
+		}
+		if (!placed && message.toolsAdded !== undefined) {
+			placed = true;
+			const { toolsRemoved: _removed, ...rest } = message;
+			return { ...rest, toolsAdded: sorted };
+		}
+		const { toolsAdded: _added, toolsRemoved: _removed, ...rest } = message;
+		return rest;
+	});
+}
+
+function projectHistoryBlock(block: AssistantMessage["content"][number]): AssistantMessage["content"][number] {
+	if (block.type !== "toolCall") return block;
+	const echoed = block.modelCall ?? reverseMap(block);
+	const { modelCall: _recorded, ...rest } = block;
+	return { ...rest, name: echoed.name, arguments: { ...echoed.arguments } };
+}
+
+/** A session written before the original call was recorded. Description and background are gone. */
+function reverseMap(block: ToolCall): { name: string; arguments: JsonObject } {
+	const covered = ccTool(block.name);
+	if (!covered) return { name: block.name, arguments: block.arguments };
+	const args = block.arguments;
+	if (covered.pi === "bash") {
+		return {
+			name: "Bash",
+			arguments: {
+				command: args.command,
+				...(args.timeout === undefined ? {} : { timeout: Number(args.timeout) * 1000 }),
+			},
+		};
+	}
+	if (covered.pi === "edit") {
+		const edits = Array.isArray(args.edits) ? args.edits : [];
+		const first = edits[0] && typeof edits[0] === "object" ? (edits[0] as Record<string, JsonObject[string]>) : {};
+		return {
+			name: "Edit",
+			arguments: {
+				file_path: args.path,
+				old_string: first.oldText ?? "",
+				new_string: first.newText ?? "",
+				replace_all: args.replaceAll === true,
+			},
+		};
+	}
+	if (covered.pi === "read") {
+		return {
+			name: "Read",
+			arguments: {
+				file_path: args.path,
+				...(args.offset === undefined ? {} : { offset: args.offset }),
+				...(args.limit === undefined ? {} : { limit: args.limit }),
+				...(args.allowLarge === undefined ? {} : { allow_large: args.allowLarge }),
+			},
+		};
+	}
+	return { name: "Write", arguments: { file_path: args.path, content: args.content } };
+}
+
+function noticeOf(message: Message): string | undefined {
+	if (message.role !== "toolResult" || message.details === undefined || message.details === null) return undefined;
+	if (typeof message.details !== "object" || Array.isArray(message.details)) return undefined;
+	const notice = (message.details as { ccNotice?: unknown }).ccNotice;
+	return typeof notice === "string" && notice.length > 0 ? notice : undefined;
 }
 
 /**
  * Project one assistant message the model returned into the pi message the loop records: a tool
  * call that Claude Code named and shaped becomes the pi call that runs it.
  */
-export function projectAssistantMessageForPi(message: AssistantMessage): AssistantMessage {
+export interface ProjectCallOptions {
+	active?: ReadonlySet<string>;
+	ownedNames?: ReadonlySet<string>;
+}
+
+export function projectAssistantMessageForPi(
+	message: AssistantMessage,
+	options?: ProjectCallOptions,
+): AssistantMessage {
 	let changed = false;
 	const content = message.content.map((block) => {
 		if (block.type !== "toolCall") return block;
-		const projected = projectToolCall(block);
-		if (projected.name === block.name && projected.inputError === undefined) return block;
+		const projected = projectToolCall({ ...block, ...options });
 		changed = true;
-		return {
+		const next = {
 			...block,
 			name: projected.name,
-			arguments: projected.arguments,
-			...(projected.inputError === undefined ? {} : { argumentsError: projected.inputError }),
-		} as typeof block;
+			arguments: projected.arguments as JsonObject,
+			...(projected.modelCall === undefined ? {} : { modelCall: projected.modelCall }),
+		};
+		if (projected.inputError === undefined) delete next.argumentsError;
+		else next.argumentsError = projected.inputError;
+		return next;
 	});
 	return changed ? { ...message, content } : message;
 }
 
-function projectStreamEvent(event: AssistantMessageEvent): AssistantMessageEvent {
+/** Rename a still-streaming call without validating it. A partial's arguments are not the call yet. */
+function projectPartialNames(message: AssistantMessage, options?: ProjectCallOptions): AssistantMessage {
+	const content = message.content.map((block) => {
+		if (block.type !== "toolCall") return block;
+		if (options?.ownedNames?.has(block.name)) return { ...block, arguments: { ...block.arguments } };
+		const covered = ccToolByDeclaredName(block.name);
+		if (!covered) return { ...block, arguments: { ...block.arguments } };
+		return { ...block, name: covered.pi, arguments: { ...block.arguments } };
+	});
+	return { ...message, content };
+}
+
+function projectStreamEvent(event: AssistantMessageEvent, options?: ProjectCallOptions): AssistantMessageEvent {
 	switch (event.type) {
 		case "done":
-			return { ...event, message: projectAssistantMessageForPi(event.message) };
+			return { ...event, message: projectAssistantMessageForPi(event.message, options) };
 		case "error":
-			return { ...event, error: projectAssistantMessageForPi(event.error) };
+			return { ...event, error: projectAssistantMessageForPi(event.error, options) };
+		case "toolcall_end": {
+			const partial = projectAssistantMessageForPi(event.partial, options);
+			const toolCall = partial.content[event.contentIndex];
+			return {
+				...event,
+				partial,
+				toolCall: toolCall?.type === "toolCall" ? toolCall : event.toolCall,
+			};
+		}
 		default:
-			return { ...event, partial: projectAssistantMessageForPi(event.partial) };
+			return { ...event, partial: projectPartialNames(event.partial, options) };
 	}
 }
 
@@ -404,30 +604,43 @@ function projectStreamEvent(event: AssistantMessageEvent): AssistantMessageEvent
  * Wrap a provider stream so the loop only ever sees pi's tool names and arguments, while the
  * provider only ever sees Claude Code's. Every other event passes through untouched.
  */
-export function wrapStreamFn(stream: StreamFn): StreamFn {
+export function wrapStreamFn(stream: StreamFn, toolNames?: () => readonly string[]): StreamFn {
 	return (model, context, options) => {
+		const names = toolNames?.();
+		const callOptions: ProjectCallOptions | undefined =
+			names === undefined
+				? undefined
+				: {
+						active: new Set(names),
+						ownedNames: new Set(names.filter((name) => ccToolByDeclaredName(name))),
+					};
 		const response = stream(model, context, options);
-		return response instanceof Promise ? response.then((settled) => projectStream(settled)) : projectStream(response);
+		const project = (settled: AssistantMessageEventStream) => projectStream(settled, model, callOptions);
+		return response instanceof Promise ? response.then(project) : project(response);
 	};
 }
 
-function projectStream(stream: AssistantMessageEventStream): AssistantMessageEventStream {
+function projectStream(
+	stream: AssistantMessageEventStream,
+	model: Model<any>,
+	options?: ProjectCallOptions,
+): AssistantMessageEventStream {
 	const projected = new AssistantMessageEventStream();
 	void (async () => {
 		try {
-			for await (const event of stream) projected.push(projectStreamEvent(event));
+			for await (const event of stream) projected.push(projectStreamEvent(event, options));
 			// A stream can finish with end(message) and no done event. Forward that message, or the
 			// loop waits forever on result().
-			projected.end(projectAssistantMessageForPi(await stream.result()));
+			projected.end(projectAssistantMessageForPi(await stream.result(), options));
 		} catch (error) {
 			projected.end({
 				role: "assistant",
 				content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
 				stopReason: "error",
 				errorMessage: error instanceof Error ? error.message : String(error),
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "unknown",
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
 				usage: {
 					input: 0,
 					output: 0,

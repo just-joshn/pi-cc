@@ -433,21 +433,24 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			messages: existingSession.messages,
 		},
 		convertToLlm: convertToLlmForModel,
-		streamFn: wrapStreamFn(async (sessionModel, context, options) => {
-			const model = fixedTools
-				? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
-				: sessionModel;
-			const requestOptions = buildRequestOptions(options);
-			// Compaction and summaries use their own routing ids; only session requests
-			// replace the cache entry, so warming restarts from them. Keep warming while
-			// the current transcript still extends the request's prefix. Agent state may
-			// shallow-copy the messages array or refresh the model object without changing
-			// the provider request, so top-level object identity is not a valid cache key.
-			if (options?.sessionId === sessionManager.getSessionId()) {
-				cacheWarmer.start({ model, context, options: requestOptions }, cacheContextIsCurrent(model));
-			}
-			return modelRuntime.streamSimple(model, context, requestOptions);
-		}),
+		streamFn: wrapStreamFn(
+			async (sessionModel, context, options) => {
+				const model = fixedTools
+					? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
+					: sessionModel;
+				const requestOptions = buildRequestOptions(options);
+				// Compaction and summaries use their own routing ids; only session requests
+				// replace the cache entry, so warming restarts from them. Keep warming while
+				// the current transcript still extends the request's prefix. Agent state may
+				// shallow-copy the messages array or refresh the model object without changing
+				// the provider request, so top-level object identity is not a valid cache key.
+				if (options?.sessionId === sessionManager.getSessionId()) {
+					cacheWarmer.start({ model, context, options: requestOptions }, cacheContextIsCurrent(model));
+				}
+				return modelRuntime.streamSimple(model, context, requestOptions);
+			},
+			() => agent.state.tools.map((tool) => tool.name),
+		),
 		onPayload: transformProviderPayload,
 		onResponse: handleProviderResponse,
 		onProviderStreamEvent: handleProviderStreamEvent,

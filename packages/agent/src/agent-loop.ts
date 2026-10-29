@@ -723,6 +723,15 @@ async function prepareToolCall(
 	signal: AbortSignal | undefined,
 	tools: readonly AgentTool<any>[] = currentContext.tools ?? [],
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
+	// The model boundary already answered this call. Honor that before a name lookup, or a
+	// disabled Claude Code name is reported under pi's spelling.
+	if (toolCall.argumentsError?.startsWith("<tool_use_error>")) {
+		return {
+			kind: "immediate",
+			result: createErrorToolResult(toolCall.argumentsError),
+			isError: true,
+		};
+	}
 	const tool = tools.find((t) => t.name === toolCall.name);
 	if (!tool) {
 		return {

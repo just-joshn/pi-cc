@@ -7,7 +7,14 @@ import { type Static, Type } from "typebox";
 import { processImage } from "../../utils/image-process.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
-import { CC_READ_MAX_BYTES, CC_READ_MAX_TOKENS, CC_TOOL_TEXT, formatCcSize, toolUseError } from "./cc-text.ts";
+import {
+	CC_READ_MAX_BYTES,
+	CC_READ_MAX_TOKENS,
+	CC_TOOL_TEXT,
+	estimateTextTokens,
+	formatCcSize,
+	toolUseError,
+} from "./cc-text.ts";
 import { resolveReadPathAsync } from "./path-utils.ts";
 import { normalizeForComparison, type ReadState } from "./read-state.ts";
 import { readRenderers } from "./renderers/read.ts";
@@ -52,6 +59,8 @@ export interface ReadToolDetails {
 	 * result that carries no content (a warning, a refusal) leaves this unset.
 	 */
 	firstLineNumber?: number;
+	/** Claude Code's partial-view notice, sent as the following system message rather than in the result. */
+	ccNotice?: string;
 }
 
 /**
@@ -202,24 +211,48 @@ export function createReadToolDefinition(
 									const endIndex =
 										lineLimit === undefined ? totalLines : Math.min(startIndex + lineLimit, totalLines);
 									const selected = allLines.slice(startIndex, endIndex);
-									// allowLarge lifts the cap entirely: Claude Code then returns what fits in context.
-									const capped =
-										lineLimit === undefined && !allowLarge ? capReadTokens(selected, totalLines) : undefined;
-									const shown = capped?.lines ?? selected;
-									rawText = shown.join("\n");
+									const selectedText = selected.join("\n");
+									const tokens = estimateTextTokens(selectedText);
+									const fromStart = offset === undefined || offset <= 1;
+									const wholeFile = fromStart && lineLimit === undefined;
+									// allowLarge lifts the cap. A bounded or offset read that still exceeds it is refused;
+									// only a whole-file read from the start is truncated and announced.
+									if (!allowLarge && tokens > CC_READ_MAX_TOKENS && !wholeFile) {
+										throw new Error(CC_TOOL_TEXT.readTooManyTokens(tokens, CC_READ_MAX_TOKENS));
+									}
+									const kept =
+										!allowLarge && tokens > CC_READ_MAX_TOKENS
+											? keepLinesWithinTokenCap(selected, tokens)
+											: selected;
+									rawText = kept.join("\n");
 									const numbered = numberLines(rawText, firstLineNumber);
-									content = [
-										{
-											type: "text",
-											text:
-												capped === undefined
-													? numbered
-													: `${numbered}\n\n${partialViewNotice(path, shown.length, totalLines)}`,
-										},
-									];
+									content = [{ type: "text", text: numbered }];
+									const truncated = kept.length !== selected.length;
 									details = {
 										firstLineNumber,
-										...(capped === undefined ? {} : { truncation: capped.truncation }),
+										...(truncated
+											? {
+													ccNotice: CC_TOOL_TEXT.readPartialNotice(
+														absolutePath,
+														kept.length,
+														totalLines,
+														tokens,
+													),
+													truncation: {
+														content: rawText,
+														truncated: true,
+														truncatedBy: "bytes" as const,
+														totalLines,
+														totalBytes: Buffer.byteLength(selectedText, "utf-8"),
+														outputLines: kept.length,
+														outputBytes: Buffer.byteLength(rawText, "utf-8"),
+														lastLinePartial: false,
+														firstLineExceedsLimit: false,
+														maxLines: kept.length,
+														maxBytes: CC_READ_MAX_TOKENS * 4,
+													},
+												}
+											: {}),
 									};
 								}
 							}
@@ -286,54 +319,26 @@ function numberLines(text: string, firstLineNumber: number): string {
 		.join("\n");
 }
 
-/**
- * Claude Code reports a capped read to the model as a partial view. It sends that notice as its own
- * system message; this build appends the same sentence to the read result instead, because a
- * mid-transcript system message is a transport concern this unit does not own.
- */
-function partialViewNotice(path: string, shownLines: number, totalLines: number): string {
-	return `[Truncated: PARTIAL view — ${path}: showing lines 1-${shownLines} of ${totalLines} total. Call Read with offset=${shownLines + 1} limit=${shownLines} for the next page. Do NOT answer from this page alone if the answer may be further in the file.]`;
-}
-
 /** A NUL byte in the first 8KB is Claude Code's reason to call a file binary. */
 function looksBinary(buffer: Buffer): boolean {
 	return buffer.subarray(0, 8192).includes(0);
 }
 
 /**
- * Cap the returned lines at Claude Code's token budget, keeping whole lines. The caller renders
- * the partial-view notice, so the truncation facts go in `details`.
+ * Keep a prefix of lines whose estimated tokens fit the cap. The first cut is 85% of the
+ * proportional share, then each retry drops 30%, matching the shrink Claude Code uses after
+ * its tokenizer refuses the whole file. The count here is {@link estimateTextTokens}, not that
+ * tokenizer, so the line count will not match a count_tokens reply.
  */
-function capReadTokens(
-	lines: readonly string[],
-	totalLines: number,
-): { lines: string[]; truncation: TruncationResult } | undefined {
-	const maxBytes = CC_READ_MAX_TOKENS * 4;
-	let bytes = 0;
-	let shown = 0;
-	for (const line of lines) {
-		const next = bytes + Buffer.byteLength(line, "utf-8") + 1;
-		if (next > maxBytes) break;
-		bytes = next;
-		shown++;
+function keepLinesWithinTokenCap(lines: readonly string[], tokenCount: number): string[] {
+	let count = Math.max(
+		1,
+		Math.min(lines.length, Math.floor(((lines.length * CC_READ_MAX_TOKENS) / Math.max(1, tokenCount)) * 0.85)),
+	);
+	let kept = lines.slice(0, count).join("\n");
+	for (let attempt = 0; attempt < 6 && estimateTextTokens(kept) > CC_READ_MAX_TOKENS && count > 1; attempt++) {
+		count = Math.max(1, Math.floor(count * 0.7));
+		kept = lines.slice(0, count).join("\n");
 	}
-	if (shown === lines.length) return undefined;
-	const kept = lines.slice(0, Math.max(1, shown));
-	const outputBytes = Math.min(bytes, maxBytes);
-	return {
-		lines: kept,
-		truncation: {
-			content: kept.join("\n"),
-			truncated: true,
-			truncatedBy: "bytes",
-			totalLines,
-			totalBytes: lines.reduce((sum, line) => sum + Buffer.byteLength(line, "utf-8") + 1, 0),
-			outputLines: kept.length,
-			outputBytes,
-			lastLinePartial: false,
-			firstLineExceedsLimit: false,
-			maxLines: kept.length,
-			maxBytes,
-		},
-	};
+	return lines.slice(0, count);
 }

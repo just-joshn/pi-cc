@@ -1,6 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
+import { access as fsAccess, mkdir as fsMkdir, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
+import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import { splitBom } from "../../utils/text.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
@@ -90,12 +91,15 @@ export interface EditOperations {
 	writeFile: (absolutePath: string, content: string) => Promise<void>;
 	/** Check if file is readable and writable (throw if not) */
 	access: (absolutePath: string) => Promise<void>;
+	/** Create parent directories before creating a new file. */
+	mkdir?: (dir: string) => Promise<void>;
 }
 
 const defaultEditOperations: EditOperations = {
 	readFile: (path) => fsReadFile(path),
 	writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
 	access: (path) => fsAccess(path, constants.R_OK | constants.W_OK),
+	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
 };
 
 export interface EditToolOptions {
@@ -213,6 +217,7 @@ export function createEditToolDefinition(
 					if (normalizedContent.trim() !== "") {
 						throw new Error(toolUseError(CC_TOOL_TEXT.editFileExists));
 					}
+					await (ops.mkdir ?? defaultEditOperations.mkdir)!(dirname(absolutePath));
 					await ops.writeFile(absolutePath, normalizedEdits[0].rawNew);
 					throwIfAborted();
 					options?.readState?.record(absolutePath, {
@@ -296,8 +301,14 @@ function applyExactEdits(content: string, edits: readonly NormalizedEdit[], repl
 			throw new Error(toolUseError(CC_TOOL_TEXT.editMultipleMatches(indexes.length, edit.rawOld)));
 		}
 		const used = replaceAll ? indexes : indexes.slice(0, 1);
-		for (const start of used)
-			spans.push({ start, end: start + edit.oldText.length, newText: edit.newText, rawOld: edit.rawOld });
+		for (const hit of used) {
+			spans.push({
+				start: hit.start,
+				end: hit.end,
+				newText: foldReplacement(hit.matched, edit.newText),
+				rawOld: edit.rawOld,
+			});
+		}
 	}
 	spans.sort((left, right) => left.start - right.start);
 	for (let i = 1; i < spans.length; i++) {
@@ -316,14 +327,75 @@ function applyExactEdits(content: string, edits: readonly NormalizedEdit[], repl
 	return { next };
 }
 
-function indexesOf(content: string, text: string): number[] {
-	const indexes: number[] = [];
-	let index = content.indexOf(text);
+function indexesOf(content: string, text: string): Array<{ start: number; end: number; matched: string }> {
+	const matched = quoteMatch(content, text);
+	if (matched === undefined) return [];
+	const indexes: Array<{ start: number; end: number; matched: string }> = [];
+	let index = content.indexOf(matched);
 	while (index !== -1) {
-		indexes.push(index);
-		index = content.indexOf(text, index + text.length);
+		indexes.push({ start: index, end: index + matched.length, matched });
+		index = content.indexOf(matched, index + matched.length);
 	}
 	return indexes;
+}
+
+const CURLY_SINGLE_OPEN = "\u2018";
+const CURLY_SINGLE_CLOSE = "\u2019";
+const CURLY_DOUBLE_OPEN = "\u201c";
+const CURLY_DOUBLE_CLOSE = "\u201d";
+
+function foldQuotes(text: string): string {
+	return text
+		.replaceAll(CURLY_SINGLE_OPEN, "'")
+		.replaceAll(CURLY_SINGLE_CLOSE, "'")
+		.replaceAll(CURLY_DOUBLE_OPEN, '"')
+		.replaceAll(CURLY_DOUBLE_CLOSE, '"');
+}
+
+function quoteMatch(content: string, oldText: string): string | undefined {
+	if (content.includes(oldText)) return oldText;
+	const at = foldQuotes(content).indexOf(foldQuotes(oldText));
+	if (at === -1) return undefined;
+	return content.slice(at, at + oldText.length);
+}
+
+function opensQuote(text: string, index: number): boolean {
+	if (index === 0) return true;
+	const prev = text[index - 1];
+	return (
+		prev === " " ||
+		prev === "\t" ||
+		prev === "\n" ||
+		prev === "\r" ||
+		prev === "(" ||
+		prev === "[" ||
+		prev === "{" ||
+		prev === "\u2014" ||
+		prev === "\u2013"
+	);
+}
+
+function foldReplacement(matched: string, replacement: string): string {
+	let next = replacement;
+	if (matched.includes(CURLY_DOUBLE_OPEN) || matched.includes(CURLY_DOUBLE_CLOSE)) {
+		next = [...next]
+			.map((ch, index) => (ch === '"' ? (opensQuote(next, index) ? CURLY_DOUBLE_OPEN : CURLY_DOUBLE_CLOSE) : ch))
+			.join("");
+	}
+	if (matched.includes(CURLY_SINGLE_OPEN) || matched.includes(CURLY_SINGLE_CLOSE)) {
+		const chars = [...next];
+		next = chars
+			.map((ch, index) => {
+				if (ch !== "'") return ch;
+				const prev = index > 0 ? chars[index - 1] : undefined;
+				const following = index < chars.length - 1 ? chars[index + 1] : undefined;
+				const letter = (value: string | undefined) => value !== undefined && /\p{L}/u.test(value);
+				if (letter(prev) && letter(following)) return CURLY_SINGLE_CLOSE;
+				return opensQuote(next, index) ? CURLY_SINGLE_OPEN : CURLY_SINGLE_CLOSE;
+			})
+			.join("");
+	}
+	return next;
 }
 
 export function createEditTool(cwd: string, options?: EditToolOptions): AgentTool<typeof editSchema> {

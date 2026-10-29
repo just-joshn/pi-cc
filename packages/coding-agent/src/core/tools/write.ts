@@ -31,11 +31,16 @@ export interface WriteOperations {
 	writeFile: (absolutePath: string, content: string) => Promise<void>;
 	/** Create directory recursively */
 	mkdir: (dir: string) => Promise<void>;
+	/** Read existing content. Default operations read the local file; custom operations must supply this or the prior-content check reads the local disk. */
+	readFile?: (absolutePath: string) => Promise<Buffer>;
+	stat?: (absolutePath: string) => Promise<{ isFile: () => boolean }>;
 }
 
 const defaultWriteOperations: WriteOperations = {
 	writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
 	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
+	readFile: (path) => fsReadFile(path),
+	stat: (path) => fsStat(path),
 };
 
 export interface WriteToolOptions {
@@ -91,7 +96,7 @@ export function createWriteToolDefinition(
 				}
 
 				const record = options?.readState?.get(absolutePath);
-				const previous = await readIfPresent(absolutePath);
+				const previous = await readIfPresent(ops, absolutePath);
 				throwIfAborted();
 
 				// Both refusals exist to avoid a prompt, so Claude Code raises them only for a path whose
@@ -127,12 +132,16 @@ export function createWriteTool(cwd: string, options?: WriteToolOptions): AgentT
 	return wrapToolDefinition(createWriteToolDefinition(cwd, options));
 }
 
-/** The file's text, or undefined when the path holds no file. */
-async function readIfPresent(absolutePath: string): Promise<string | undefined> {
+/** The file's text, or undefined when the path holds no file. A custom readFile is not paired with a local stat. */
+async function readIfPresent(ops: WriteOperations, absolutePath: string): Promise<string | undefined> {
+	const readFile = ops.readFile ?? fsReadFile;
+	const stat = ops.stat ?? (ops.readFile ? undefined : fsStat);
 	try {
-		const stats = await fsStat(absolutePath);
-		if (!stats.isFile()) return undefined;
-		return (await fsReadFile(absolutePath)).toString("utf-8");
+		if (stat) {
+			const stats = await stat(absolutePath);
+			if (!stats.isFile()) return undefined;
+		}
+		return (await readFile(absolutePath)).toString("utf-8");
 	} catch {
 		return undefined;
 	}

@@ -1,0 +1,21 @@
+{
+  "id": "tool/disabled-call",
+  "area": "tool",
+  "argv": ["-p", "Invoke the fixture", "--tools", "Read", "--output-format", "stream-json", "--verbose"],
+  "env": {},
+  "stdin": null,
+  "files": {},
+  "model": {
+    "turns": [
+      { "tool_use": { "name": "Bash", "input": { "command": "echo SHOULD_NOT_RUN" } } },
+      { "text": "PROBE_OK" }
+    ]
+  },
+  "timeout_ms": 60000,
+  "compare": {
+    "exit": 0,
+    "stdout": { "kind": "text", "match": ["No such tool available: Bash. Bash is disabled for this session, in subagents as well as here."] },
+    "requests": [{ "pathStartsWith": "/v1/messages", "count": 2 }]
+  },
+  "skip": []
+}

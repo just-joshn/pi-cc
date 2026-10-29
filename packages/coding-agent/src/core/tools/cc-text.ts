@@ -42,6 +42,10 @@ export const CC_TOOL_TEXT = {
 		`This tool cannot read binary files. The file appears to be a binary ${extension} file. Use a skill for this file type if one is available, or a shell command or script that can read the format.`,
 	readTooLarge: (size: string, maxSize: string) =>
 		`File content (${size}) exceeds maximum allowed size (${maxSize}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file. To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file.`,
+	readTooManyTokens: (tokens: number, maxTokens: number) =>
+		`File content (${tokens} tokens) exceeds maximum allowed tokens (${maxTokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file. To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file.`,
+	readPartialNotice: (absolutePath: string, shown: number, total: number, tokens: number) =>
+		`[Truncated: PARTIAL view — ${absolutePath}: showing lines 1-${shown} of ${total} total (${tokens} tokens, cap ${CC_READ_MAX_TOKENS}). Call Read with offset=${shown + 1} limit=${shown} for the next page, or Grep to find a specific section. To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file. Do NOT answer from this page alone if the answer may be further in the file.]`,
 	editNotRead: "File has not been read yet. Read it first before writing to it.",
 	editStale:
 		"File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.",

@@ -69,13 +69,15 @@ function createRemoteWriteOps(remote: string, remoteCwd: string, localCwd: strin
 			await sshExec(remote, `echo ${JSON.stringify(b64)} | base64 -d > ${JSON.stringify(toRemote(p))}`);
 		},
 		mkdir: (dir) => sshExec(remote, `mkdir -p ${JSON.stringify(toRemote(dir))}`).then(() => {}),
+		readFile: (p) => sshExec(remote, `cat ${JSON.stringify(toRemote(p))}`),
+		stat: (p) => sshExec(remote, `test -f ${JSON.stringify(toRemote(p))}`).then(() => ({ isFile: () => true })),
 	};
 }
 
 function createRemoteEditOps(remote: string, remoteCwd: string, localCwd: string): EditOperations {
 	const r = createRemoteReadOps(remote, remoteCwd, localCwd);
 	const w = createRemoteWriteOps(remote, remoteCwd, localCwd);
-	return { readFile: r.readFile, access: r.access, writeFile: w.writeFile };
+	return { readFile: r.readFile, access: r.access, writeFile: w.writeFile, mkdir: w.mkdir };
 }
 
 function createRemoteBashOps(remote: string, remoteCwd: string, localCwd: string): BashOperations {

@@ -122,7 +122,8 @@ describe("Coding Agent Tools", () => {
 			const output = getTextOutput(result);
 
 			expect(output).toContain("1\tLine 1:");
-			expect(output).toContain("PARTIAL view");
+			expect(output).not.toContain("PARTIAL view");
+			expect(result.details?.ccNotice).toContain("PARTIAL view");
 			expect(output).not.toContain("500\tLine 500:");
 			expect(result.details?.truncation?.truncated).toBe(true);
 		});

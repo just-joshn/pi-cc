@@ -223,6 +223,55 @@ describe("pi tool identity stays inside the process", () => {
 		expect(readFileSync(join(result.workspace, "fuzzy.txt"), "utf-8")).toBe("foo  \nx\nfoo \nx\n");
 	});
 
+	it("sends the model's call back, not the pi call, on the next request", async () => {
+		const result = await probe({
+			argv: ["-p", "go"],
+			turns: [
+				{
+					tool_use: {
+						name: "Edit",
+						input: { file_path: "q.txt", old_string: "", new_string: "made\n" },
+					},
+				},
+				{
+					tool_use: {
+						name: "Bash",
+						input: { command: "echo t", timeout: 1000, description: "say hi" },
+					},
+				},
+			],
+		});
+		roots.push(join(result.workspace, ".."));
+		expect(result.results[0]).toMatchObject({
+			name: "Edit",
+			input: { file_path: "q.txt", old_string: "", new_string: "made\n", replace_all: false },
+		});
+		expect(result.results[1]).toMatchObject({
+			name: "Bash",
+			input: { command: "echo t", timeout: 1000, description: "say hi" },
+		});
+	});
+
+	it("rejects a pi name and a disabled Claude Code name with the name the model used", async () => {
+		const lower = await probe({
+			argv: ["-p", "go"],
+			turns: [{ tool_use: { name: "read", input: { path: "a.txt" } } }],
+		});
+		roots.push(join(lower.workspace, ".."));
+		expect(lower.results[0]?.text).toContain(
+			"No such tool available: read. Tool names are case-sensitive: call Read instead.",
+		);
+
+		const disabled = await probe({
+			argv: ["-p", "go", "--tools", "Read"],
+			turns: [{ tool_use: { name: "Bash", input: { command: "echo x" } } }],
+		});
+		roots.push(join(disabled.workspace, ".."));
+		expect(disabled.results[0]?.text).toContain(
+			"No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.",
+		);
+	});
+
 	it("returns every line of a 2500-line file, with no false truncation notice", async () => {
 		const body = `${Array.from({ length: 2500 }, (_, index) => `line${index + 1}`).join("\n")}\n`;
 		const result = await probe({

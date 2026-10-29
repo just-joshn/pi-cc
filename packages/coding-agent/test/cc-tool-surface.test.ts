@@ -2,6 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { convertMessages as convertOpenAIMessages } from "@earendil-works/pi-ai/api/openai-completions";
+import { getModel } from "@earendil-works/pi-ai/compat";
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -119,6 +122,28 @@ describe("Claude Code tool surface", () => {
 		});
 	});
 
+	it("replays a recorded Claude Code call through the OpenAI provider", () => {
+		const model = { ...getModel("openai", "gpt-4o-mini"), api: "openai-completions" as const };
+		const history = projectMessagesForModel([
+			projectAssistantMessageForPi(
+				assistantCall("Bash", {
+					command: "echo t",
+					timeout: 1200,
+					description: "say hi",
+				}),
+			),
+		]);
+		const messages = convertOpenAIMessages(model, normalizeContext({ messages: history }), {} as never);
+		const assistant = messages.find((message) => message.role === "assistant");
+		const toolCall = assistant?.role === "assistant" ? assistant.tool_calls?.[0] : undefined;
+		expect(toolCall).toMatchObject({
+			function: {
+				name: "Bash",
+				arguments: JSON.stringify({ command: "echo t", timeout: 1200, description: "say hi" }),
+			},
+		});
+	});
+
 	it("reverse-maps a session written before the original call was recorded", () => {
 		const history = projectMessagesForModel([
 			assistantCall("write", { path: "n.txt", content: "z" }),
@@ -142,6 +167,41 @@ describe("Claude Code tool surface", () => {
 		});
 		expect(result.inputError).toBeUndefined();
 		expect(result.arguments).toMatchObject({ replaceAll: true });
+	});
+
+	it("sends the partial-view notice as a separate system message", () => {
+		const history = projectMessagesForModel([
+			{
+				role: "toolResult",
+				toolCallId: "call-1",
+				toolName: "read",
+				content: [{ type: "text", text: "1\tfirst" }],
+				isError: false,
+				timestamp: 0,
+				details: { ccNotice: "[Truncated: PARTIAL view]" },
+			},
+		]);
+		expect(history).toMatchObject([
+			{ role: "toolResult", content: [{ text: "1\tfirst" }] },
+			{ role: "system", content: "[Truncated: PARTIAL view]" },
+		]);
+	});
+
+	it("sorts a resumed session's merged tool list", () => {
+		const tool = (name: string) => ({ name, description: name, parameters: Type.Object({}) });
+		const history = projectMessagesForModel([
+			{ role: "system", content: "", timestamp: 1, toolsAdded: [tool("write"), tool("bash")] },
+			{ role: "system", content: "", timestamp: 2, toolsAdded: [tool("edit"), tool("read")] },
+		]);
+		const declared = history.filter((message) => message.role === "system" && message.toolsAdded);
+		expect(declared).toHaveLength(1);
+		expect(declared[0]?.role === "system" && declared[0].toolsAdded?.map((entry) => entry.name)).toEqual([
+			"Bash",
+			"Edit",
+			"Read",
+			"DeferredToolPlaceholder",
+			"Write",
+		]);
 	});
 
 	it("lets an extension registered as Read own that name", () => {
@@ -223,8 +283,8 @@ describe("read and write gates", () => {
 
 	it("refuses an offset read that still exceeds the token cap, instead of a partial notice", async () => {
 		dir = mkdtempSync(join(tmpdir(), "pi-cc-read-off-"));
-		const line = `x`.repeat(80);
-		writeFileSync(join(dir, "wide.txt"), Array.from({ length: 3001 }, (_, i) => `${i} ${line}`).join("\n") + "\n");
+		const line = `x`.repeat(60);
+		writeFileSync(join(dir, "wide.txt"), `${Array.from({ length: 3001 }, (_, i) => `${i} ${line}`).join("\n")}\n`);
 		const read = createReadTool(dir);
 		await expect(read.execute("1", { path: "wide.txt", offset: 1000 })).rejects.toThrow(
 			/File content \(\d+ tokens\) exceeds maximum allowed tokens \(25000\)/,
@@ -240,6 +300,48 @@ describe("read and write gates", () => {
 		});
 		expect(result.content[0]).toMatchObject({ type: "text" });
 		expect(readFileSync(join(dir, "new/deep.txt"), "utf-8")).toBe("made\n");
+	});
+
+	it("creates parent directories through a custom edit operation", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-edit-ops-"));
+		const calls: string[] = [];
+		let written: string | undefined;
+		const edit = createEditTool(dir, {
+			operations: {
+				access: async () => {
+					throw Object.assign(new Error("missing"), { code: "ENOENT" });
+				},
+				readFile: async () => {
+					throw Object.assign(new Error("missing"), { code: "ENOENT" });
+				},
+				mkdir: async (path) => {
+					calls.push(path);
+				},
+				writeFile: async (_path, content) => {
+					written = content;
+				},
+			},
+		});
+		await edit.execute("1", { path: "new/deep.txt", edits: [{ oldText: "", newText: "made\n" }] });
+		expect(calls).toEqual([join(dir, "new")]);
+		expect(written).toBe("made\n");
+	});
+
+	it("reads prior content through a custom write operation", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-write-ops-"));
+		let written: string | undefined;
+		const write = createWriteTool(dir, {
+			operations: {
+				readFile: async () => Buffer.from("old\n"),
+				writeFile: async (_path, content) => {
+					written = content;
+				},
+				mkdir: async () => {},
+			},
+		});
+		const result = await write.execute("1", { path: "remote.txt", content: "new\n" });
+		expect(result.content[0]).toMatchObject({ text: expect.stringContaining("has been updated successfully") });
+		expect(written).toBe("new\n");
 	});
 
 	it("applies an edit whose straight quotes match curly quotes in the file", async () => {
