@@ -162,6 +162,41 @@ describe("Claude Code tool surface", () => {
 		expect(fraction).toContain("expected as `int` but provided as `number`");
 	});
 
+	// Measured against claude 2.1.312 through the conformance harness, one Read offset per form.
+	it.each([
+		["2", 2],
+		["2.0", 2],
+		[" 2", 2],
+		["2 ", 2],
+		["\t2", 2],
+		["2\n", 2],
+		["\u00a02", 2],
+		["+2", 2],
+		["02", 2],
+		["-1", -1],
+	])("reads the numeric string %j as %d", (offset, expected) => {
+		const result = projectToolCall({ name: "Read", arguments: { file_path: "n.txt", offset } });
+		expect(result.inputError).toBeUndefined();
+		expect(result.arguments).toEqual({ path: "n.txt", offset: expected });
+	});
+
+	it.each(["2.", ".5", "-.5", "1e0", "0x2", "1_0", "Infinity", ""])("refuses the string %j as a string", (offset) => {
+		const result = projectToolCall({ name: "Read", arguments: { file_path: "n.txt", offset } });
+		expect(result.inputError).toContain(
+			"The parameter `offset` type is expected as `number` but provided as `string`",
+		);
+	});
+
+	it("reports a numeric string for a boolean field as a string", () => {
+		const result = projectToolCall({
+			name: "Edit",
+			arguments: { file_path: "r.txt", old_string: "a", new_string: "b", replace_all: "1" },
+		});
+		expect(result.inputError).toContain(
+			"The parameter `replace_all` type is expected as `boolean` but provided as `string`",
+		);
+	});
+
 	it("accepts replace_all as the string true", () => {
 		const result = projectToolCall({
 			name: "Edit",
