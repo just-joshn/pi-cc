@@ -253,7 +253,9 @@ function takeWorkspace(roots: Roots): string {
 		renameSync(roots.workspace, snapshot);
 		return snapshot;
 	} catch {
-		return roots.workspace;
+		// The workspace could not be moved out of the side's reach, so scan a path that cannot exist
+		// rather than a tree the side can still write. That reports as unreadable, which fails the case.
+		return join(dirname(roots.root), `snapshot-${roots.side}-unavailable`);
 	}
 }
 
@@ -369,14 +371,20 @@ function stragglersIn(root: string, startedAt: number): number[] {
 		return [];
 	}
 	const candidates: number[] = [];
+	let parsed = 0;
 	for (const line of listed.stdout.split("\n")) {
 		const fields = /^\s*(\d+)\s+(\S+ \S+ \S+ \S+ \S+)\s*$/.exec(line);
 		if (fields === null) continue;
+		parsed += 1;
 		const pid = Number.parseInt(fields[1], 10);
 		const started = Date.parse(fields[2]);
 		// `lstart` has one-second resolution, so a process that started just before the run still counts.
 		if (pid === process.pid || (!Number.isNaN(started) && started + 1_000 < startedAt)) continue;
 		candidates.push(pid);
+	}
+	if (parsed === 0) {
+		warnOnce("survivor sweep unavailable: /bin/ps no longer prints a start time this harness reads");
+		return [];
 	}
 	if (candidates.length === 0) return [];
 	const cwd = spawnSync("/usr/sbin/lsof", ["-a", "-d", "cwd", "-p", candidates.join(","), "-w", "-n", "-P", "-Fpn"], {
@@ -402,12 +410,12 @@ function stragglersIn(root: string, startedAt: number): number[] {
 	return pids;
 }
 
-let warned = false;
+const WARNINGS: string[] = [];
 
-/** One line on the console, so a sweep that cannot run is not mistaken for a clean one. */
+/** One line on the console and in the report, so a sweep that cannot run is not mistaken for a clean one. */
 function warnOnce(message: string): void {
-	if (warned) return;
-	warned = true;
+	if (WARNINGS.includes(message)) return;
+	WARNINGS.push(message);
 	console.warn(message);
 }
 
@@ -521,6 +529,7 @@ function writeReport(
 		run: new Date().toISOString(),
 		aborted,
 		run_root: runRoot,
+		...(WARNINGS.length === 0 ? {} : { warnings: WARNINGS }),
 		claude:
 			claude === null
 				? null
