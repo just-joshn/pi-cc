@@ -303,7 +303,20 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 			}
 		}
 		const last = matched.at(-1);
-		const serialized = last === undefined ? "" : JSON.stringify(last.body);
+		if (last === undefined) {
+			for (const pattern of request.bodyMatch ?? []) {
+				diffs.push({ check: "requests.bodyMatch", expected: `match /${pattern}/`, actual: "no matching request" });
+			}
+			for (const pattern of request.bodyNotMatch ?? []) {
+				diffs.push({
+					check: "requests.bodyNotMatch",
+					expected: `no match /${pattern}/`,
+					actual: "no matching request",
+				});
+			}
+			continue;
+		}
+		const serialized = JSON.stringify(last.body);
 		for (const pattern of request.bodyMatch ?? []) {
 			if (!toRegExp(pattern).test(serialized)) {
 				diffs.push({ check: "requests.bodyMatch", expected: `match /${pattern}/`, actual: excerpt(serialized) });
