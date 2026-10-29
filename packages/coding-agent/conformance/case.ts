@@ -126,9 +126,10 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 }
 
 /**
- * A case runs against the real Claude Code install, so it must never reach a subcommand that
- * authenticates, installs, or mutates that binary. Every token is checked, not just the first one,
- * and it is matched lowercased with leading dashes stripped, so `--login` and `LOGIN` are refused too.
+ * The second line, not the boundary: the Seatbelt profile in `isolate.ts` is what bounds a case. A case
+ * still must never reach a subcommand that authenticates, installs, or mutates the installed claude, so
+ * every token is checked, not just the first, lowercased with leading dashes stripped, so `--login` and
+ * `LOGIN` are refused too.
  */
 function assertArgvAllowed(argv: readonly string[], source: string): void {
 	for (const token of argv) {
