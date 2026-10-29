@@ -65,6 +65,15 @@ describe("loadCases", () => {
 			/argv must not contain "--update=now"/,
 		);
 	});
+
+	test("rejects the remaining subcommands that mutate or authenticate", () => {
+		for (const token of ["plugins", "import", "gateway", "ultrareview", "rm", "--bg"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, argv: [token] })).toThrow(new RegExp(`argv must not run "${token}"`));
+			expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hello", token] })).toThrow(
+				new RegExp(`argv must not run "${token}"`),
+			);
+		}
+	});
 });
 
 describe("turn shapes", () => {
