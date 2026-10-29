@@ -683,7 +683,6 @@ function buildSessionOptions(
 	// Tools
 	// Claude Code's --bare keeps Bash, Edit and Read and nothing else, and offers no placeholder.
 	if (parsed.bare === true) {
-		options.ccPlaceholder = false;
 		options.fixedTools = true;
 		if (!parsed.tools) {
 			options.tools = [...CC_BARE_TOOLS];
@@ -1058,7 +1057,6 @@ export async function main(args: string[], options?: MainOptions) {
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
-			ccPlaceholder: sessionOptions.ccPlaceholder,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {

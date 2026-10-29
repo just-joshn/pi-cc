@@ -71,8 +71,6 @@ export interface CreateAgentSessionOptions {
 	 *   but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
-	/** Whether the model is offered Claude Code's `DeferredToolPlaceholder`. Default: true. */
-	ccPlaceholder?: boolean;
 	/**
 	 * Optional allowlist of tool names or patterns, where `*` matches any characters.
 	 *
@@ -89,7 +87,7 @@ export interface CreateAgentSessionOptions {
 	 * These entries take exact names. Mixing them with plain entries throws.
 	 */
 	tools?: string[];
-	/** Keep a fixed tool list on the wire without a deferred tool placeholder. */
+	/** Keep a fixed tool list on the wire without a deferred tool placeholder, pi's or Claude Code's. */
 	fixedTools?: boolean;
 	/**
 	 * Optional denylist of tool names or patterns to disable. Applies after `tools` when both are
@@ -323,8 +321,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// Read per request, because the model can change mid-session and the notice placement follows
 	// the model's own capability: a model the transport folds system messages for gets the notice
 	// inside its tool result, the way Claude Code answers it there.
+	const fixedTools = options.fixedTools === true;
 	const ccSurface = (): CcSurfaceOptions => ({
-		placeholder: options.ccPlaceholder !== false,
+		placeholder: !fixedTools,
 		midConversationSystemMessages: midConversationSystemMessages(agent.state.model),
 	});
 	const convertToLlmForModel = (messages: AgentMessage[]): Message[] =>
@@ -437,7 +436,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	};
 
-	const fixedTools = options.fixedTools === true;
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: "",
