@@ -31,8 +31,8 @@ const FAMILY_ENV: Record<AnthropicModelFamily, string> = {
 /** What the pinned 2.1.312 resolves a bare family alias to when no variable redefines it. */
 const FAMILY_DEFAULT: Record<AnthropicModelFamily, string> = {
 	opus: "claude-opus-5-5",
-	sonnet: "claude-sonnet-4-6",
-	haiku: "claude-haiku-4-5",
+	sonnet: "claude-sonnet-5-5",
+	haiku: "claude-haiku-5-5",
 	fable: "claude-fable-5-1",
 };
 

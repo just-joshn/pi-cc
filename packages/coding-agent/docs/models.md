@@ -20,7 +20,7 @@ Run `/login` and select a provider. Pi stores credentials in [`auth.json`](confi
 
 You can instead provide an API key through the provider's environment variable. This is useful in CI and other environments where Pi should not write credentials. [Providers](providers.md) lists the variables and provider-specific setup.
 
-When several credential sources are configured, Pi uses a runtime `--api-key` first, then a stored `auth.json` credential, an `apiKey` from `models.json`, and finally the provider's environment variables or ambient cloud credentials. Provider extensions can define their own authentication behavior.
+When several credential sources are configured, Pi uses a runtime `--api-key` first, then a stored `auth.json` credential, an `apiKey` from `models.json`, and finally the provider's environment variables or ambient cloud credentials. Anthropic is the exception: `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` outrank `auth.json` and a `models.json` key, and `ANTHROPIC_BASE_URL` outranks a configured endpoint. `--api-key` still wins, and with no Anthropic environment credential the usual order holds. Provider extensions can define their own authentication behavior.
 
 Keep `auth.json` and any credential commands private. Project settings and extensions can execute inside the Pi process after you trust a project. Review [Security](security.md) before loading configuration from an untrusted directory.
 
