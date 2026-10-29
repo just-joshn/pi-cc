@@ -1,17 +1,38 @@
 /**
- * Per-case, per-side sandbox roots. Every path the sandbox profile names is realpath-resolved because
- * Seatbelt matches resolved paths: a profile that says `/var/...` instead of `/private/var/...`
- * silently denies writes to its own temp root.
+ * Per-case, per-side sandbox roots, and every syscall the harness makes on a path a side can write.
+ *
+ * Two rules hold here. A path the side controls is only ever read without following a link at its last
+ * component, so the unsandboxed harness cannot be pointed at the operator's files. And a path the side
+ * controls is only ever hashed or read after being classified, so a link, a fifo, or a mode that denies
+ * the read becomes a reported violation instead of a crash, a hang, or leaked content.
+ *
+ * Every path the sandbox profile names is realpath-resolved because Seatbelt matches resolved paths: a
+ * profile that says `/var/...` instead of `/private/var/...` silently denies writes to its own temp root.
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
+import {
+	closeSync,
+	constants,
+	fstatSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
 import { userInfo } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
 export const PROBES = { ls: "/bin/ls", nc: "/usr/bin/nc", open: "/usr/bin/open" } as const;
+
+export type ProbeName = keyof typeof PROBES;
 
 export type SideName = "claude" | "pi-cc";
 
@@ -38,6 +59,9 @@ export interface Roots {
 }
 
 export const REAL_HOME = userInfo().homedir;
+
+/** A case workspace holds source and config files, so a file past this is a plant, not case data. */
+const MAX_READ_BYTES = 8 * 1024 * 1024;
 const FIXTURES_DIR = fileURLToPath(new URL("../fixtures/", import.meta.url));
 
 const MODEL_API_KEY = "sk-ant-conformance-fixture-0000000000000000";
@@ -77,9 +101,10 @@ export function expandPlaceholders(value: string, roots: Roots): string {
 }
 
 /**
- * The environment every side runs with. The harness owns these keys: a case may add its own, but a case
- * that replaced PATH, HOME, or a disable flag would measure itself instead of the pinned binary. The
- * key list is derived from this table so the loader and the runner cannot disagree about what is owned.
+ * The environment every side runs with. The harness owns these keys and the loader refuses a case that
+ * replaces one, because a case that replaced PATH, HOME, or a disable flag would measure itself instead
+ * of the pinned binary. The key list is derived from this table so the loader and the runner cannot
+ * disagree about what is owned.
  */
 const HARNESS_ENV: Readonly<Record<string, (roots: Roots, port: number | null) => string | undefined>> = {
 	PATH: () => "/usr/bin:/bin:/usr/sbin:/sbin",
@@ -121,31 +146,209 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 	return env;
 }
 
+/**
+ * Writes the case's files into `workspace/`. Content is expanded like argv, because a seeded
+ * `settings.json` hook command needs an absolute host path that the sandboxed process cannot learn
+ * from its own environment, such as `$REAL_HOME`.
+ */
 export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const target = join(roots.workspace, path);
 		if (relative(roots.workspace, target).startsWith("..")) throw new Error(`seeded path escapes workspace: ${path}`);
 		mkdirp(dirname(target));
-		writeFileSync(target, content);
+		writeFileSync(target, expandPlaceholders(content, roots));
 	}
 }
 
-export function hashTree(dir: string): Map<string, string> {
-	const hashes = new Map<string, string>();
-	const walk = (current: string) => {
-		for (const entry of readdirSync(current, { withFileTypes: true })) {
-			const path = join(current, entry.name);
-			if (entry.isDirectory()) {
-				walk(path);
-			} else if (entry.isFile()) {
-				hashes.set(relative(dir, path), createHash("sha256").update(readFileSync(path)).digest("hex"));
-			} else if (entry.isSymbolicLink()) {
-				hashes.set(relative(dir, path), `symlink:${realpathSync(path)}`);
-			}
+/** Every violation the harness can report against a side. Case data names one of these. */
+export const VIOLATION_KINDS = [
+	"symlink",
+	"escaping-symlink",
+	"dangling-symlink",
+	"not-regular-file",
+	"unreadable",
+	"survivor",
+] as const;
+
+export type ViolationKind = (typeof VIOLATION_KINDS)[number];
+
+export interface Violation {
+	kind: ViolationKind;
+	/** A workspace-relative path, or null for the workspace itself and for a live descendant. */
+	path: string | null;
+}
+
+export interface TreeScan {
+	/** Relative path to an opaque value. Only a regular file the walk could read carries a digest. */
+	entries: Map<string, string>;
+	/** The text of the wanted paths, read in the same pass that hashed them. */
+	text: Map<string, string>;
+	violations: Violation[];
+}
+
+/**
+ * Hashes a side's tree without following a link, opening a special file, or throwing on what the side
+ * left behind. A link, a fifo or socket, an entry the walk could not read, and a file over the read cap
+ * each become a violation and are never opened, so nothing downstream can be pointed at the operator's
+ * files or block on a pipe. The tree's own anchor is checked first: a side can rename its workspace and
+ * leave a link in its place, and the harness must never walk what that link names.
+ *
+ * `wanted` names the paths whose text the caller compares. Their text is kept from the same open that
+ * produced the digest, so what the harness hashes and what it reports cannot come from two states of
+ * the tree. The walk keeps its own stack rather than recursing, so a tree of any depth is reported
+ * rather than overflowing the stack.
+ */
+export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan {
+	const scan: TreeScan = { entries: new Map(), text: new Map(), violations: [] };
+	const wantedPaths = new Set(wanted);
+	const root = realpathOrNull(dir);
+	if (root === null) {
+		scan.violations.push({ kind: "unreadable", path: null });
+		return scan;
+	}
+	const anchor = lstatOrNull(dir);
+	if (anchor === null) {
+		scan.violations.push({ kind: "unreadable", path: null });
+		return scan;
+	}
+	if (anchor.isSymbolicLink()) {
+		scan.violations.push({ kind: "symlink", path: null });
+		return scan;
+	}
+	if (!anchor.isDirectory()) {
+		scan.violations.push({ kind: "not-regular-file", path: null });
+		return scan;
+	}
+	const pending: { path: string; prefix: string }[] = [{ path: dir, prefix: "" }];
+	while (pending.length > 0) {
+		const current = pending.pop();
+		if (current === undefined) break;
+		scanDirectory(current.path, current.prefix, root, wantedPaths, scan, pending);
+	}
+	return scan;
+}
+
+/** The paths that exist, where a dangling link counts as present: the side tried to create something. */
+export function findPresentPaths(paths: readonly string[]): string[] {
+	return paths.filter((path) => lstatOrNull(path) !== null);
+}
+
+function scanDirectory(
+	current: string,
+	prefix: string,
+	root: string,
+	wanted: Set<string>,
+	scan: TreeScan,
+	pending: { path: string; prefix: string }[],
+): void {
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(current, { withFileTypes: true });
+	} catch (error) {
+		const path = prefix === "" ? null : prefix;
+		scan.entries.set(path ?? ".", `unreadable:${errorCode(error)}`);
+		scan.violations.push({ kind: "unreadable", path });
+		return;
+	}
+	for (const entry of entries) {
+		const path = join(current, entry.name);
+		const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+		if (entry.isDirectory()) {
+			pending.push({ path, prefix: relative });
+			continue;
 		}
+		if (entry.isSymbolicLink()) {
+			const target = readlinkOrNull(path);
+			if (target === null) {
+				scan.entries.set(relative, "unreadable:link");
+				scan.violations.push({ kind: "unreadable", path: relative });
+				continue;
+			}
+			const kind = linkKind(path, target, root);
+			scan.entries.set(relative, `symlink:${kind}:${target}`);
+			scan.violations.push({ kind, path: relative });
+			continue;
+		}
+		if (!entry.isFile()) {
+			scan.entries.set(relative, `special:${specialKind(entry)}`);
+			scan.violations.push({ kind: "not-regular-file", path: relative });
+			continue;
+		}
+		readRegularFile(path, relative, wanted.has(relative), scan);
+	}
+}
+
+function readRegularFile(path: string, relative: string, keepText: boolean, scan: TreeScan): void {
+	const refuse = (reason: string) => {
+		scan.entries.set(relative, `unreadable:${reason}`);
+		scan.violations.push({ kind: "unreadable", path: relative });
 	};
-	if (statSync(dir).isDirectory()) walk(dir);
-	return hashes;
+	try {
+		const fd = openNoFollow(path);
+		try {
+			if (fstatSync(fd).size > MAX_READ_BYTES) {
+				refuse("too-large");
+				return;
+			}
+			const content = readFileSync(fd);
+			scan.entries.set(relative, createHash("sha256").update(content).digest("hex"));
+			if (keepText) scan.text.set(relative, content.toString("utf8"));
+		} finally {
+			closeSync(fd);
+		}
+	} catch (error) {
+		refuse(errorCode(error));
+	}
+}
+
+/** How a link relates to the tree it sits in, decided from where its target lands, not from its text. */
+function linkKind(linkPath: string, target: string, root: string): ViolationKind {
+	const landed = realpathOrNull(resolve(dirname(linkPath), target));
+	if (landed === null) return "dangling-symlink";
+	if (landed === root || landed.startsWith(`${root}/`)) return "symlink";
+	return "escaping-symlink";
+}
+
+function specialKind(entry: Dirent): string {
+	if (entry.isFIFO()) return "fifo";
+	if (entry.isSocket()) return "socket";
+	if (entry.isBlockDevice()) return "block-device";
+	if (entry.isCharacterDevice()) return "character-device";
+	return "unknown";
+}
+
+/** Opens a side-controlled path without following a link at its last component. */
+function openNoFollow(path: string): number {
+	return openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+}
+
+function lstatOrNull(path: string): Stats | null {
+	try {
+		return lstatSync(path);
+	} catch {
+		return null;
+	}
+}
+
+function realpathOrNull(path: string): string | null {
+	try {
+		return realpathSync(path);
+	} catch {
+		return null;
+	}
+}
+
+function readlinkOrNull(path: string): string | null {
+	try {
+		return readlinkSync(path);
+	} catch {
+		return null;
+	}
+}
+
+function errorCode(error: unknown): string {
+	const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+	return typeof code === "string" ? code : "unknown";
 }
 
 /**
@@ -194,6 +397,10 @@ export function renderProfile(options: ProfileOptions): string {
 		`(allow file-read* (subpath ${quote(roots.root)}))`,
 		"(deny file-write*)",
 		`(allow file-write* (subpath ${quote(roots.root)}))`,
+		// The harness writes its evidence into `out/` after the run, and the mock appends its request
+		// log there during it. A side that could write there could plant a link for the harness to
+		// follow, so the allow is taken back: the last matching rule wins.
+		`(deny file-write* (subpath ${quote(roots.out)}))`,
 		...["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/dtracehelper"].map(
 			(path) => `(allow file-write* (literal ${quote(path)}))`,
 		),

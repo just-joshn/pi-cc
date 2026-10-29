@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBeGreaterThan(20);
+		expect(cases.length).toBe(35);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -51,30 +51,6 @@ describe("loadCases", () => {
 		expect(() => loadOne({ ...MINIMAL_CASE, compar: { exit: 0 } })).toThrow(/case has unknown key "compar"/);
 	});
 
-	test("rejects a case that runs a subcommand the harness must never reach", () => {
-		for (const subcommand of ["login", "logout", "update", "install", "setup-token"]) {
-			expect(() => loadOne({ ...MINIMAL_CASE, argv: [subcommand] })).toThrow(
-				new RegExp(`argv must not run "${subcommand}"`),
-			);
-		}
-	});
-
-	test("rejects --update", () => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--update"] })).toThrow(/argv must not contain "--update"/);
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hi", "--update=now"] })).toThrow(
-			/argv must not contain "--update=now"/,
-		);
-	});
-
-	test("rejects the remaining subcommands that mutate or authenticate", () => {
-		for (const token of ["plugins", "import", "gateway", "ultrareview", "rm", "--bg"]) {
-			expect(() => loadOne({ ...MINIMAL_CASE, argv: [token] })).toThrow(new RegExp(`argv must not run "${token}"`));
-			expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hello", token] })).toThrow(
-				new RegExp(`argv must not run "${token}"`),
-			);
-		}
-	});
-
 	test("rejects env the harness owns", () => {
 		for (const key of [
 			"PATH",
@@ -82,17 +58,32 @@ describe("loadCases", () => {
 			"DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 			"ANTHROPIC_BASE_URL",
+			"ANTHROPIC_API_KEY",
 		]) {
 			expect(() => loadOne({ ...MINIMAL_CASE, env: { [key]: "/tmp/elsewhere" } })).toThrow(
-				new RegExp(`env cannot replace "${key}"`),
+				new RegExp(`env cannot replace "${key}" because the harness sets it`),
 			);
 		}
 	});
 
-	test("keeps env a case owns", () => {
-		expect(loadOne({ ...MINIMAL_CASE, env: { PI_CONFORMANCE_PROBE: "1" } }).env).toEqual({
-			PI_CONFORMANCE_PROBE: "1",
-		});
+	test("loads the env keys the ENV unit needs", () => {
+		for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_MODEL"]) {
+			expect(loadOne({ ...MINIMAL_CASE, env: { [key]: "probe" } }).env).toEqual({ [key]: "probe" });
+		}
+	});
+
+	test("loads the provider-env keys PR #6 selects models with", () => {
+		for (const key of [
+			"ANTHROPIC_SMALL_FAST_MODEL",
+			"ANTHROPIC_DEFAULT_OPUS_MODEL",
+			"ANTHROPIC_DEFAULT_SONNET_MODEL",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+			"ANTHROPIC_DEFAULT_FABLE_MODEL",
+		]) {
+			expect(loadOne({ ...MINIMAL_CASE, env: { [key]: "claude-haiku-4-5" } }).env).toEqual({
+				[key]: "claude-haiku-4-5",
+			});
+		}
 	});
 
 	test("rejects a timeout that is not a positive integer", () => {
@@ -166,28 +157,260 @@ describe("stdout allowExtra", () => {
 	});
 });
 
-const DENIED_ARGV: string[][] = [
-	["upgrade"],
-	["--verbose", "update"],
-	["--", "login"],
-	["--model", "x", "setup-token"],
-	["LOGIN"],
-	["auth", "logout"],
-	["purge"],
-	["respawn"],
-	["plugin", "install", "x"],
+interface VerifierRepro {
+	label: string;
+	argv?: string[];
+	probe?: string;
+	env?: Record<string, string>;
+	stdin?: { kind: "text"; data: string };
+}
+
+/** One row per bypass a verification round reported, so a hole that reopens names itself. */
+const VERIFIER_REPROS: VerifierRepro[] = [
+	{
+		label: "edit-permission-rules with permissions on stdin",
+		argv: ["edit-permission-rules", "--json"],
+		stdin: { kind: "text", data: '{"permissions":{"allow":[]}}' },
+	},
+	{ label: "edit-hook", argv: ["edit-hook"] },
+	{ label: "edit-memory-settings", argv: ["edit-memory-settings"] },
+	{ label: "edit-skill-overrides", argv: ["edit-skill-overrides"] },
+	{ label: "edit-sandbox-settings", argv: ["edit-sandbox-settings"] },
+	{ label: "edit-chrome-settings", argv: ["edit-chrome-settings"] },
+	{ label: "import-conversations", argv: ["import-conversations"] },
+	{ label: "drop-worktree-registrations", argv: ["drop-worktree-registrations"] },
+	{ label: "design-login", argv: ["design-login"] },
+	{ label: "apply-project-settings", argv: ["apply-project-settings"] },
+	{ label: "remote-control", argv: ["remote-control"] },
+	{ label: "rc", argv: ["rc"] },
+	{ label: "mcp xaa setup", argv: ["mcp", "xaa", "setup"] },
+	{ label: "mcp xaa clear", argv: ["mcp", "xaa", "clear"] },
+	{ label: "--background", argv: ["--background"] },
+	{ label: "--bg", argv: ["--bg"] },
+	{ label: "stop", argv: ["stop", "probe-id"] },
+	{ label: "kill", argv: ["kill", "probe-id"] },
+	{ label: "attach", argv: ["attach", "probe-id"] },
+	{ label: "auth", argv: ["auth"] },
+	{ label: "LOGIN in any case", argv: ["LOGIN"] },
+	{ label: "--login", argv: ["--login"] },
+	{ label: "mcp add", argv: ["mcp", "add", "probe", "probe-command"] },
+	{ label: "mcp list add", argv: ["mcp", "list", "add"] },
+	{ label: "auto-mode reset -y", argv: ["auto-mode", "reset", "-y"] },
+	{ label: "agents --cwd", argv: ["agents", "--cwd", "."] },
+	{ label: "edit-hook after a prompt", argv: ["-p", "hello", "edit-hook"] },
+	{ label: "--update", argv: ["--update"] },
+	{ label: "--update=now after -p", argv: ["-p", "hi", "--update=now"] },
+	{ label: "--worktree", argv: ["--worktree", "probe"] },
+	{ label: "-w", argv: ["-w", "probe"] },
+	{ label: "--plugin-dir", argv: ["--plugin-dir", "$WORKSPACE/p"] },
+	{ label: "--plugin-url", argv: ["--plugin-url", "https://example.test/p.zip"] },
+	{ label: "--file", argv: ["--file", "https://example.test/f"] },
+	{ label: "--teleport", argv: ["--teleport"] },
+	{ label: "--cloud", argv: ["--cloud"] },
+	{ label: "--desktop", argv: ["--desktop"] },
+	{ label: "--chrome", argv: ["--chrome"] },
+	{ label: "--ide", argv: ["--ide"] },
+	{ label: "--environment", argv: ["--environment", "probe"] },
+	{ label: "--from-pr", argv: ["--from-pr", "1"] },
+	{ label: "--tmux", argv: ["--tmux"] },
+	{ label: "--remote-control-session-name-prefix", argv: ["--remote-control-session-name-prefix", "x"] },
+	{ label: "nc -e", probe: "nc", argv: ["-e", "/bin/sh", "127.0.0.1", "1"] },
+	{ label: "BUN_OPTIONS preload", env: { BUN_OPTIONS: "--preload=/tmp/probe.ts" } },
+	{ label: "DYLD_LIBRARY_PATH", env: { DYLD_LIBRARY_PATH: "/tmp/probe" } },
+	{ label: "DYLD_FRAMEWORK_PATH", env: { DYLD_FRAMEWORK_PATH: "/tmp/probe" } },
+	{ label: "NODE_PATH", env: { NODE_PATH: "/tmp/probe" } },
+	{ label: "NODE_OPTIONS", env: { NODE_OPTIONS: "--require=/tmp/probe.js" } },
+	{ label: "CLAUDE_CODE_USE_BEDROCK", env: { CLAUDE_CODE_USE_BEDROCK: "1" } },
+	{ label: "CLAUDE_CODE_USE_VERTEX", env: { CLAUDE_CODE_USE_VERTEX: "1" } },
+	{ label: "CLAUDE_CODE_OAUTH_TOKEN", env: { CLAUDE_CODE_OAUTH_TOKEN: "probe" } },
+	{ label: "GITHUB_TOKEN", env: { GITHUB_TOKEN: "probe" } },
+	{ label: "CLAUDE_CODE_API_TOKEN_FILE_DESCRIPTOR", env: { CLAUDE_CODE_API_TOKEN_FILE_DESCRIPTOR: "3" } },
+	{ label: "HTTPS_PROXY", env: { HTTPS_PROXY: "http://127.0.0.1:1" } },
+	{ label: "ALL_PROXY", env: { ALL_PROXY: "http://127.0.0.1:1" } },
+	{ label: "NODE_TLS_REJECT_UNAUTHORIZED", env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" } },
+	{ label: "NODE_EXTRA_CA_CERTS", env: { NODE_EXTRA_CA_CERTS: "/tmp/probe.pem" } },
+	{ label: "CLAUDE_CODE_API_BASE_URL", env: { CLAUDE_CODE_API_BASE_URL: "https://example.test" } },
+	{ label: "PI_CONFORMANCE_PROBE", env: { PI_CONFORMANCE_PROBE: "1" } },
 ];
 
-describe("denied argv tokens", () => {
-	test.each(DENIED_ARGV.map((argv) => [argv]))("rejects %j", (argv) => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/argv must not run "/);
+describe("reported bypasses", () => {
+	test.each(VERIFIER_REPROS)("refuses $label", (repro: VerifierRepro) => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, probe: repro.probe, argv: repro.argv, env: repro.env, stdin: repro.stdin }),
+		).toThrow(/is not in the reviewed allowlist|env cannot replace/);
+	});
+});
+
+/** Every word the old denylist named, so dropping the list cannot quietly reopen one. */
+const FORMERLY_DENIED: string[][] = [
+	["auth"],
+	["login"],
+	["logout"],
+	["install"],
+	["uninstall"],
+	["update"],
+	["upgrade"],
+	["setup-token"],
+	["purge"],
+	["respawn"],
+	["plugin"],
+	["plugins"],
+	["migrate-installer"],
+	["import"],
+	["gateway"],
+	["ultrareview"],
+	["rm"],
+	["bg"],
+	["stop"],
+	["kill"],
+	["attach"],
+	["mcp", "add", "probe", "probe-command"],
+	["mcp", "remove", "probe"],
+	["mcp", "add-json", "probe", "{}"],
+	["mcp", "add-from-claude-desktop"],
+	["mcp", "reset-project-choices"],
+];
+
+describe("words the old denylist refused", () => {
+	test.each(FORMERLY_DENIED.map((argv) => [argv]))("still refuses %j", (argv) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/is not in the reviewed allowlist/);
+	});
+});
+
+describe("allowlist messages", () => {
+	test("names the word and the list it belongs in", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["edit-permission-rules", "--json"] })).toThrow(
+			/argv word "edit-permission-rules" is not in the reviewed allowlist, so add it to SIDE_ARGV\.words in conformance\/allowlist\.ts after review/,
+		);
 	});
 
-	test("names the offending token and the rule", () => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--", "login"] })).toThrow(
-			/argv must not run "login": the harness never runs a claude subcommand that authenticates, installs, or mutates/,
+	test("names the flag and the list it belongs in", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--background"] })).toThrow(
+			/argv flag "--background" is not in the reviewed allowlist, so add it to SIDE_ARGV\.flags/,
 		);
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--login"] })).toThrow(/argv must not run "--login"/);
+	});
+
+	test("names a short flag", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-w", "probe"] })).toThrow(
+			/argv flag "-w" is not in the reviewed allowlist/,
+		);
+	});
+
+	test("names the probe's own list", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, probe: "nc", argv: ["-e", "/bin/sh"] })).toThrow(
+			/argv flag "-e" is not in the reviewed allowlist, so add it to PROBE_ARGV\.nc\.flags/,
+		);
+	});
+
+	test("names the env key and the list it belongs in", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, env: { BUN_OPTIONS: "--preload=/tmp/probe.ts" } })).toThrow(
+			/env key "BUN_OPTIONS" is not in the reviewed allowlist, so add it to CASE_ENV_KEYS in conformance\/allowlist\.ts after review/,
+		);
+	});
+});
+
+const READ_ONLY_ARGV: [string[], string?][] = [
+	[["-p", "hello"]],
+	[["-p", "Reply with exactly PROBE_OK"]],
+	[["--output-format", "json"]],
+	[["--output-format=json"]],
+	[["--settings", "{}"]],
+	[["--setting-sources", "project"]],
+	[["-A", "$HOME"], "ls"],
+];
+
+describe("keeps the argv a case writes", () => {
+	test.each(READ_ONLY_ARGV)("loads %j", (argv, probe) => {
+		expect(loadOne({ ...MINIMAL_CASE, probe, argv }).argv).toEqual(argv);
+	});
+});
+
+/** Entries no case writes, removed this round. A word or flag that creeps back names itself here. */
+const SUBTRACTED: string[][] = [
+	["mcp"],
+	["mcp", "list"],
+	["mcp", "get", "probe"],
+	["agents", "--json"],
+	["auto-mode", "config"],
+	["auto-mode", "defaults"],
+	["auto-mode", "critique"],
+	["logs"],
+	["doctor"],
+	["text"],
+	["high"],
+	["--mcp-config", "probe"],
+	["--agents=probe"],
+	["--dangerously-skip-permissions"],
+	["--print"],
+	["--model", "probe"],
+	["--add-dir", "."],
+];
+
+describe("entries no case writes", () => {
+	test.each(SUBTRACTED.map((argv) => [argv]))("refuses %j", (argv) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/is not in the reviewed allowlist/);
+	});
+});
+
+describe("file assertions", () => {
+	test("loads a bare path and a path with fragments", () => {
+		const files = ["a.txt", { path: "b.txt", contains: ["x"] }];
+		expect(loadOne({ ...MINIMAL_CASE, compare: { exit: 0, files } }).compare.files).toEqual(files);
+	});
+
+	test("rejects a path that reaches outside the workspace", () => {
+		for (const path of ["/etc/passwd", "../outside.txt", "a/../../b"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, files: [path] } })).toThrow(
+				/must be relative to the workspace, without "\.\."/,
+			);
+			expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, files: [{ path }] } })).toThrow(
+				/must be relative to the workspace, without "\.\."/,
+			);
+		}
+	});
+
+	test("rejects a misspelled fragment key", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, files: [{ path: "a", contain: ["x"] }] } })).toThrow(
+			/compare\.files\[0\] has unknown key "contain"/,
+		);
+	});
+
+	test("loads absent paths and rejects a relative one", () => {
+		const absent = ["$REAL_HOME/marker.txt", "/tmp/marker.txt"];
+		expect(loadOne({ ...MINIMAL_CASE, compare: { exit: 0, absent } }).compare.absent).toEqual(absent);
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, absent: ["marker.txt"] } })).toThrow(
+			/must be absolute or start with a \$ placeholder/,
+		);
+	});
+});
+
+describe("not applicable sides", () => {
+	test("loads a side with its reason", () => {
+		const reason = "hooks land in P08";
+		expect(loadOne({ ...MINIMAL_CASE, not_applicable: { "pi-cc": reason } }).notApplicable).toEqual({
+			"pi-cc": reason,
+		});
+	});
+
+	test("rejects a key that is not a side", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, not_applicable: { claude_code: "x" } })).toThrow(
+			/not_applicable key "claude_code" is not a side \(claude, pi-cc\)/,
+		);
+	});
+
+	test("rejects a reason that says nothing", () => {
+		for (const reason of ["", "   "]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, not_applicable: { "pi-cc": reason } })).toThrow(/needs a reason/);
+		}
+		expect(() => loadOne({ ...MINIMAL_CASE, not_applicable: { "pi-cc": 7 } })).toThrow(
+			/not_applicable\.pi-cc must be a string/,
+		);
+	});
+
+	test("rejects a case that excludes every side", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, not_applicable: { claude: "a", "pi-cc": "b" } })).toThrow(
+			/not_applicable names every side, so the case would assert nothing/,
+		);
 	});
 });
 
@@ -210,5 +433,54 @@ describe("probe table", () => {
 
 	test("rejects case data that names a binary path", () => {
 		expect(() => loadOne({ ...MINIMAL_CASE, binary: "/bin/sh" })).toThrow(/case has unknown key "binary"/);
+	});
+});
+
+describe("containment declarations", () => {
+	test("loads a planted violation with and without a path", () => {
+		const containment = [{ kind: "escaping-symlink", path: "secret.log" }, { kind: "survivor" }];
+		expect(loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment } }).compare.containment).toEqual(containment);
+	});
+
+	test("rejects a kind the harness cannot report", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "escape" }] } })).toThrow(
+			/is not a violation kind/,
+		);
+	});
+
+	test("rejects a path that reaches outside the workspace", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "symlink", path: "/etc/hosts" }] } }),
+		).toThrow(/must be relative to the workspace, without "\.\."/);
+	});
+
+	test("rejects a path on a survivor, which is a process", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "survivor", path: "late.txt" }] } }),
+		).toThrow(/is a process, not a path/);
+	});
+
+	test("rejects a misspelled key", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "symlink", target: "a" }] } }),
+		).toThrow(/compare\.containment\[0\] has unknown key "target"/);
+	});
+});
+
+describe("containment declarations that could never match", () => {
+	test("rejects a link kind with no path", () => {
+		for (const kind of ["escaping-symlink", "dangling-symlink"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind }] } })).toThrow(
+				/\.path is required/,
+			);
+		}
+	});
+
+	test("rejects a path spelling the scan never produces", () => {
+		for (const path of ["./secret.log", "secret.log/"]) {
+			expect(() =>
+				loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "symlink", path }] } }),
+			).toThrow(/without "\.\/" or a trailing "\/"/);
+		}
 	});
 });

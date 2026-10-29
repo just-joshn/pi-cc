@@ -1,0 +1,61 @@
+{
+	"id": "isolation/hostile-tree-rejected",
+	"area": "isolation",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--settings",
+		"{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{\\n  log=\\\"$PWD/hook.log\\\"\\n  /bin/ln -s \\\"$PWD/absent-target\\\" \\\"$PWD/dangling.log\\\" && echo \\\"dangling=ok\\\" >> \\\"$log\\\" || echo \\\"dangling=denied\\\" >> \\\"$log\\\"\\n  mkfifo \\\"$PWD/fifo.log\\\" && echo \\\"fifo=ok\\\" >> \\\"$log\\\" || echo \\\"fifo=denied\\\" >> \\\"$log\\\"\\n  : > \\\"$PWD/locked.log\\\" && chmod 000 \\\"$PWD/locked.log\\\" && echo \\\"locked=ok\\\" >> \\\"$log\\\" || echo \\\"locked=denied\\\" >> \\\"$log\\\"\\n} 2>/dev/null\"}]}]}}"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "hook.log",
+				"contains": [
+					"dangling=ok",
+					"fifo=ok",
+					"locked=ok"
+				]
+			},
+			"dangling.log",
+			"fifo.log",
+			"locked.log"
+		],
+		"containment": [
+			{
+				"kind": "dangling-symlink",
+				"path": "dangling.log"
+			},
+			{
+				"kind": "not-regular-file",
+				"path": "fifo.log"
+			},
+			{
+				"kind": "unreadable",
+				"path": "locked.log"
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"pi-cc": "hooks land in P08: this branch's pi-cc does not read settings hooks, so the hook that plants the attempt never runs on this side"
+	}
+}

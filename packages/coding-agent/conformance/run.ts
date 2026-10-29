@@ -1,18 +1,27 @@
 /** Runs each case against the pinned claude binary and the built pi-cc CLI, then prints a scoreboard. */
 
-import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { ConformanceCase, StdinSpec } from "./case.ts";
+import type { ConformanceCase, FileSpec, StdinSpec } from "./case.ts";
 import { loadCases } from "./case.ts";
 import type { Diff, Observation } from "./compare.ts";
 import { compare } from "./compare.ts";
-import type { Roots, Side, SideName } from "./isolate.ts";
-import { baseEnv, createRoots, expandPlaceholders, hashTree, REAL_HOME, renderProfile, seedFiles } from "./isolate.ts";
+import type { Roots, Side, SideName, Violation } from "./isolate.ts";
+import {
+	baseEnv,
+	createRoots,
+	expandPlaceholders,
+	findPresentPaths,
+	hashTree,
+	REAL_HOME,
+	renderProfile,
+	seedFiles,
+} from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
@@ -26,6 +35,8 @@ interface SideRun {
 	ran: boolean;
 	diffs: Diff[];
 	stderr: string;
+	/** The case's reason when it declares this side not applicable. */
+	notApplicable: string | null;
 }
 
 interface CaseRun {
@@ -41,6 +52,8 @@ interface ProcessResult {
 	stdout: string;
 	stderr: string;
 	timedOut: boolean;
+	/** The side left a process behind, which the harness killed before it hashed the workspace. */
+	survivors: boolean;
 }
 
 const CONFORMANCE_DIR = fileURLToPath(new URL(".", import.meta.url));
@@ -161,11 +174,22 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 
 async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string): Promise<CaseRun> {
 	const runs: SideRun[] = [];
-	// The verdict is only PASS when every side ran, so a claude side that was not selected still reports here.
-	if (!sides.some((side) => side.name === "claude")) runs.push({ side: "claude", ran: false, diffs: [], stderr: "" });
-	for (const side of sides) runs.push(await runSide(testCase, side, runRoot));
+	// The verdict is only PASS when every applicable side ran, so a claude side that was not selected reports here.
+	if (!sides.some((side) => side.name === "claude")) {
+		runs.push({ side: "claude", ran: false, diffs: [], stderr: "", notApplicable: null });
+	}
+	for (const side of sides) {
+		const reason = testCase.notApplicable[side.name];
+		if (reason !== undefined) {
+			runs.push({ side: side.name, ran: false, diffs: [], stderr: "", notApplicable: reason });
+			continue;
+		}
+		runs.push(await runSide(testCase, side, runRoot));
+	}
 	const failed = runs.some((run) => run.diffs.length > 0);
-	const verdict: Verdict = failed ? "FAIL" : runs.some((run) => !run.ran) ? "UNVERIFIED" : "PASS";
+	const applicable = runs.filter((run) => run.notApplicable === null);
+	const verified = applicable.length > 0 && applicable.every((run) => run.ran);
+	const verdict: Verdict = failed ? "FAIL" : verified ? "PASS" : "UNVERIFIED";
 	return { id: testCase.id, area: testCase.area, verdict, runs, skip: null };
 }
 
@@ -188,15 +212,22 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 
 		const workspaceBefore = hashTree(roots.workspace);
 		const result = await runSandboxed(profilePath, argv, roots, env, testCase.stdin, testCase.timeout_ms);
+		const workspaceAfter = hashTree(takeWorkspace(roots), expectedFilePaths(testCase));
+		const violations: Violation[] = [...workspaceAfter.violations];
+		if (result.survivors) violations.push({ kind: "survivor", path: null });
 		const observation: Observation = {
 			timedOut: result.timedOut,
 			exitCode: result.exitCode,
 			stdout: result.stdout,
 			stderr: result.stderr,
 			requests: mock?.requests ?? [],
-			workspaceBefore,
-			workspaceAfter: hashTree(roots.workspace),
+			workspaceBefore: workspaceBefore.entries,
+			workspaceAfter: workspaceAfter.entries,
+			fileText: workspaceAfter.text,
+			forbiddenPathsFound: findPresentPaths(absentPaths(testCase, roots)),
+			violations,
 		};
+		// The profile denies the side every write under `out/`, so nothing it planted can redirect these.
 		writeFileSync(join(roots.out, "stdout.txt"), result.stdout);
 		writeFileSync(join(roots.out, "stderr.txt"), result.stderr);
 		writeFileSync(
@@ -204,10 +235,39 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 			`${JSON.stringify({ argv, env, ...summarize(result, observation.requests) }, null, "\t")}\n`,
 		);
 		const diffs = compare(testCase.compare, observation, { sideRoot: roots.root, realHome: REAL_HOME });
-		return { side: side.name, ran: true, diffs, stderr: result.stderr };
+		return { side: side.name, ran: true, diffs, stderr: result.stderr, notApplicable: null };
 	} finally {
 		if (mock !== null) await mock.close();
 	}
+}
+
+/**
+ * Moves the workspace out of the side's write grant before the harness reads it, and returns where it
+ * now lives. A process that outlived the side can then neither add nor change a file in the tree the
+ * harness hashes, because the profile grants writes only under `roots.root`. A workspace that no longer
+ * exists is scanned where the case expected it, which reports it as unreadable.
+ */
+function takeWorkspace(roots: Roots): string {
+	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
+	try {
+		renameSync(roots.workspace, snapshot);
+		return snapshot;
+	} catch {
+		// The workspace could not be moved out of the side's reach, so scan a path that cannot exist
+		// rather than a tree the side can still write. That reports as unreadable, which fails the case.
+		return join(dirname(roots.root), `snapshot-${roots.side}-unavailable`);
+	}
+}
+
+/** The workspace-relative paths a case asserts on, so a `contains` check never reads a path it was not given. */
+function expectedFilePaths(testCase: ConformanceCase): string[] {
+	return (testCase.compare.files ?? []).map((spec: FileSpec) => (typeof spec === "string" ? spec : spec.path));
+}
+
+/** A `compare.absent` path that exists after the run is a containment failure, so the harness looks itself. */
+function absentPaths(testCase: ConformanceCase, roots: Roots): string[] {
+	// Resolved lexically, because the workspace moves out of the side's root before this runs.
+	return (testCase.compare.absent ?? []).map((spec) => resolve(expandPlaceholders(spec, roots)));
 }
 
 function summarize(result: ProcessResult, requests: RecordedRequest[]) {
@@ -227,6 +287,7 @@ function runSandboxed(
 	timeoutMs: number,
 ): Promise<ProcessResult> {
 	return new Promise((resolve, reject) => {
+		const startedAt = Date.now();
 		const child = spawn(SANDBOX_EXEC, ["-f", profilePath, ...argv], {
 			cwd: roots.workspace,
 			env,
@@ -244,26 +305,122 @@ function runSandboxed(
 		child.stdin.end();
 		const timer = setTimeout(() => {
 			timedOut = true;
-			if (child.pid !== undefined) {
-				try {
-					process.kill(-child.pid, "SIGKILL");
-				} catch {}
-			}
+			if (child.pid !== undefined) killGroup(child.pid);
 		}, timeoutMs);
 		child.on("error", (error) => {
 			clearTimeout(timer);
 			reject(error);
 		});
-		child.on("close", (code) => {
+		child.on("close", async (code) => {
 			clearTimeout(timer);
+			const survivors = child.pid === undefined ? false : await reap(child.pid, roots, startedAt);
 			resolve({
 				exitCode: code,
 				stdout: Buffer.concat(stdout).toString("utf8"),
 				stderr: Buffer.concat(stderr).toString("utf8"),
 				timedOut,
+				survivors,
 			});
 		});
 	});
+}
+
+/**
+ * Kills the side's process group and every process this run started that is still working inside the
+ * side's root, then reports whether anything outlived the side. The group covers a child that stayed
+ * in it. The sweep covers a SessionStart hook, which Claude Code spawns detached: the hook shell lands
+ * in its own session, so `nohup ... &` inside it survives the group and has to be found in the process
+ * table. Both run to completion before the caller hashes the workspace, so a delayed writer cannot
+ * change what the case compared.
+ */
+async function reap(pgid: number, roots: Roots, startedAt: number): Promise<boolean> {
+	killGroup(pgid);
+	let survived = false;
+	const deadline = Date.now() + 2_000;
+	for (;;) {
+		const stragglers = stragglersIn(roots.root, startedAt);
+		if (stragglers.length === 0) break;
+		survived = true;
+		for (const pid of stragglers) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {}
+		}
+		if (Date.now() >= deadline) break;
+		await delay(25);
+	}
+	return survived;
+}
+
+function killGroup(pgid: number): void {
+	try {
+		process.kill(-pgid, "SIGKILL");
+	} catch {}
+}
+
+/**
+ * Processes that started after the run began and are still working inside the side's root. `ps` narrows
+ * the table by start time first, because confirming every process's directory costs 20x more, and
+ * `lsof` confirms the directory before anything is killed, so a process that merely started at the same
+ * moment is never touched.
+ */
+function stragglersIn(root: string, startedAt: number): number[] {
+	const listed = spawnSync("/bin/ps", ["-axo", "pid=,lstart="], { encoding: "utf8", timeout: 5_000 });
+	if (listed.stdout === null || listed.error !== undefined) {
+		warnOnce("survivor sweep unavailable: /bin/ps could not list processes");
+		return [];
+	}
+	const candidates: number[] = [];
+	let parsed = 0;
+	for (const line of listed.stdout.split("\n")) {
+		const fields = /^\s*(\d+)\s+(\S+ \S+ \S+ \S+ \S+)\s*$/.exec(line);
+		if (fields === null) continue;
+		parsed += 1;
+		const pid = Number.parseInt(fields[1], 10);
+		const started = Date.parse(fields[2]);
+		// `lstart` has one-second resolution, so a process that started just before the run still counts.
+		if (pid === process.pid || (!Number.isNaN(started) && started + 1_000 < startedAt)) continue;
+		candidates.push(pid);
+	}
+	if (parsed === 0) {
+		warnOnce("survivor sweep unavailable: /bin/ps no longer prints a start time this harness reads");
+		return [];
+	}
+	if (candidates.length === 0) return [];
+	const cwd = spawnSync("/usr/sbin/lsof", ["-a", "-d", "cwd", "-p", candidates.join(","), "-w", "-n", "-P", "-Fpn"], {
+		encoding: "utf8",
+		timeout: 5_000,
+	});
+	if (cwd.stdout === null || cwd.error !== undefined) {
+		warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories");
+		return [];
+	}
+	const pids: number[] = [];
+	let pid: number | null = null;
+	for (const line of cwd.stdout.split("\n")) {
+		if (line.startsWith("p")) {
+			pid = Number.parseInt(line.slice(1), 10);
+			continue;
+		}
+		if (line.startsWith("n") && pid !== null) {
+			const path = line.slice(1);
+			if (path === root || path.startsWith(`${root}/`)) pids.push(pid);
+		}
+	}
+	return pids;
+}
+
+const WARNINGS: string[] = [];
+
+/** One line on the console and in the report, so a sweep that cannot run is not mistaken for a clean one. */
+function warnOnce(message: string): void {
+	if (WARNINGS.includes(message)) return;
+	WARNINGS.push(message);
+	console.warn(message);
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function writeStdin(stream: Writable, stdin: StdinSpec): void {
@@ -303,12 +460,16 @@ function printHeader(selected: number, total: number, claude: ClaudeIdentity | n
 }
 
 function printRow(run: CaseRun, drift: string | null): void {
-	const cells = run.runs.map((side) =>
-		side.ran ? `${side.side} ${side.diffs.length === 0 ? "PASS" : "FAIL"}` : `${side.side} unverified`,
-	);
+	const cells = run.runs.map((side) => {
+		if (side.notApplicable !== null) return `${side.side} n/a`;
+		return side.ran ? `${side.side} ${side.diffs.length === 0 ? "PASS" : "FAIL"}` : `${side.side} unverified`;
+	});
 	const label = drift === null ? "" : `  [${drift}]`;
 	console.log(`${run.verdict.padEnd(10)} ${run.id.padEnd(38)} ${cells.join("  ")}${label}`);
 	if (run.skip !== null) console.log(`           skipped: ${run.skip}`);
+	for (const side of run.runs) {
+		if (side.notApplicable !== null) console.log(`           ${side.side} not applicable: ${side.notApplicable}`);
+	}
 	printDiffs(run);
 }
 
@@ -328,14 +489,26 @@ function printDiffs(run: CaseRun): void {
 function printTotals(runs: CaseRun[]): void {
 	const count = (verdict: Verdict) => runs.filter((run) => run.verdict === verdict).length;
 	for (const side of ["claude", "pi-cc"] as SideName[]) {
-		const sideRuns = runs.flatMap((run) => run.runs.filter((entry) => entry.side === side));
+		const sideRuns = runs.flatMap((run) =>
+			run.runs.filter((entry) => entry.side === side && entry.notApplicable === null),
+		);
 		const pass = sideRuns.filter((entry) => entry.ran && entry.diffs.length === 0).length;
 		const fail = sideRuns.filter((entry) => entry.diffs.length > 0).length;
-		console.log(`${side.padEnd(7)} side: ${pass} pass, ${fail} fail`);
+		const na = notApplicableCases(runs, side) === 0 ? "" : `, ${notApplicableCases(runs, side)} not applicable`;
+		console.log(`${side.padEnd(7)} side: ${pass} pass, ${fail} fail${na}`);
 	}
+	const partial = notApplicableCases(runs);
+	const note = partial === 0 ? "" : `; ${partial} with an n/a side`;
 	console.log(
-		`totals: ${count("PASS")} pass, ${count("FAIL")} fail, ${count("SKIP")} skip, ${count("UNVERIFIED")} unverified (of ${runs.length} cases)`,
+		`totals: ${count("PASS")} pass, ${count("FAIL")} fail, ${count("SKIP")} skip, ${count("UNVERIFIED")} unverified (of ${runs.length} cases${note})`,
 	);
+}
+
+/** Cases where a side is not applicable, so a pass covers only the sides that ran. */
+function notApplicableCases(runs: CaseRun[], side?: SideName): number {
+	return runs.filter((run) =>
+		run.runs.some((entry) => entry.notApplicable !== null && (side === undefined || entry.side === side)),
+	).length;
 }
 
 function writeReport(
@@ -350,11 +523,13 @@ function writeReport(
 		fail: runs.filter((run) => run.verdict === "FAIL").length,
 		skip: runs.filter((run) => run.verdict === "SKIP").length,
 		unverified: runs.filter((run) => run.verdict === "UNVERIFIED").length,
+		not_applicable: notApplicableCases(runs),
 	};
 	const report = {
 		run: new Date().toISOString(),
 		aborted,
 		run_root: runRoot,
+		...(WARNINGS.length === 0 ? {} : { warnings: WARNINGS }),
 		claude:
 			claude === null
 				? null
@@ -371,6 +546,13 @@ function writeReport(
 			verdict: run.verdict,
 			skip: run.skip,
 			...(drift === null ? {} : { claude_version: drift }),
+			...(run.runs.some((side) => side.notApplicable !== null)
+				? {
+						not_applicable: run.runs
+							.filter((side) => side.notApplicable !== null)
+							.map((side) => `${side.side}: ${side.notApplicable}`),
+					}
+				: {}),
 			diffs: run.runs.flatMap((side) =>
 				side.diffs.map((diff) => `${side.side} ${diff.check}: ${diff.expected} != ${diff.actual}`),
 			),

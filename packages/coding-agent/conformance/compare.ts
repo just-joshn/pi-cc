@@ -1,4 +1,5 @@
-import type { CompareSpec, StdoutSpec } from "./case.ts";
+import type { CompareSpec, ContainmentSpec, FileSpec, StdoutSpec } from "./case.ts";
+import type { Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
 import { normalizeText, normalizeWhitespace } from "./normalize/stdout.ts";
@@ -11,6 +12,12 @@ export interface Observation {
 	requests: RecordedRequest[];
 	workspaceBefore: Map<string, string>;
 	workspaceAfter: Map<string, string>;
+	/** Text of the `compare.files` paths that exist after the run. */
+	fileText: Map<string, string>;
+	/** `compare.absent` paths that exist after the run, which is a containment failure. */
+	forbiddenPathsFound: string[];
+	/** What the side left in its own tree that the harness refused to follow, plus a live descendant. */
+	violations: Violation[];
 }
 
 export interface Diff {
@@ -27,6 +34,8 @@ export function compare(spec: CompareSpec, observation: Observation, context: No
 	checkStdout(spec.stdout, observation, context, diffs);
 	checkStderr(spec.stderr, observation, diffs);
 	checkFiles(spec.files, observation, diffs);
+	checkAbsent(observation, diffs);
+	checkContainment(spec.containment, observation, diffs);
 	checkRequests(spec.requests, observation, diffs);
 	return diffs;
 }
@@ -159,19 +168,61 @@ function checkStderr(spec: CompareSpec["stderr"], observation: Observation, diff
 	}
 }
 
-function checkFiles(expected: string[] | undefined, observation: Observation, diffs: Diff[]): void {
+function checkFiles(expected: FileSpec[] | undefined, observation: Observation, diffs: Diff[]): void {
 	const before = observation.workspaceBefore;
 	const after = observation.workspaceAfter;
 	const changed = new Set<string>();
 	for (const [path, hash] of after) if (before.get(path) !== hash) changed.add(path);
 	for (const path of before.keys()) if (!after.has(path)) changed.add(path);
-	for (const path of expected ?? []) {
-		if (!after.has(path)) diffs.push({ check: "files", expected: `${path} written`, actual: "absent" });
+	for (const spec of expected ?? []) {
+		const path = typeof spec === "string" ? spec : spec.path;
+		if (!after.has(path)) {
+			diffs.push({ check: "files", expected: `${path} written`, actual: "absent" });
+		} else if (typeof spec !== "string") {
+			const text = observation.fileText.get(path) ?? "";
+			for (const fragment of spec.contains ?? []) {
+				if (text.includes(fragment)) continue;
+				diffs.push({ check: "files.contains", expected: `${path} contains ${fragment}`, actual: firstLine(text) });
+			}
+		}
 		changed.delete(path);
 	}
 	for (const path of [...changed].sort()) {
 		diffs.push({ check: "files", expected: "no unexpected write", actual: `${path} changed` });
 	}
+}
+
+function checkAbsent(observation: Observation, diffs: Diff[]): void {
+	for (const path of observation.forbiddenPathsFound) {
+		diffs.push({ check: "files.absent", expected: `${path} absent`, actual: "present" });
+	}
+}
+
+/**
+ * A violation the case did not plant is a containment failure, and a violation the case planted but the
+ * harness did not report fails too: an isolation case then proves the harness caught the attempt rather
+ * than assuming it would.
+ */
+function checkContainment(spec: ContainmentSpec[] | undefined, observation: Observation, diffs: Diff[]): void {
+	const unclaimed = [...(spec ?? [])];
+	for (const violation of observation.violations) {
+		const index = unclaimed.findIndex(
+			(entry) => entry.kind === violation.kind && (entry.path ?? null) === violation.path,
+		);
+		if (index === -1) {
+			diffs.push({ check: "containment", expected: "no side violation", actual: describeViolation(violation) });
+			continue;
+		}
+		unclaimed.splice(index, 1);
+	}
+	for (const entry of unclaimed) {
+		diffs.push({ check: "containment", expected: describeViolation(entry), actual: "not reported" });
+	}
+}
+
+function describeViolation(violation: ContainmentSpec | Violation): string {
+	const path = violation.path ?? null;
+	return path === null ? violation.kind : `${violation.kind} at ${path}`;
 }
 
 function checkRequests(spec: CompareSpec["requests"], observation: Observation, diffs: Diff[]): void {
