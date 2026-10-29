@@ -6,7 +6,7 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { minimatch } from "minimatch";
-import { parseFrontmatter } from "../../utils/frontmatter.ts";
+import { parse as parseYaml } from "yaml";
 import { canonicalizePath } from "../../utils/paths.ts";
 import { stripBom } from "../../utils/text.ts";
 import { findGitPaths } from "../footer-data-provider.ts";
@@ -341,6 +341,9 @@ const LEGACY_INSTRUCTION_FILES: ReadonlyMap<string, InstructionFiles> = new Map(
 const AGENTS_MD_PLUGIN = "cc-plugin-agents-md@builtin";
 const AGENTS_NAMES = ["AGENTS.md", join(".claude", "AGENTS.md")];
 const CLAUDE_NAMES = ["CLAUDE.md", join(".claude", "CLAUDE.md"), "CLAUDE.local.md"];
+// The closing `---` need not start a line, and `----` opens no frontmatter. Line endings are kept.
+const FRONTMATTER = /^---\s*\n([\s\S]*?)---\s*\n?/;
+const YAML_SPECIAL = /[{}[\]*&#!|>%@`]|: /;
 const MAX_IMPORT_DEPTH = 5;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const EXCLUDABLE: ReadonlySet<MemoryType> = new Set(["user", "project", "local"]);
@@ -449,13 +452,56 @@ function readMemoryDocument(path: string): MemoryDocument | undefined {
 	} catch {
 		return undefined;
 	}
-	let parsed: { frontmatter: Record<string, unknown>; body: string };
-	try {
-		parsed = parseFrontmatter(text);
-	} catch {
-		parsed = { frontmatter: {}, body: text };
+	const fence = text.indexOf("---", 3) === -1 ? null : FRONTMATTER.exec(text);
+	if (fence === null) {
+		return { frontmatter: {}, body: text, content: stripCommentBlocks(text) };
 	}
-	return { frontmatter: parsed.frontmatter, body: parsed.body, content: stripCommentBlocks(parsed.body) };
+	const body = text.slice(fence[0].length);
+	return { frontmatter: parseFrontmatterYaml(fence[1]), body, content: stripCommentBlocks(body) };
+}
+
+/** The frontmatter as a table, retried with special-character values quoted when it does not parse. */
+function parseFrontmatterYaml(yaml: string): Record<string, unknown> {
+	let value: unknown;
+	try {
+		value = parseYaml(yaml);
+	} catch {
+		try {
+			value = parseYaml(quoteSpecialValues(yaml).replace(/^\t+/gm, (tabs) => "  ".repeat(tabs.length)));
+		} catch {
+			value = undefined;
+		}
+	}
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+// `paths: [unclosed` becomes `paths: "[unclosed"`, so a rule whose frontmatter is broken stays conditional.
+function quoteSpecialValues(yaml: string): string {
+	return yaml
+		.split("\n")
+		.map((line) => {
+			const match = /^([a-zA-Z_-]+):\s+(\S.*)$/.exec(line);
+			if (match === null) {
+				return line;
+			}
+			const [, key, value] = match;
+			const quoted = ['"', "'"].some((quote) => value.startsWith(quote) && value.endsWith(quote));
+			if (quoted || (value.startsWith("[") && value.endsWith("]") && isYamlList(value))) {
+				return line;
+			}
+			return YAML_SPECIAL.test(value) ? `${key}: "${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : line;
+		})
+		.join("\n");
+}
+
+function isYamlList(text: string): boolean {
+	try {
+		return Array.isArray(parseYaml(text));
+	} catch {
+		return false;
+	}
 }
 
 function isExcluded(load: Load, type: MemoryType, candidates: readonly string[]): boolean {
