@@ -1,0 +1,25 @@
+{
+	"id": "isolation/home-empty",
+	"area": "isolation",
+	"binary": "/bin/ls",
+	"argv": [
+		"-A",
+		"$HOME"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 15000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": ""
+		}
+	},
+	"skip": []
+}

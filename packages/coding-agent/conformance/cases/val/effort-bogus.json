@@ -1,0 +1,37 @@
+{
+	"id": "val/effort-bogus",
+	"area": "val",
+	"argv": [
+		"-p",
+		"hello",
+		"--effort",
+		"nonsense"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"(?i)(not logged in|login|log in|credential|api key)"
+			]
+		},
+		"stderr": {
+			"contains": [
+				"Warning: Unknown --effort value 'nonsense'",
+				"Valid values: low, medium, high, xhigh, max."
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 0
+			}
+		]
+	},
+	"skip": []
+}

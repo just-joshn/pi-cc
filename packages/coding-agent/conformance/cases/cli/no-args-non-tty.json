@@ -1,0 +1,23 @@
+{
+	"id": "cli/no-args-non-tty",
+	"area": "cli",
+	"argv": [],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"contains": [
+				"Input must be provided"
+			]
+		}
+	},
+	"skip": []
+}

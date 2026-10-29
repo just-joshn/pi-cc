@@ -1,0 +1,27 @@
+{
+	"id": "isolation/network-external-denied",
+	"area": "isolation",
+	"binary": "/usr/bin/nc",
+	"argv": [
+		"-v",
+		"-z",
+		"-w",
+		"2",
+		"192.0.2.1",
+		"443"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 15000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"Operation not permitted"
+			]
+		}
+	},
+	"skip": []
+}

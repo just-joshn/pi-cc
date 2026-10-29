@@ -1,0 +1,33 @@
+{
+	"id": "host/print-selected-by-non-tty",
+	"area": "host",
+	"argv": [],
+	"env": {},
+	"stdin": {
+		"kind": "text",
+		"data": "Reply with exactly PROBE_OK"
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"equals": "PROBE_OK"
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,23 @@
+{
+	"id": "isolation/keychain-denied",
+	"area": "isolation",
+	"binary": "/bin/ls",
+	"argv": [
+		"-A",
+		"/Library/Keychains"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 15000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"Operation not permitted"
+			]
+		}
+	},
+	"skip": []
+}

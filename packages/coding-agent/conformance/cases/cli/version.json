@@ -1,0 +1,30 @@
+{
+	"id": "cli/version",
+	"area": "cli",
+	"argv": [
+		"--version"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"equals": "<version>",
+			"normalize": [
+				"version"
+			],
+			"match": [
+				"^\\S+ \\([^)]+\\)$"
+			]
+		},
+		"stderr": {
+			"equals": ""
+		},
+		"requests": []
+	},
+	"skip": []
+}

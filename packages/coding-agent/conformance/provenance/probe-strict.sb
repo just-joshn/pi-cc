@@ -1,0 +1,43 @@
+(version 1)
+(deny default)
+(allow process-fork)
+(allow process-exec*)
+(deny process-exec
+  (literal "/usr/bin/security")
+  (literal "/usr/sbin/securityd")
+  (literal "/usr/bin/ssh-add")
+  (literal "/usr/bin/osascript"))
+(allow signal (target self))
+(allow signal (target children))
+(allow sysctl-read)
+; mach lookups stay broad, but the credential services are the keychain and
+; trust path. Denying them stops a keychain read from succeeding even if a
+; file rule were wrong.
+(allow mach-lookup)
+(deny mach-lookup
+  (global-name "com.apple.securityd")
+  (global-name "com.apple.trustd")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.ocspd")
+  (global-name-prefix "com.apple.security."))
+
+(allow file-read-metadata)
+(allow file-read*)
+(deny file-read*
+  (subpath "/Users/josh-desktop")
+  (subpath "/Library/Keychains")
+  (subpath "/private/var/db/dslocal")
+  (subpath "/Library/Application Support/ClaudeCode")
+  (subpath "/etc/claude-code")
+  (subpath "/private/tmp/claude-re-probe-jgk8hd0q"))
+(allow file-read* (literal "/Users/josh-desktop/.pi/agent/pstack/workspaces/--Users-josh-desktop-.claude--/artifacts/01a18607-9e4b-7380-9552-e121df0aa579/claude-code-re/original/claude-2.1.312") (subpath "/Users/josh-desktop/.pi/agent/pstack/workspaces/--Users-josh-desktop-.claude--/artifacts/01a18607-9e4b-7380-9552-e121df0aa579/claude-code-re/runtime"))
+(deny file-write*)
+(allow file-write*
+  (subpath "/Users/josh-desktop/.pi/agent/pstack/workspaces/--Users-josh-desktop-.claude--/artifacts/01a18607-9e4b-7380-9552-e121df0aa579/claude-code-re/runtime")
+  (literal "/dev/null")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/dtracehelper"))
+
+; loopback is opened only for the fixture server this harness runs
+(deny network*)
