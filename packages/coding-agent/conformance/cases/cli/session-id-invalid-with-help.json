@@ -1,0 +1,31 @@
+{
+	"id": "cli/session-id-invalid-with-help",
+	"area": "cli",
+	"argv": [
+		"--session-id",
+		"not-a-uuid",
+		"--help"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "help",
+			"requireFlags": [
+				"--help",
+				"--session-id",
+				"--version"
+			],
+			"allowExtra": true
+		},
+		"stderr": {
+			"equals": ""
+		},
+		"requests": []
+	},
+	"skip": []
+}

@@ -7,6 +7,7 @@ import {
 	formatCcHelpSection,
 	formatDiagnosticPrefix,
 	formatUnknownOptionMessage,
+	validateSessionId,
 } from "../src/cli/cc-flags.ts";
 import { APP_NAME, VERSION } from "../src/config.ts";
 
@@ -88,10 +89,18 @@ describe("validation diagnostics", () => {
 		expect(result.maxBudgetUsd).toBe(1.5);
 	});
 
-	test("rejects a session ID that is not a UUID", () => {
+	test("leaves session-id validation to the session path", () => {
 		const result = parseArgs(["-p", "hello", "--session-id", "not-a-uuid"]);
-		expect(result.diagnostics.map(render)).toEqual(["Error: Invalid session ID. Must be a valid UUID."]);
-		expect(result.sessionId).toBeUndefined();
+		expect(result.diagnostics).toEqual([]);
+		expect(result.sessionId).toBe("not-a-uuid");
+	});
+
+	test("rejects a session ID that is not a UUID", () => {
+		expect(validateSessionId("not-a-uuid")).toEqual({
+			type: "error",
+			message: "Invalid session ID. Must be a valid UUID.",
+		});
+		expect(validateSessionId(SESSION_ID)).toBeUndefined();
 	});
 
 	test("accepts a UUID session ID", () => {

@@ -35,7 +35,7 @@ import {
 	printAuthCommandHelp,
 	validateAuthCommandArgs,
 } from "./cli/auth-command.ts";
-import { formatDiagnosticPrefix } from "./cli/cc-flags.ts";
+import { formatDiagnosticPrefix, validateSessionId } from "./cli/cc-flags.ts";
 import { resolveCredentialForPrint } from "./cli/credential-print.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
@@ -66,7 +66,7 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
-import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
+import { SessionManager } from "./core/session-manager.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
@@ -335,11 +335,13 @@ function validateSessionIdFlags(parsed: Args): void {
 		process.exit(1);
 	}
 
-	try {
-		assertValidSessionId(parsed.sessionId);
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.error(chalk.red(`Error: ${message}`));
+	// Claude Code validates the id only when it creates a session, so `--help` and pi's metadata
+	// commands never reject it.
+	if (parsed.help || parsed.noSession || parsed.listModels !== undefined) return;
+
+	const rejected = validateSessionId(parsed.sessionId);
+	if (rejected !== undefined) {
+		console.error(chalk.red(`${formatDiagnosticPrefix(rejected)}${rejected.message}`));
 		process.exit(1);
 	}
 }

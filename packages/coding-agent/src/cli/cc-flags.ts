@@ -141,7 +141,7 @@ function validateEffort(value: string): CcDiagnostic | undefined {
 	};
 }
 
-function validateSessionId(value: string): CcDiagnostic | undefined {
+export function validateSessionId(value: string): CcDiagnostic | undefined {
 	if (UUID_PATTERN.test(value)) {
 		return undefined;
 	}
@@ -623,7 +623,6 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "uuid",
 		summary: "Exact session ID, created if missing",
 		status: "wired",
-		validate: validateSessionId,
 		apply: setString("sessionId"),
 	},
 	{
