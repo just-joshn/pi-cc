@@ -1,0 +1,328 @@
+/**
+ * The merged `env` block, applied over the inherited process environment. A settings value replaces
+ * the inherited value for that key, credential and base-URL keys included: that is what Claude Code
+ * 2.1.312 does, and a repository-controlled file that can name its own endpoint is the measured
+ * behavior, not an oversight. What keeps that safe is trust, not this list: the project and local
+ * tiers are only read when pi trusts the project (see `run.ts`). The list below only removes keys that
+ * would move pi's own loader roots or pi's own TLS and provider endpoints, from the tiers a repository
+ * controls.
+ */
+
+import { isJsonObject } from "./keys.ts";
+import type { CcSettings, CcSettingsSource } from "./types.ts";
+
+/**
+ * Claude Code's env keys a project or local settings file may not set (`h3r`, chunk-b9rj0bam.js:332-360).
+ *
+ * Claude Code also admits a few values for keys in its `Ers`/`Ym`/`N` tables (telemetry-off, OTEL
+ * exporters and three chrome flags), and that exception set is not ported because pi-cc has none of
+ * those surfaces.
+ */
+const CC_PROTECTED_ENV_NAMES: ReadonlySet<string> = new Set([
+	"ALLUSERSPROFILE",
+	"ANTHROPIC_CONFIG_DIR",
+	"APPDATA",
+	"AUTOMODE_DECISION_LOG",
+	"BETA_TRACING_ENDPOINT",
+	"CCR_ENABLE_BUNDLE",
+	"CCR_FORCE_BUNDLE",
+	"CCR_SESSION_PROFILE",
+	"CDPATH",
+	"CLAUDE_AFK_COUNTDOWN_MS",
+	"CLAUDE_AFK_TIMEOUT_MS",
+	"CLAUDE_AX_SCREEN_READER",
+	"CLAUDE_BG_DISPATCHER_RATE_LIMIT_TIER",
+	"CLAUDE_BG_DISPATCHER_SUBSCRIPTION_TYPE",
+	"CLAUDE_CHROME_CLASSIFIER_FLOOR",
+	"CLAUDE_CHROME_PERMISSION_MODE",
+	"CLAUDE_CODE_3P_PROBE_WROTE_HAIKU_DEFAULT",
+	"CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT",
+	"CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT",
+	"CLAUDE_CODE_3P_SEEDED_OPUS_DEFAULT",
+	"CLAUDE_CODE_3P_SEEDED_SONNET_DEFAULT",
+	"CLAUDE_CODE_ALLOW_OTHER_MODELS",
+	"CLAUDE_CODE_ARTIFACT_OPEN_ACTION",
+	"CLAUDE_CODE_ARTIFACT_PRESENCE",
+	"CLAUDE_CODE_ARTIFACT_PREVIEW_EMULATOR",
+	"CLAUDE_CODE_ARTIFACT_REPL",
+	"CLAUDE_CODE_ARTIFACT_ROOM",
+	"CLAUDE_CODE_ATTRIBUTION_STATUS_TIMEOUT_MS",
+	"CLAUDE_CODE_BASH_EDIT_DIFF",
+	"CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT",
+	"CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT",
+	"CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS",
+	"CLAUDE_CODE_BRIDGE_CHILD_PROJECTS_ENTRYPOINT",
+	"CLAUDE_CODE_CCR_SURFACE",
+	"CLAUDE_CODE_CLIENT_DATA_URL",
+	"CLAUDE_CODE_COORDINATOR_EXTRA_TOOLS",
+	"CLAUDE_CODE_COORDINATOR_MODE",
+	"CLAUDE_CODE_CUSTOM_OAUTH_URL",
+	"CLAUDE_CODE_DEBUG_LOGS_DIR",
+	"CLAUDE_CODE_DIAGNOSTICS_FILE",
+	"CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION",
+	"CLAUDE_CODE_DISABLE_ATTACHMENTS",
+	"CLAUDE_CODE_DISABLE_ATTRIBUTION_CROSS_REPO",
+	"CLAUDE_CODE_DISABLE_BG_STABLE_PATH",
+	"CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT",
+	"CLAUDE_CODE_DISABLE_FILE_MENTIONS",
+	"CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT",
+	"CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT",
+	"CLAUDE_CODE_DISABLE_POWERSHELL_CMD_RM_DENY",
+	"CLAUDE_CODE_DISABLE_PROACTIVITY",
+	"CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT",
+	"CLAUDE_CODE_DISABLE_ULTRAREVIEW_TRUST_CHECK",
+	"CLAUDE_CODE_DISABLE_WEB_FETCH",
+	"CLAUDE_CODE_ENABLE_CFC",
+	"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS",
+	"CLAUDE_CODE_ENABLE_TELEMETRY",
+	"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+	"CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS",
+	"CLAUDE_CODE_FEDERATION_CACHE_DIR",
+	"CLAUDE_CODE_FORWARD_USER_INTENT",
+	"CLAUDE_CODE_FRAME_TIMING_LOG",
+	"CLAUDE_CODE_GENTLE_PARASOL",
+	"CLAUDE_CODE_GZIP_REQUEST_BODY_BLOCKS",
+	"CLAUDE_CODE_HARBOR_KITE",
+	"CLAUDE_CODE_HARBOR_KITE_CLOUD",
+	"CLAUDE_CODE_HARBOR_KITE_PACING_OFF",
+	"CLAUDE_CODE_HOST_PROMPT_SUPERSEDES_RECORD",
+	"CLAUDE_CODE_IGNORE_PERSISTED_TRUST",
+	"CLAUDE_CODE_INCREMENTAL_REQUEST_BODY",
+	"CLAUDE_CODE_LEGACY_BUNDLE",
+	"CLAUDE_CODE_MANAGED_SETTINGS_PATH",
+	"CLAUDE_CODE_MCP_APPS_HOST",
+	"CLAUDE_CODE_MCP_CONNECTOR_PREWAIT_MS",
+	"CLAUDE_CODE_MCP_PREWAIT_SERVERS",
+	"CLAUDE_CODE_MCP_PREWAIT_SERVERS_MS",
+	"CLAUDE_CODE_MCP_STARTUP_WAIT_MS",
+	"CLAUDE_CODE_MESSAGING_SOCKET",
+	"CLAUDE_CODE_MESSAGING_TOKEN",
+	"CLAUDE_CODE_MODEL_CAPABILITIES",
+	"CLAUDE_CODE_MODEL_CATALOG",
+	"CLAUDE_CODE_MODEL_CATALOG_URL",
+	"CLAUDE_CODE_NANKEEN_KESTREL",
+	"CLAUDE_CODE_OAUTH_CLIENT_ID",
+	"CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+	"CLAUDE_CODE_OAUTH_SCOPES",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"CLAUDE_CODE_PERFETTO_TRACE",
+	"CLAUDE_CODE_PLUGIN_ATTRIBUTION",
+	"CLAUDE_CODE_PLUGIN_CACHE_DIR",
+	"CLAUDE_CODE_PLUGIN_DIRS",
+	"CLAUDE_CODE_PLUGIN_DIR_WATCH",
+	"CLAUDE_CODE_PLUGIN_SEED_DIR",
+	"CLAUDE_CODE_PROCESS_WRAPPER",
+	"CLAUDE_CODE_RATE_LIMIT_TIER",
+	"CLAUDE_CODE_RELAUNCH_PROACTIVITY_BASELINE",
+	"CLAUDE_CODE_RELAUNCH_PROACTIVITY_DECIDED",
+	"CLAUDE_CODE_RELAUNCH_PROACTIVITY_EVER_ON",
+	"CLAUDE_CODE_RELAUNCH_PROACTIVITY_LEVEL",
+	"CLAUDE_CODE_REMOTE_MEMORY_DIR",
+	"CLAUDE_CODE_REMOTE_TOOLS_FORWARD",
+	"CLAUDE_CODE_REMOTE_TOOLS_HOST_ALLOWS_UNATTENDED",
+	"CLAUDE_CODE_REMOTE_TOOLS_HOST_IDLE_RELEASE_MINUTES",
+	"CLAUDE_CODE_REMOTE_TOOLS_PIN_STORED_LOGIN",
+	"CLAUDE_CODE_REMOVE_PROMPT_STRINGS",
+	"CLAUDE_CODE_SAFE_MODE",
+	"CLAUDE_CODE_SANDBOXED",
+	"CLAUDE_CODE_SANDBOX_LEAVE_DENIES_TO_SRT_WIN",
+	"CLAUDE_CODE_SANDBOX_LEAVE_PARENT_FOLDERS_ALONE",
+	"CLAUDE_CODE_SILENT_TURN_REMINDER",
+	"CLAUDE_CODE_SILENT_TURN_REMINDER_SECONDS",
+	"CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT",
+	"CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS",
+	"CLAUDE_CODE_SIMPLE",
+	"CLAUDE_CODE_SKILL_ATTRIBUTION",
+	"CLAUDE_CODE_SKILL_PROPOSALS",
+	"CLAUDE_CODE_SKIP_PLUGIN_LOCAL_MCP_SERVERS",
+	"CLAUDE_CODE_SKIP_PLUGIN_MCP_BUNDLES",
+	"CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS_EXCEPT",
+	"CLAUDE_CODE_STREAMED_BUMBLEBEE_TEXT",
+	"CLAUDE_CODE_STRICT_INLINE_SHELL_RM_PROMPT",
+	"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+	"CLAUDE_CODE_SUBSCRIPTION_TYPE",
+	"CLAUDE_CODE_SYNC_PLUGINS",
+	"CLAUDE_CODE_SYNC_SKILLS",
+	"CLAUDE_CODE_TETHER_LIVE",
+	"CLAUDE_CODE_TMPDIR",
+	"CLAUDE_CODE_TOASTY_THIMBLE",
+	"CLAUDE_CODE_TOOL_USE_ID",
+	"CLAUDE_CODE_TRANSCRIPT_LOCAL_GC",
+	"CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS",
+	"CLAUDE_CODE_WHIMSICAL_ELEPHANT",
+	"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL",
+	"CLAUDE_CONFIG_DIR",
+	"CLAUDE_COWORK_MEMORY_PATH_OVERRIDE",
+	"CLAUDE_JOB_DIR",
+	"CLAUDE_PTY_RECORD",
+	"CLAUDE_SECURESTORAGE_CONFIG_DIR",
+	"CLAUDE_TMPDIR",
+	"COMMONPROGRAMFILES",
+	"COMMONPROGRAMFILES(X86)",
+	"COMMONPROGRAMW6432",
+	"COMSPEC",
+	"ENABLE_BETA_TRACING_DETAILED",
+	"ENABLE_ENHANCED_TELEMETRY_BETA",
+	"GITHUB_ACTIONS",
+	"HOME",
+	"HOMEDRIVE",
+	"HOMEPATH",
+	"HOMESHARE",
+	"INK_SCREEN_READER",
+	"LOCALAPPDATA",
+	"ONEDRIVE",
+	"ONEDRIVECOMMERCIAL",
+	"ONEDRIVECONSUMER",
+	"OTEL_EXPORTER_OTLP_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_CLIENT_KEY",
+	"OTEL_EXPORTER_OTLP_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_HEADERS",
+	"OTEL_EXPORTER_OTLP_INSECURE",
+	"OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_LOGS_CLIENT_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_LOGS_CLIENT_KEY",
+	"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+	"OTEL_EXPORTER_OTLP_LOGS_INSECURE",
+	"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+	"OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY",
+	"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+	"OTEL_EXPORTER_OTLP_METRICS_INSECURE",
+	"OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+	"OTEL_EXPORTER_OTLP_PROFILES_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_PROFILES_CLIENT_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_PROFILES_CLIENT_KEY",
+	"OTEL_EXPORTER_OTLP_PROFILES_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_PROFILES_HEADERS",
+	"OTEL_EXPORTER_OTLP_PROFILES_INSECURE",
+	"OTEL_EXPORTER_OTLP_PROFILES_PROTOCOL",
+	"OTEL_EXPORTER_OTLP_PROTOCOL",
+	"OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE",
+	"OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY",
+	"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+	"OTEL_EXPORTER_OTLP_TRACES_INSECURE",
+	"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+	"OTEL_EXPORTER_PROMETHEUS_HOST",
+	"OTEL_EXPORTER_PROMETHEUS_PORT",
+	"OTEL_LOGS_EXPORTER",
+	"OTEL_LOG_ASSISTANT_RESPONSES",
+	"OTEL_LOG_MANAGED_SETTINGS",
+	"OTEL_LOG_RAW_API_BODIES",
+	"OTEL_LOG_TOOL_CONTENT",
+	"OTEL_LOG_TOOL_DETAILS",
+	"OTEL_LOG_USER_PROMPTS",
+	"OTEL_METRICS_EXPORTER",
+	"OTEL_TRACES_EXPORTER",
+	"PATHEXT",
+	"PROGRAMDATA",
+	"PROGRAMFILES",
+	"PROGRAMFILES(X86)",
+	"PROGRAMW6432",
+	"PSMODULEPATH",
+	"PWD",
+	"RUNNER_ENVIRONMENT",
+	"SYSTEMDRIVE",
+	"SYSTEMROOT",
+	"TEMP",
+	"TMP",
+	"TMPDIR",
+	"USERPROFILE",
+	"USER_TYPE",
+	"WINDIR",
+	"XDG_CACHE_HOME",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_RUNTIME_DIR",
+	"XDG_STATE_HOME",
+]);
+
+/** Claude Code's prefix list beside `h3r`: every accessibility key a repository may not set. */
+const CC_PROTECTED_ENV_PREFIXES: readonly string[] = ["CLAUDE_AX_"];
+
+/**
+ * pi's own bootstrap namespace, plus the keys that move pi's TLS and provider endpoints. A repository
+ * that is trusted may set its own proxy, which is what Claude Code allows, but it may not turn off
+ * certificate verification for pi's clients or repoint a provider that pi reads from a variable.
+ */
+const PI_PROTECTED_ENV_NAMES: ReadonlySet<string> = new Set([
+	"NODE_OPTIONS",
+	"PATH",
+	"BASH_ENV",
+	"ENV",
+	"ZDOTDIR",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	"AZURE_OPENAI_BASE_URL",
+	"LLAMA_BASE_URL",
+]);
+
+const PI_PROTECTED_ENV_PREFIXES: readonly string[] = ["PI_", "LD_", "DYLD_"];
+
+const PROTECTED_ENV_PREFIXES: readonly string[] = [...CC_PROTECTED_ENV_PREFIXES, ...PI_PROTECTED_ENV_PREFIXES];
+
+/**
+ * Keys a repository-controlled tier may not set. Claude Code protects its own; pi adds the keys that
+ * would move pi's loader roots, because a checked-in `.claude/settings.json` that sets `HOME` can make
+ * pi read the repository's extensions and skills as trusted user resources.
+ */
+export function ccProtectedEnvKey(name: string): boolean {
+	const upper = name.toUpperCase();
+	return (
+		CC_PROTECTED_ENV_NAMES.has(upper) ||
+		PI_PROTECTED_ENV_NAMES.has(upper) ||
+		PROTECTED_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))
+	);
+}
+
+/**
+ * Drops protected keys from a project or local env block before it joins the merge. The flag, user
+ * and policy tiers keep every key.
+ */
+export function ccAdmitRepoEnv(source: CcSettingsSource, value: unknown): unknown {
+	if ((source !== "project" && source !== "local") || !isJsonObject(value)) {
+		return value;
+	}
+	const admitted: Record<string, string> = {};
+	for (const [name, entry] of Object.entries(value)) {
+		if (typeof entry === "string" && !ccProtectedEnvKey(name)) {
+			admitted[name] = entry;
+		}
+	}
+	return admitted;
+}
+
+export function ccEffectiveEnv(
+	inherited: Readonly<Record<string, string | undefined>>,
+	settings: CcSettings,
+): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [name, value] of Object.entries(inherited)) {
+		if (value !== undefined) {
+			env[name] = value;
+		}
+	}
+	for (const [name, value] of Object.entries(settings.env)) {
+		env[name] = value;
+	}
+	return env;
+}
+
+/**
+ * `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is the settings env key that reaches the request body: Claude Code
+ * uses it as the run's output cap, and the settings layer coerces every `env` value to a string, so a
+ * numeric or boolean YAML-esque value arrives here as text. An absent, non-integer, or non-positive
+ * value leaves the model's own cap alone, which is what 2.1.312 does for `true` and `null`.
+ */
+export function ccMaxOutputTokens(env: Readonly<Record<string, string | undefined>>): number | undefined {
+	const raw = env.CLAUDE_CODE_MAX_OUTPUT_TOKENS?.trim();
+	if (raw === undefined || raw.length === 0) {
+		return undefined;
+	}
+	const value = Number(raw);
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}

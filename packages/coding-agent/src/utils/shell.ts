@@ -2,6 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { delimiter, join, win32 } from "node:path";
 import { spawn, spawnSync } from "child_process";
 import { getBinDir } from "../config.ts";
+import { startupEnv } from "./internal-env.ts";
 
 export interface ShellConfig {
 	shell: string;
@@ -48,6 +49,7 @@ function findExecutableOnPath(executable: string): string | null {
 				encoding: "utf-8",
 				timeout: 5000,
 				windowsHide: true,
+				env: startupEnv(),
 			});
 			if (result.status === 0 && result.stdout) {
 				const firstMatch = result.stdout.trim().split(/\r?\n/)[0];
@@ -63,7 +65,11 @@ function findExecutableOnPath(executable: string): string | null {
 
 	// Unix: Use 'which' and trust its output (handles Termux and special filesystems)
 	try {
-		const result = spawnSync("which", [executable], { encoding: "utf-8", timeout: 5000 });
+		const result = spawnSync("which", [executable], {
+			encoding: "utf-8",
+			timeout: 5000,
+			env: startupEnv(),
+		});
 		if (result.status === 0 && result.stdout) {
 			const firstMatch = result.stdout.trim().split(/\r?\n/)[0];
 			if (firstMatch) {

@@ -1,0 +1,41 @@
+{
+	"id": "settings/hooks-lenient-skip",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		".claude/settings.json": "{\"hooks\": \"nope\", \"model\": \"claude-sonnet-4-5\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"contains": [
+				"These settings entries were skipped",
+				"\"hooks\" must be an object"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-sonnet-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

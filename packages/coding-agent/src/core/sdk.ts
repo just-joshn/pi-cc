@@ -17,6 +17,7 @@ import { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { ccMaxOutputTokens } from "./settings/cc/env.ts";
 import {
 	applyToolModifiers,
 	DEFAULT_TOOL_NAMES,
@@ -275,6 +276,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	} else {
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
+	}
+
+	// `CLAUDE_CODE_MAX_OUTPUT_TOKENS` caps the whole response, thinking included, so it replaces the
+	// model's own cap rather than the caller's answer budget: `adjustMaxTokensForThinking` adds the
+	// thinking budget on top of an explicit request cap, and Claude Code's number is already the total.
+	const maxOutputTokens = ccMaxOutputTokens(process.env);
+	if (model && maxOutputTokens !== undefined) {
+		model = { ...model, maxTokens: maxOutputTokens };
 	}
 
 	const toolListError = options.tools ? getToolListError(options.tools) : undefined;

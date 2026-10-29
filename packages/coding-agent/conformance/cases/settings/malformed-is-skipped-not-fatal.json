@@ -1,0 +1,23 @@
+{
+	"id": "settings/malformed-is-skipped-not-fatal",
+	"area": "settings",
+	"argv": ["-p", "Reply with exactly PROBE_OK", "--settings", "$WORKSPACE/broken-settings.json"],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"broken-settings.json": "{\"model\": "
+	},
+	"model": null,
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"match": ["login"]
+		},
+		"stderr": {
+			"contains": ["broken-settings.json", "did not load", "Invalid or malformed JSON"]
+		}
+	},
+	"skip": []
+}

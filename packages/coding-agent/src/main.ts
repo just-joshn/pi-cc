@@ -5,9 +5,10 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
-import { setCapabilityOverrides } from "@earendil-works/pi-tui";
+import { setCapabilityOverrides, setInternalSpawnEnv } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import {
 	type Args,
@@ -43,7 +44,7 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir } from "./config.ts";
+import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -58,7 +59,7 @@ import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dis
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
-import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
+import { type AppMode, readInitialProjectTrust, resolveProjectTrusted } from "./core/project-trust.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
 import {
 	formatMissingSessionCwdPrompt,
@@ -67,6 +68,22 @@ import {
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
 import { SessionManager } from "./core/session-manager.ts";
+import { ccEffectiveEnv } from "./core/settings/cc/env.ts";
+import { withAdditionalDirectories } from "./core/settings/cc/merge.ts";
+import {
+	formatIgnoredProjectSettings,
+	formatSettingsFailures,
+	formatSkippedSettings,
+} from "./core/settings/cc/report.ts";
+import {
+	admitCcDirectory,
+	type CcDirectoryAdmission,
+	type CcRunLocation,
+	type CcRunSettings,
+	type CcSettleResult,
+	openCcRunSettings,
+} from "./core/settings/cc/run.ts";
+import type { CcSettings } from "./core/settings/cc/types.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
@@ -78,10 +95,13 @@ import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
+import { captureStartupEnv, startupEnv } from "./utils/internal-env.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
+
+const CC_BARE_TOOLS: readonly string[] = ["read", "edit", "bash"];
 
 /**
  * Read all content from piped stdin.
@@ -116,6 +136,93 @@ function reportDiagnostics(diagnostics: readonly AgentSessionRuntimeDiagnostic[]
 function isTruthyEnvFlag(value: string | undefined): boolean {
 	if (!value) return false;
 	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
+}
+
+function toSettingSources(value: string | undefined): string[] | undefined {
+	return value
+		?.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+}
+
+function ccRunLocation(parsed: Args, cwd: string): CcRunLocation {
+	return {
+		cwd,
+		home: homedir(),
+		env: process.env,
+		platform: process.platform,
+		version: VERSION,
+		settingSources: toSettingSources(parsed.settingSources),
+		flagSettings: parsed.settings,
+	};
+}
+
+function openCcSettingsForRun(parsed: Args, cwd: string, trust: boolean | "pending"): CcRunSettings {
+	const run = openCcRunSettings(ccRunLocation(parsed, cwd), trust);
+	if (run.flagError !== undefined) {
+		console.error(chalk.red(`Error: ${run.flagError}`));
+		process.exit(1);
+	}
+	reportCcSettings(run);
+	if (run.refusal !== undefined) {
+		console.error(chalk.red(`Error: ${run.refusal}`));
+		process.exit(1);
+	}
+	applyCcEnv(ccRunSettings(run.settings, parsed));
+	return run;
+}
+
+function ccRunSettings(settings: CcSettings, parsed: Args): CcSettings {
+	return withAdditionalDirectories(settings, parsed.addDir ?? []);
+}
+
+function reportCcSettings(report: CcSettleResult): void {
+	const blocks = [
+		...formatSettingsFailures(report.failures),
+		...formatSkippedSettings(report.skipped),
+		...formatIgnoredProjectSettings(report.ignored),
+	];
+	for (const line of blocks) {
+		console.error(chalk.dim(line));
+	}
+}
+
+function repoTierReport(run: CcRunSettings): CcSettleResult {
+	const isRepo = (source: string) => source === "project" || source === "local";
+	return {
+		settings: run.settings,
+		failures: run.failures.filter((failure) => isRepo(failure.source)),
+		skipped: run.skipped.filter((skip) => isRepo(skip.source)),
+		ignored: run.ignored,
+	};
+}
+
+function applyCcEnv(settings: CcSettings): void {
+	const effectiveEnv = ccEffectiveEnv(process.env, settings);
+	for (const [name, value] of Object.entries(effectiveEnv)) {
+		if (process.env[name] !== value) {
+			process.env[name] = value;
+		}
+	}
+}
+
+export function ccResourceSuppression(parsed: Args): {
+	noExtensions: boolean;
+	noSkills: boolean;
+	noPromptTemplates: boolean;
+	noContextFiles: boolean;
+	noMcp: boolean;
+} {
+	const bare = parsed.bare === true;
+	const safeMode = parsed.safeMode === true;
+	return {
+		noExtensions: parsed.noExtensions === true || bare || safeMode,
+		noSkills: parsed.noSkills === true || bare || safeMode,
+		noPromptTemplates: parsed.noPromptTemplates === true || safeMode,
+		noContextFiles: parsed.noContextFiles === true || bare,
+		// --safe-mode names MCP servers among the customizations it disables; --bare does not.
+		noMcp: parsed.noMcp === true || parsed.safeMode === true,
+	};
 }
 
 function resolveAppMode(parsed: Args, stdinIsTTY: boolean, stdoutIsTTY: boolean): AppMode {
@@ -465,6 +572,7 @@ function buildSessionOptions(
 	hasExistingSession: boolean,
 	modelRuntime: ModelRuntime,
 	settingsManager: SettingsManager,
+	ccModel: string | undefined,
 ): {
 	options: CreateAgentSessionOptions;
 	cliThinkingFromModel: boolean;
@@ -505,6 +613,18 @@ function buildSessionOptions(
 				options.thinkingLevel = resolved.thinkingLevel;
 				cliThinkingFromModel = true;
 			}
+		}
+	}
+
+	if (!options.model && ccModel !== undefined) {
+		const selected = resolveCliModel({ cliModel: ccModel, modelRuntime });
+		if (selected.model === undefined) {
+			diagnostics.push({
+				type: "warning",
+				message: `Model "${ccModel}" from Claude Code settings did not resolve (${selected.error ?? "no match"}). Using the default model.`,
+			});
+		} else {
+			options.model = selected.model;
 		}
 	}
 
@@ -549,13 +669,17 @@ function buildSessionOptions(
 	// (handled by caller before createAgentSession)
 
 	// Tools
-	if (parsed.noTools) {
-		options.noTools = "all";
-	} else if (parsed.noBuiltinTools) {
-		options.noTools = "builtin";
-	}
-	if (parsed.tools) {
-		options.tools = [...parsed.tools];
+	if (parsed.bare === true) {
+		options.tools = [...CC_BARE_TOOLS];
+	} else {
+		if (parsed.noTools) {
+			options.noTools = "all";
+		} else if (parsed.noBuiltinTools) {
+			options.noTools = "builtin";
+		}
+		if (parsed.tools) {
+			options.tools = [...parsed.tools];
+		}
 	}
 	if (parsed.excludeTools) {
 		options.excludeTools = [...parsed.excludeTools];
@@ -592,6 +716,8 @@ export async function main(args: string[], options?: MainOptions) {
 		process.env.PI_OFFLINE = "1";
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
+	captureStartupEnv();
+	setInternalSpawnEnv(startupEnv());
 
 	if (await runAuthCommand(args)) {
 		return;
@@ -687,6 +813,46 @@ export async function main(args: string[], options?: MainOptions) {
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
 
+	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
+
+	const trustStore = new ProjectTrustStore(agentDir);
+	const readTrust = (directory: string): boolean | "pending" =>
+		readInitialProjectTrust({
+			cwd: directory,
+			trustStore,
+			trustOverride: parsed.projectTrustOverride,
+			defaultProjectTrust: bootstrapSettingsManager.getDefaultProjectTrust(),
+			hasUI: trustPromptMode === "interactive",
+		});
+	// Pending withholds every repo tier until the runtime directory is known. Opening the startup
+	// directory as already decided would report or admit its files before --session can select another.
+	let ccAdmission: CcDirectoryAdmission = {
+		cwd,
+		run: openCcSettingsForRun(parsed, cwd, "pending"),
+	};
+	const bindCcDirectory = (directory: string, trust: boolean | "pending"): void => {
+		const result = admitCcDirectory(ccAdmission, ccRunLocation(parsed, directory), directory, trust);
+		ccAdmission = result.admission;
+		if (result.opened) {
+			if (result.admission.run.flagError !== undefined) {
+				console.error(chalk.red(`Error: ${result.admission.run.flagError}`));
+				process.exit(1);
+			}
+			reportCcSettings(repoTierReport(result.admission.run));
+			if (result.admission.run.refusal !== undefined) {
+				console.error(chalk.red(`Error: ${result.admission.run.refusal}`));
+				process.exit(1);
+			}
+			applyCcEnv(ccRunSettings(result.admission.run.settings, parsed));
+			return;
+		}
+		if (result.settled) {
+			reportCcSettings(result.settled);
+			applyCcEnv(ccRunSettings(result.settled.settings, parsed));
+		}
+	};
+	time("ccSettings");
+
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
 	time("runMigrations");
@@ -739,13 +905,12 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	time("createSessionManager");
 
-	const trustStore = new ProjectTrustStore(agentDir);
 	const sessionCwd = sessionManager.getCwd();
+	bindCcDirectory(sessionCwd, readTrust(sessionCwd));
 	const autoTrustOnReloadCwd =
 		parsed.projectTrustOverride === undefined && !hasTrustRequiringProjectResources(sessionCwd)
 			? sessionCwd
 			: undefined;
-	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
 	const projectTrustByCwd = new Map<string, boolean>();
 
 	const resolvedExtensionPaths = resolveCliPaths(cwd, parsed.extensions);
@@ -770,7 +935,13 @@ export async function main(args: string[], options?: MainOptions) {
 			: (cachedProjectTrust ??
 				parsed.projectTrustOverride ??
 				(!hasTrustRequiringResources || trustStore.get(cwd) === true));
+		if (cwd !== ccAdmission.cwd) {
+			bindCcDirectory(cwd, shouldResolveProjectTrust ? "pending" : projectTrusted);
+		} else if (!shouldResolveProjectTrust) {
+			bindCcDirectory(cwd, projectTrusted);
+		}
 		const runtimeSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
+		const ccResources = ccResourceSuppression(parsed);
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,
@@ -797,6 +968,7 @@ export async function main(args: string[], options?: MainOptions) {
 								onExtensionError: (message) => projectTrustDiagnostics.push({ type: "warning", message }),
 							});
 							projectTrustByCwd.set(cwd, trusted);
+							bindCcDirectory(cwd, trusted);
 							return trusted;
 						},
 					}
@@ -806,12 +978,9 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalSkillPaths: resolvedSkillPaths,
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
-				noExtensions: parsed.noExtensions,
-				disabledBuiltinExtensions: parsed.noMcp ? ["mcp"] : undefined,
-				noSkills: parsed.noSkills,
-				noPromptTemplates: parsed.noPromptTemplates,
+				...ccResources,
+				disabledBuiltinExtensions: ccResources.noMcp ? ["mcp"] : undefined,
 				noThemes: parsed.noThemes,
-				noContextFiles: parsed.noContextFiles,
 				systemPrompt: parsed.systemPrompt,
 				appendSystemPrompt: parsed.appendSystemPrompt,
 				extensionFactories,
@@ -847,6 +1016,7 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.buildSessionContext().messages.length > 0,
 			modelRuntime,
 			settingsManager,
+			process.env.ANTHROPIC_MODEL ?? ccAdmission.run.settings.model,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
 

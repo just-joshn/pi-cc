@@ -93,6 +93,8 @@ export class RpcClient {
 
 		const childProcess = spawn("node", [cliPath, ...args], {
 			cwd: this.options.cwd,
+			// A spawned pi is another agent process, not a pi-internal resource loader, so it inherits the
+			// caller's environment; the caller's settings `env` block is what an embedder expects here.
 			env: { ...process.env, ...this.options.env },
 			stdio: ["pipe", "pipe", "pipe"],
 		});

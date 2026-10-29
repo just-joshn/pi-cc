@@ -15,21 +15,22 @@ import {
 import { homedir } from "node:os";
 
 function getEnv(): NodeJS.ProcessEnv {
-	if (process.platform !== "linux" || Object.keys(process.env).length > 0) {
-		return process.env;
+	const env = startupEnv();
+	if (process.platform !== "linux" || Object.keys(env).length > 0) {
+		return env;
 	}
 	try {
 		const data = readFileSync("/proc/self/environ", "utf-8");
-		const env: NodeJS.ProcessEnv = {};
+		const procEnviron: NodeJS.ProcessEnv = {};
 		for (const entry of data.split("\0")) {
 			const idx = entry.indexOf("=");
 			if (idx > 0) {
-				env[entry.slice(0, idx)] = entry.slice(idx + 1);
+				procEnviron[entry.slice(0, idx)] = entry.slice(idx + 1);
 			}
 		}
-		return env;
+		return procEnviron;
 	} catch {
-		return process.env;
+		return env;
 	}
 }
 
@@ -41,6 +42,7 @@ import { gt, maxSatisfying, rcompare, satisfies, valid, validRange } from "semve
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, parseGitUrl } from "../utils/git.ts";
+import { startupEnv } from "../utils/internal-env.ts";
 import {
 	canonicalizePath,
 	isLocalPath,

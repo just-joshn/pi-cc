@@ -92,6 +92,10 @@ export function expandPlaceholders(value: string, roots: Roots): string {
 		.join(roots.workspace)
 		.split("$TMP")
 		.join(roots.tmp)
+		.split("$CONFIG")
+		.join(roots.config)
+		.split("$AGENT")
+		.join(roots.agent)
 		.split("$HOME")
 		.join(roots.home)
 		.split("$REAL_HOME")
@@ -147,17 +151,35 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 }
 
 /**
- * Writes the case's files into `workspace/`. Content is expanded like argv, because a seeded
- * `settings.json` hook command needs an absolute host path that the sandboxed process cannot learn
- * from its own environment, such as `$REAL_HOME`.
+ * Writes the case's files. A bare path seeds the workspace. A `$`-rooted path seeds the directory it
+ * names, and either target stays inside the side's own root. Content is expanded like argv, because a
+ * seeded `settings.json` hook command needs an absolute host path that the sandboxed process cannot
+ * learn from its own environment, such as `$REAL_HOME`.
  */
 export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
-		const target = join(roots.workspace, path);
-		if (relative(roots.workspace, target).startsWith("..")) throw new Error(`seeded path escapes workspace: ${path}`);
+		const target = seedTarget(roots, path);
 		mkdirp(dirname(target));
+		// Expanded in the content too, so a case can name its own workspace inside a file it seeds (a
+		// trust record, or a settings file that has to point at the side root).
 		writeFileSync(target, expandPlaceholders(content, roots));
 	}
+}
+
+/**
+ * A bare path seeds the workspace. A `$`-rooted path seeds the directory it names, so a case can write
+ * the user settings file or a home-directory file the side reads before the workspace exists. Either
+ * way the target stays inside the side's own root.
+ */
+function seedTarget(roots: Roots, path: string): string {
+	if (!path.startsWith("$")) {
+		const target = join(roots.workspace, path);
+		if (relative(roots.workspace, target).startsWith("..")) throw new Error(`seeded path escapes workspace: ${path}`);
+		return target;
+	}
+	const target = expandPlaceholders(path, roots);
+	if (relative(roots.root, target).startsWith("..")) throw new Error(`seeded path escapes the case root: ${path}`);
+	return target;
 }
 
 /** Every violation the harness can report against a side. Case data names one of these. */

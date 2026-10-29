@@ -38,6 +38,16 @@ const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
 	"APPEND_SYSTEM.md",
 ] as const;
 
+/**
+ * Claude Code's project and local settings files, below cwd. They hold an `env` block that reaches the
+ * model client and the agent's tools, so a repository that ships one is asking for the same trust pi
+ * asks for a `.pi` resource.
+ */
+export const TRUST_REQUIRING_CLAUDE_SETTINGS_PATHS = [
+	[".claude", "settings.json"],
+	[".claude", "settings.local.json"],
+] as const;
+
 function normalizeCwd(cwd: string): string {
 	return canonicalizePath(resolvePath(cwd));
 }
@@ -178,9 +188,9 @@ function withTrustFileLock<T>(path: string, fn: () => T): T {
 
 /**
  * Returns true when cwd has project-local resources that must be gated by
- * project trust: trust-requiring entries under cwd/.pi, or .agents/skills in
- * cwd or one of its ancestors. Returns false when no such project resources
- * exist. The user/global ~/.agents/skills directory is always treated as a
+ * project trust: trust-requiring entries under cwd/.pi, Claude Code's project and local settings
+ * files under cwd/.claude, or .agents/skills in cwd or one of its ancestors. Returns false when no
+ * such project resources exist. The user/global ~/.agents/skills directory is always treated as a
  * trusted user resource and is ignored here, even when cwd is $HOME.
  */
 export function hasTrustRequiringProjectResources(cwd: string): boolean {
@@ -190,6 +200,9 @@ export function hasTrustRequiringProjectResources(cwd: string): boolean {
 
 	const configDir = join(currentDir, CONFIG_DIR_NAME);
 	if (TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.some((entry) => existsSync(join(configDir, entry)))) {
+		return true;
+	}
+	if (TRUST_REQUIRING_CLAUDE_SETTINGS_PATHS.some((parts) => existsSync(join(currentDir, ...parts)))) {
 		return true;
 	}
 

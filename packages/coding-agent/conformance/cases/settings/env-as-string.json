@@ -1,0 +1,32 @@
+{
+	"id": "settings/env-as-string",
+	"area": "settings",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		".claude/settings.json": "{\"env\": \"nope\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"contains": [
+				"did not load",
+				"(env): Expected record, but received string"
+			]
+		}
+	},
+	"skip": []
+}

@@ -10,6 +10,7 @@ import {
 	getSelfUpdateUnavailableInstruction,
 	getUpdateInstruction,
 } from "../src/config.ts";
+import { captureStartupEnv } from "../src/utils/internal-env.ts";
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
 const originalPath = process.env.PATH;
@@ -33,6 +34,7 @@ afterEach(() => {
 	} else {
 		process.env.PATH = originalPath;
 	}
+	captureStartupEnv();
 	if (originalPiPackageDir === undefined) {
 		delete process.env.PI_PACKAGE_DIR;
 	} else {
@@ -73,6 +75,7 @@ function createPnpmGlobalInstall(): { root: string; packageDir: string } {
 	chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+	captureStartupEnv();
 	process.env.PI_PACKAGE_DIR = packageDir;
 	setExecPath(
 		join(
@@ -100,6 +103,7 @@ function createYarnGlobalInstall(): { globalDir: string; packageDir: string } {
 	chmodSync(join(binDir, process.platform === "win32" ? "yarn.cmd" : "yarn"), 0o755);
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+	captureStartupEnv();
 	process.env.PI_PACKAGE_DIR = packageDir;
 	setExecPath(join(globalDir, ".yarn", "@mariozechner", "pi-coding-agent", "dist", "cli.js"));
 	return { globalDir, packageDir };
@@ -118,6 +122,7 @@ function createBunGlobalInstall(): { packageDir: string } {
 	chmodSync(join(bunBin, process.platform === "win32" ? "bun.cmd" : "bun"), 0o755);
 	tempDir = temp;
 	process.env.PATH = `${bunBin}${delimiter}${originalPath ?? ""}`;
+	captureStartupEnv();
 	process.env.PI_PACKAGE_DIR = packageDir;
 	setExecPath(join(packageDir, "dist", "cli.js"));
 	return { packageDir };
@@ -375,6 +380,7 @@ describe("detectInstallMethod", () => {
 		chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
 		tempDir = temp;
 		process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+		captureStartupEnv();
 		process.env.PI_PACKAGE_DIR = storePackageDir;
 		process.argv[1] = join(globalPackageDir, "dist", "cli.js");
 		setExecPath(join(storePackageDir, "dist", "cli.js"));

@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
 import { spawnProcessSync } from "./utils/child-process.ts";
+import { startupEnv } from "./utils/internal-env.ts";
 import { normalizePath } from "./utils/paths.ts";
 import { stripBom } from "./utils/text.ts";
 
@@ -203,6 +204,7 @@ function readCommandOutput(
 	const result = spawnProcessSync(command, args, {
 		encoding: "utf-8",
 		stdio: ["ignore", "pipe", "pipe"],
+		env: startupEnv(),
 	});
 	if (result.status === 0) return result.stdout.trim() || undefined;
 	if (options.requireSuccess) {
