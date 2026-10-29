@@ -91,6 +91,10 @@ function checkStdout(
 		}
 		return;
 	}
+	if (spec.kind === "jsonl") {
+		checkJsonLines(spec, observation, diffs);
+		return;
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(normalizeWhitespace(observation.stdout));
@@ -101,6 +105,43 @@ function checkStdout(
 	const record = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
 	for (const key of spec.records ?? []) {
 		if (!(key in record)) diffs.push({ check: "stdout.json", expected: `has "${key}"`, actual: "absent" });
+	}
+}
+
+function checkJsonLines(
+	spec: { minRecords?: number; records?: string[] },
+	observation: Observation,
+	diffs: Diff[],
+): void {
+	const lines = observation.stdout.split("\n").filter((line) => line.trim().length > 0);
+	const records: Record<string, unknown>[] = [];
+	for (const [index, line] of lines.entries()) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch (error) {
+			diffs.push({ check: "stdout.jsonl", expected: `record ${index} parses`, actual: String(error) });
+			return;
+		}
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			diffs.push({ check: "stdout.jsonl", expected: `record ${index} is a JSON object`, actual: typeof parsed });
+			return;
+		}
+		records.push(parsed as Record<string, unknown>);
+	}
+	const minimum = spec.minRecords ?? 1;
+	if (records.length < minimum) {
+		diffs.push({
+			check: "stdout.jsonl",
+			expected: `at least ${minimum} record`,
+			actual: `${records.length} records`,
+		});
+	}
+	for (const key of spec.records ?? []) {
+		const missing = records.findIndex((record) => !(key in record));
+		if (missing !== -1) {
+			diffs.push({ check: "stdout.jsonl", expected: `record ${missing} has "${key}"`, actual: "absent" });
+		}
 	}
 }
 

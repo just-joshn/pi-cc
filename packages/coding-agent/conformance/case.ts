@@ -15,7 +15,8 @@ export type Turn =
 export type StdoutSpec =
 	| { kind: "text"; equals?: string; match?: string[]; normalize?: NormalizeRule[] }
 	| { kind: "help"; requireFlags?: string[]; requireCommands?: string[]; allowExtra?: boolean }
-	| { kind: "json"; records?: string[] };
+	| { kind: "json"; records?: string[] }
+	| { kind: "jsonl"; minRecords?: number; records?: string[] };
 
 export interface RequestSpec {
 	pathStartsWith?: string;
@@ -76,6 +77,7 @@ const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "requests"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
 const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
 const JSON_STDOUT_KEYS = ["kind", "records"];
+const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
 const REQUEST_KEYS = ["pathStartsWith", "count", "bodyEquals"];
 const MODEL_KEYS = ["turns"];
@@ -196,6 +198,14 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 		assertKnownKeys(object, JSON_STDOUT_KEYS, source, "compare.stdout");
 		return { kind, records: asOptionalStringArray(object.records, source, "compare.stdout.records") };
 	}
+	if (kind === "jsonl") {
+		assertKnownKeys(object, JSONL_STDOUT_KEYS, source, "compare.stdout");
+		return {
+			kind,
+			minRecords: asOptionalPositiveInteger(object.minRecords, source, "compare.stdout.minRecords"),
+			records: asOptionalStringArray(object.records, source, "compare.stdout.records"),
+		};
+	}
 	return fail(source, `unknown compare.stdout.kind "${kind}"`);
 }
 
@@ -297,6 +307,14 @@ function asOptionalString(value: unknown, source: string, field: string): string
 function asOptionalNumber(value: unknown, source: string, field: string): number | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value !== "number" || !Number.isFinite(value)) fail(source, `${field} must be a number`);
+	return value;
+}
+
+function asOptionalPositiveInteger(value: unknown, source: string, field: string): number | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+		fail(source, `${field} must be a positive integer`);
+	}
 	return value;
 }
 
