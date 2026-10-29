@@ -62,7 +62,7 @@ const JSON_STDOUT_KEYS = ["kind", "records"];
 const STDERR_KEYS = ["contains", "equals"];
 const REQUEST_KEYS = ["pathStartsWith", "count", "bodyEquals"];
 const MODEL_KEYS = ["turns"];
-const TURN_KEYS = ["text", "tool_use", "tool_uses", "sse"];
+const TURN_KEYS = ["text", "tool_use", "tool_uses", "sse"] as const;
 const TOOL_USE_KEYS = ["name", "input"];
 
 export function loadCases(casesDir: string): ConformanceCase[] {
@@ -158,7 +158,7 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 			kind,
 			requireFlags: asOptionalStringArray(object.requireFlags, source, "compare.stdout.requireFlags"),
 			requireCommands: asOptionalStringArray(object.requireCommands, source, "compare.stdout.requireCommands"),
-			allowExtra: object.allowExtra === true,
+			allowExtra: asOptionalBoolean(object.allowExtra, source, "compare.stdout.allowExtra"),
 		};
 	}
 	if (kind === "json") {
@@ -196,23 +196,28 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 function asTurns(value: unknown, source: string): Turn[] {
 	if (!Array.isArray(value)) fail(source, "model.turns must be an array");
 	return value.map((entry, index) => {
-		const object = asCheckedObject(entry, source, `model.turns[${index}]`, TURN_KEYS);
-		if (typeof object.text === "string") return { text: object.text };
-		if (object.tool_use !== undefined) {
-			const toolUse = asCheckedObject(object.tool_use, source, "model.turns[].tool_use", TOOL_USE_KEYS);
-			return { tool_use: { name: asString(toolUse.name, source, "tool_use.name"), input: toolUse.input } };
+		const field = `model.turns[${index}]`;
+		const object = asCheckedObject(entry, source, field, TURN_KEYS);
+		const kinds = TURN_KEYS.filter((key) => object[key] !== undefined);
+		if (kinds.length !== 1) {
+			const found = kinds.length === 0 ? "none" : kinds.join(", ");
+			fail(source, `${field} must set exactly one of ${TURN_KEYS.join(", ")}, found ${found}`);
 		}
-		if (Array.isArray(object.tool_uses)) {
-			return { tool_uses: object.tool_uses.map((toolUse) => asToolUse(toolUse, source)) };
+		const kind = kinds[0];
+		if (kind === "text") return { text: asString(object.text, source, `${field}.text`) };
+		if (kind === "sse") {
+			if (!Array.isArray(object.sse)) fail(source, `${field}.sse must be an array`);
+			return { sse: object.sse };
 		}
-		if (Array.isArray(object.sse)) return { sse: object.sse };
-		return fail(source, `model.turns[${index}] is not a text, tool_use, tool_uses or sse turn`);
+		if (kind === "tool_use") return { tool_use: asToolUse(object.tool_use, source, `${field}.tool_use`) };
+		if (!Array.isArray(object.tool_uses)) fail(source, `${field}.tool_uses must be an array`);
+		return { tool_uses: object.tool_uses.map((toolUse) => asToolUse(toolUse, source, `${field}.tool_uses[]`)) };
 	});
 }
 
-function asToolUse(value: unknown, source: string) {
-	const object = asCheckedObject(value, source, "tool_uses[]", TOOL_USE_KEYS);
-	return { name: asString(object.name, source, "tool_uses[].name"), input: object.input };
+function asToolUse(value: unknown, source: string, field: string) {
+	const object = asCheckedObject(value, source, field, TOOL_USE_KEYS);
+	return { name: asString(object.name, source, `${field}.name`), input: object.input };
 }
 
 function asStdin(value: unknown, source: string): StdinSpec {
@@ -261,6 +266,12 @@ function asOptionalString(value: unknown, source: string, field: string): string
 function asOptionalNumber(value: unknown, source: string, field: string): number | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value !== "number" || !Number.isFinite(value)) fail(source, `${field} must be a number`);
+	return value;
+}
+
+function asOptionalBoolean(value: unknown, source: string, field: string): boolean | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "boolean") fail(source, `${field} must be a boolean`);
 	return value;
 }
 
