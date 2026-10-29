@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { parseCcSettingsText } from "../src/core/settings/cc/keys.ts";
 import { mergeCcSettings, withAdditionalDirectories } from "../src/core/settings/cc/merge.ts";
 import { EMPTY_CC_POLICY } from "../src/core/settings/cc/policy.ts";
 import { CC_SETTINGS_ORDER, type CcSettingsDocument, type CcSettingsSource } from "../src/core/settings/cc/types.ts";
@@ -76,7 +77,7 @@ describe("per-key merge rules", () => {
 		expect(settings.values.managedMcpServers).toEqual({ one: { command: "a" }, two: { command: "b" } });
 	});
 
-	test("an object key the rules do not name is replaced whole", () => {
+	test("nested objects deep-merge at every depth", () => {
 		const settings = mergeCcSettings(
 			[
 				document("user", { permissions: { allow: ["Read"] } }),
@@ -84,7 +85,76 @@ describe("per-key merge rules", () => {
 			],
 			EMPTY_CC_POLICY,
 		);
-		expect(settings.values.permissions).toEqual({ deny: ["Bash"] });
+		expect(settings.values.permissions).toEqual({ allow: ["Read"], deny: ["Bash"] });
+	});
+
+	test("fallbackModel arrays replace the earlier array", () => {
+		const settings = mergeCcSettings(
+			[document("user", { fallbackModel: ["a", "b"] }), document("flag", { fallbackModel: ["c"] })],
+			EMPTY_CC_POLICY,
+		);
+		expect(settings.values.fallbackModel).toEqual(["c"]);
+	});
+
+	test("arrays concatenate and dedupe with Set semantics at depth", () => {
+		const settings = mergeCcSettings(
+			[
+				document("user", { permissions: { allow: ["Read", "Read"], hooks: [{ matcher: "Bash" }] } }),
+				document("project", { permissions: { allow: ["Read", "Write"], hooks: [{ matcher: "Bash" }] } }),
+			],
+			EMPTY_CC_POLICY,
+		);
+		const permissions = settings.values.permissions as Record<string, unknown>;
+		expect(permissions.allow).toEqual(["Read", "Write"]);
+		// SameValueZero: primitives dedupe by value, equal-looking objects stay because identity differs.
+		expect((permissions.hooks as unknown[]).length).toBe(2);
+	});
+
+	test("a nested scalar is overridden without dropping sibling keys", () => {
+		const settings = mergeCcSettings(
+			[
+				document("user", { statusLine: { type: "command", command: "user.sh", padding: 0 } }),
+				document("project", { statusLine: { command: "project.sh" } }),
+			],
+			EMPTY_CC_POLICY,
+		);
+		expect(settings.values.statusLine).toEqual({ type: "command", command: "project.sh", padding: 0 });
+	});
+
+	test("modelPicker replaces instead of merging", () => {
+		const settings = mergeCcSettings(
+			[
+				document("user", { modelPicker: { mode: "user", options: [{ id: "a" }] } }),
+				document("project", { modelPicker: { replaceBuiltInOptions: true } }),
+			],
+			EMPTY_CC_POLICY,
+		);
+		expect(settings.values.modelPicker).toEqual({ replaceBuiltInOptions: true });
+	});
+
+	test("the marketplace keys shallow-merge: a later entry replaces its own value", () => {
+		const settings = mergeCcSettings(
+			[
+				document("user", { extraKnownMarketplaces: { one: { source: "a", extra: 1 } } }),
+				document("project", { extraKnownMarketplaces: { one: { source: "b" } } }),
+			],
+			EMPTY_CC_POLICY,
+		);
+		expect(settings.values.extraKnownMarketplaces).toEqual({ one: { source: "b" } });
+	});
+
+	test("deniedModels from a non-policy document never reaches the merged values", () => {
+		const parsed = parseCcSettingsText('{"deniedModels":["project-model"]}', "project");
+		if (parsed.kind !== "document") throw new Error("expected a document");
+		expect(parsed.values.deniedModels).toBeUndefined();
+		expect(parsed.skipped).toEqual([
+			{ key: "deniedModels", detail: '"deniedModels" is only honored from managed settings and was ignored here.' },
+		]);
+		const settings = mergeCcSettings(
+			[{ source: "project", path: "/settings/project.json", values: parsed.values }],
+			EMPTY_CC_POLICY,
+		);
+		expect(settings.values.deniedModels).toBeUndefined();
 	});
 });
 

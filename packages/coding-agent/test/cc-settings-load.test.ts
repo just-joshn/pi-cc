@@ -8,7 +8,7 @@ import {
 	ccProjectTrusted,
 	loadCcSettings,
 } from "../src/core/settings/cc/load.ts";
-import { formatIgnoredProjectSettings, formatSettingsFailures } from "../src/core/settings/cc/report.ts";
+import { formatIgnoredProjectSettings, formatSettingsFailures, formatSkippedSettings } from "../src/core/settings/cc/report.ts";
 
 const tempDirs: string[] = [];
 
@@ -96,12 +96,55 @@ describe("tier loading", () => {
 
 	test("a wrongly shaped tier names the key and contributes nothing", () => {
 		const parts = side();
-		write(join(parts.config, "settings.json"), '{"model":"claude-haiku-4-5","hooks":"not-an-object"}');
+		write(join(parts.config, "settings.json"), '{"model":"claude-haiku-4-5","sandbox":"not-an-object"}');
 		const loaded = loadCcSettings(location(parts));
 		expect(loaded.settings.model).toBeUndefined();
-		expect(loaded.failures[0]).toMatchObject({ kind: "shape", source: "user", key: "hooks" });
+		expect(loaded.failures[0]).toMatchObject({ kind: "shape", source: "user", key: "sandbox" });
 		expect(formatSettingsFailures(loaded.failures).slice(1)).toEqual([
-			`  ${join(parts.config, "settings.json")} (hooks): Expected object, but received string`,
+			`  ${join(parts.config, "settings.json")} (sandbox): Expected object, but received string`,
+		]);
+	});
+
+	test("a wrong hooks type is skipped and the rest of the file loads", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, '{"model":"claude-haiku-4-5","hooks":"not-an-object"}');
+		const loaded = loadCcSettings(location(parts));
+		expect(loaded.failures).toEqual([]);
+		expect(loaded.settings.model).toBe("claude-haiku-4-5");
+		expect(loaded.settings.values.hooks).toBeUndefined();
+		expect(formatSkippedSettings(loaded.skipped)).toEqual([
+			"These settings entries were skipped; the rest of each file is in effect:",
+			`  ${path} (hooks): "hooks" must be an object mapping event names to matcher arrays; received string. This field was ignored.`,
+		]);
+	});
+
+	test("a document with a whole-file problem reports only the whole-file block", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, '{"model":5,"hooks":"not-an-object"}');
+		const loaded = loadCcSettings(location(parts));
+		expect(formatSkippedSettings(loaded.skipped)).toEqual([]);
+		const lines = formatSettingsFailures(loaded.failures);
+		expect(lines).toHaveLength(2);
+		expect(lines[1]).toBe(`  ${path} (model): Expected string, but received number`);
+	});
+
+	test("an empty file loads as no settings", () => {
+		const parts = side();
+		write(join(parts.config, "settings.json"), "");
+		write(join(parts.workspace, ".claude", "settings.json"), "   \n");
+		const loaded = loadCcSettings(location(parts));
+		expect(loaded.failures).toEqual([]);
+		expect(loaded.settings.values).toEqual({});
+	});
+
+	test("a null file is reported as malformed JSON", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, "null");
+		expect(formatSettingsFailures(loadCcSettings(location(parts)).failures).slice(1)).toEqual([
+			`  ${path}: Invalid or malformed JSON`,
 		]);
 	});
 
@@ -111,6 +154,83 @@ describe("tier loading", () => {
 		const lines = formatSettingsFailures(loadCcSettings(location(parts)).failures);
 		expect(lines[0]).toContain("These settings files did not load");
 		expect(lines[1]).toBe(`  ${join(parts.config, "settings.json")}: Expected object, but received array`);
+	});
+});
+
+describe("env block", () => {
+	test("coerces every value to a string", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(
+			path,
+			'{"env":{"CLAUDE_CODE_MAX_OUTPUT_TOKENS":4096,"PI_DEBUG":true,"FROM_ARRAY":[8192],"NULLED":null,"OBJECT":{}}}',
+		);
+		const loaded = loadCcSettings(location(parts));
+		expect(loaded.failures).toEqual([]);
+		expect(loaded.settings.env).toEqual({
+			CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096",
+			PI_DEBUG: "true",
+			FROM_ARRAY: "8192",
+			NULLED: "null",
+			OBJECT: "[object Object]",
+		});
+	});
+
+	test("an env block that is not a record rejects the file", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, '{"model":"claude-haiku-4-5","env":"nope"}');
+		const loaded = loadCcSettings(location(parts));
+		expect(loaded.settings.model).toBeUndefined();
+		expect(formatSettingsFailures(loaded.failures).slice(1)).toEqual([
+			`  ${path} (env): Expected record, but received string`,
+		]);
+	});
+});
+
+describe("permissions", () => {
+	test("a rule list that is not an array rejects the file", () => {
+		const parts = side();
+		write(join(parts.config, "settings.json"), '{"model":"claude-haiku-4-5"}');
+		write(join(parts.workspace, ".claude", "settings.json"), '{"model":"claude-sonnet-4-5"}');
+		const localPath = join(parts.workspace, ".claude", "settings.local.json");
+		write(localPath, '{"permissions":{"allow":"Read"}}');
+		const loaded = loadCcSettings(location(parts));
+		expect(loaded.settings.model).toBe("claude-sonnet-4-5");
+		expect(formatSettingsFailures(loaded.failures).slice(1)).toEqual([
+			`  ${localPath} (permissions.allow): Expected array, but received string`,
+		]);
+	});
+
+	test("a non-string rule is removed and reported as skipped", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, '{"model":"claude-haiku-4-5","permissions":{"allow":["Read",1],"deny":["Bash"]}}');
+		const loaded = loadCcSettings(location(parts));
+		expect(loaded.failures).toEqual([]);
+		expect(loaded.settings.model).toBe("claude-haiku-4-5");
+		expect(loaded.settings.values.permissions).toEqual({ allow: ["Read"], deny: ["Bash"] });
+		expect(formatSkippedSettings(loaded.skipped).slice(1)).toEqual([
+			`  ${path} (permissions.allow): Non-string value in allow array was removed`,
+		]);
+	});
+
+	test("a non-string additional directory rejects the file", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, '{"permissions":{"additionalDirectories":[1]}}');
+		expect(formatSettingsFailures(loadCcSettings(location(parts)).failures).slice(1)).toEqual([
+			`  ${path} (permissions.additionalDirectories.0): Expected string, but received number`,
+		]);
+	});
+
+	test("an unknown default mode reports the enumerated values", () => {
+		const parts = side();
+		const path = join(parts.config, "settings.json");
+		write(path, '{"permissions":{"defaultMode":"nope"}}');
+		expect(formatSettingsFailures(loadCcSettings(location(parts)).failures).slice(1)).toEqual([
+			`  ${path} (permissions.defaultMode): Invalid value. Expected one of: "acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"`,
+		]);
 	});
 });
 
@@ -200,6 +320,37 @@ describe("flag tier", () => {
 		expect(block).toContain("did not load");
 		expect(block).toContain("Invalid or malformed JSON");
 		expect(block).toContain(path);
+	});
+
+	test("a missing --settings path is fatal", () => {
+		const parts = side();
+		const path = join(parts.workspace, "absent.json");
+		expect(loadCcSettings(location(parts, { flagSettings: path })).flagError).toBe(`Settings file not found: ${path}`);
+	});
+
+	test("a directory passed to --settings is fatal", () => {
+		const parts = side();
+		const dir = join(parts.workspace, "settings-dir");
+		mkdirSync(dir, { recursive: true });
+		const loaded = loadCcSettings(location(parts, { flagSettings: dir }));
+		expect(loaded.flagError).toContain("Cannot use settings file (");
+		expect(loaded.flagError).toContain(dir);
+	});
+
+	test("inline --settings JSON that does not parse is fatal", () => {
+		expect(loadCcSettings(location(side(), { flagSettings: '{"model":}' })).flagError).toBe(
+			"Invalid JSON provided to --settings",
+		);
+	});
+
+	test("an empty --settings value is not a tier", () => {
+		const parts = side();
+		write(join(parts.config, "settings.json"), '{"model":"claude-haiku-4-5"}');
+		const loaded = loadCcSettings(location(parts, { flagSettings: "   " }));
+		expect(loaded.flagError).toBeUndefined();
+		expect(loaded.failures).toEqual([]);
+		expect(loaded.settings.model).toBe("claude-haiku-4-5");
+		expect(loaded.searched).toHaveLength(4);
 	});
 });
 
