@@ -486,15 +486,21 @@ function printTotals(runs: CaseRun[]): void {
 		);
 		const pass = sideRuns.filter((entry) => entry.ran && entry.diffs.length === 0).length;
 		const fail = sideRuns.filter((entry) => entry.diffs.length > 0).length;
-		const notApplicable = runs.filter((run) =>
-			run.runs.some((entry) => entry.side === side && entry.notApplicable !== null),
-		).length;
-		const na = notApplicable === 0 ? "" : `, ${notApplicable} not applicable`;
+		const na = notApplicableCases(runs, side) === 0 ? "" : `, ${notApplicableCases(runs, side)} not applicable`;
 		console.log(`${side.padEnd(7)} side: ${pass} pass, ${fail} fail${na}`);
 	}
+	const partial = notApplicableCases(runs);
+	const note = partial === 0 ? "" : `; ${partial} with an n/a side`;
 	console.log(
-		`totals: ${count("PASS")} pass, ${count("FAIL")} fail, ${count("SKIP")} skip, ${count("UNVERIFIED")} unverified (of ${runs.length} cases)`,
+		`totals: ${count("PASS")} pass, ${count("FAIL")} fail, ${count("SKIP")} skip, ${count("UNVERIFIED")} unverified (of ${runs.length} cases${note})`,
 	);
+}
+
+/** Cases where a side is not applicable, so a pass covers only the sides that ran. */
+function notApplicableCases(runs: CaseRun[], side?: SideName): number {
+	return runs.filter((run) =>
+		run.runs.some((entry) => entry.notApplicable !== null && (side === undefined || entry.side === side)),
+	).length;
 }
 
 function writeReport(
@@ -509,6 +515,7 @@ function writeReport(
 		fail: runs.filter((run) => run.verdict === "FAIL").length,
 		skip: runs.filter((run) => run.verdict === "SKIP").length,
 		unverified: runs.filter((run) => run.verdict === "UNVERIFIED").length,
+		not_applicable: notApplicableCases(runs),
 	};
 	const report = {
 		run: new Date().toISOString(),
