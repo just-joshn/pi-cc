@@ -56,7 +56,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
-import { findExactModelReferenceMatch, resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
+import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
@@ -74,7 +74,7 @@ import { withAdditionalDirectories } from "./core/settings/cc/merge.ts";
 import { formatIgnoredProjectSettings, formatSettingsFailures } from "./core/settings/cc/report.ts";
 import type { CcSettings } from "./core/settings/cc/types.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
-import { SettingsManager, type DefaultProjectTrust } from "./core/settings-manager.ts";
+import { type DefaultProjectTrust, SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { builtInExtensions } from "./extensions/index.ts";
@@ -584,15 +584,16 @@ function buildSessionOptions(
 	}
 
 	if (!options.model && ccModel !== undefined) {
-		// R5: the settings model is the session default. --model above wins; this beats the catalog default.
-		const selected = findExactModelReferenceMatch(ccModel, modelRuntime.getModels());
-		if (selected === undefined) {
+		// R5: the settings model is the session default, resolved the way `--model` is. `--model` above
+		// wins, and an id that does not resolve warns instead of failing the run.
+		const selected = resolveCliModel({ cliModel: ccModel, modelRuntime });
+		if (selected.model === undefined) {
 			diagnostics.push({
 				type: "warning",
-				message: `Model "${ccModel}" from Claude Code settings is not in the catalog. Using the default model.`,
+				message: `Model "${ccModel}" from Claude Code settings did not resolve (${selected.error ?? "no match"}). Using the default model.`,
 			});
 		} else {
-			options.model = selected;
+			options.model = selected.model;
 		}
 	}
 
@@ -782,12 +783,7 @@ export async function main(args: string[], options?: MainOptions) {
 	// Claude Code settings load before pi's own settings manager, because their env block is applied
 	// over the inherited process environment and every later resolution reads it.
 	const trustStore = new ProjectTrustStore(agentDir);
-	const ccSettings = loadCcSettingsForRun(
-		parsed,
-		cwd,
-		trustStore,
-		bootstrapSettingsManager.getDefaultProjectTrust(),
-	);
+	const ccSettings = loadCcSettingsForRun(parsed, cwd, trustStore, bootstrapSettingsManager.getDefaultProjectTrust());
 	const ccModel = ccSettings.model ?? ccSettings.env.ANTHROPIC_MODEL;
 	time("ccSettings");
 
