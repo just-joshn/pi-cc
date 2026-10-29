@@ -118,3 +118,50 @@ describe("stdout allowExtra", () => {
 		).toThrow(/compare\.stdout\.allowExtra must be a boolean/);
 	});
 });
+
+const DENIED_ARGV: string[][] = [
+	["upgrade"],
+	["--verbose", "update"],
+	["--", "login"],
+	["--model", "x", "setup-token"],
+	["LOGIN"],
+	["auth", "logout"],
+	["purge"],
+	["respawn"],
+	["plugin", "install", "x"],
+];
+
+describe("denied argv tokens", () => {
+	test.each(DENIED_ARGV.map((argv) => [argv]))("rejects %j", (argv) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/argv must not run "/);
+	});
+
+	test("names the offending token and the rule", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--", "login"] })).toThrow(
+			/argv must not run "login": the harness never runs a claude subcommand that authenticates, installs, or mutates/,
+		);
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--login"] })).toThrow(/argv must not run "--login"/);
+	});
+});
+
+describe("probe table", () => {
+	test.each([
+		["ls", "/bin/ls"],
+		["nc", "/usr/bin/nc"],
+		["open", "/usr/bin/open"],
+	])("resolves probe %s to %s", (probe, path) => {
+		expect(loadOne({ ...MINIMAL_CASE, probe }).binary).toBe(path);
+	});
+
+	test("rejects a probe that is not in the table", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, probe: "sh" })).toThrow(/unknown probe "sh"/);
+	});
+
+	test("rejects a probe that is a path", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, probe: "/bin/sh" })).toThrow(/unknown probe "\/bin\/sh"/);
+	});
+
+	test("rejects case data that names a binary path", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, binary: "/bin/sh" })).toThrow(/case has unknown key "binary"/);
+	});
+});
