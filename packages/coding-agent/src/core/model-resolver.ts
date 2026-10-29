@@ -552,21 +552,29 @@ export interface InitialModelResult {
 }
 
 /**
- * The model `ANTHROPIC_MODEL` selects. An id the catalog does not carry becomes a custom model on the
- * Anthropic provider, because Claude Code sends the name as written.
+ * The Anthropic model a Claude Code model name selects. An id the catalog does not carry becomes a
+ * custom model on the Anthropic provider, because Claude Code sends the name as written.
  */
-export function anthropicEnvModel(
+export function anthropicCcModel(
 	modelRuntime: ModelRuntime,
+	name: string,
 	env: Record<string, string | undefined> = process.env,
 ): Model<Api> | undefined {
-	const modelEnvironment = parseAnthropicModelEnv(env);
-	const requested = modelEnvironment.model;
-	if (requested === undefined || !modelRuntime.hasConfiguredAuth("anthropic")) return undefined;
-	const modelId = ccModelAlias(requested, modelEnvironment);
+	if (!modelRuntime.hasConfiguredAuth("anthropic")) return undefined;
+	const modelId = ccModelAlias(name.trim(), parseAnthropicModelEnv(env));
 	const known = modelRuntime.getModel("anthropic", modelId);
 	if (known) return known;
 	const [first, ...rest] = modelRuntime.getModels("anthropic");
 	return first === undefined ? undefined : buildFallbackModel([first, ...rest], modelId);
+}
+
+/** The model `ANTHROPIC_MODEL` selects. */
+export function anthropicEnvModel(
+	modelRuntime: ModelRuntime,
+	env: Record<string, string | undefined> = process.env,
+): Model<Api> | undefined {
+	const requested = parseAnthropicModelEnv(env).model;
+	return requested === undefined ? undefined : anthropicCcModel(modelRuntime, requested, env);
 }
 
 /**
