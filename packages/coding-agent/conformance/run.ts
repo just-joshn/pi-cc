@@ -16,7 +16,7 @@ import { baseEnv, createRoots, expandPlaceholders, hashTree, REAL_HOME, renderPr
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
-import { CLAUDE_SHA256, CLAUDE_VERSION, claudeSide, identifyClaude } from "./sides/claude.ts";
+import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, claudeSide, hashClaude } from "./sides/claude.ts";
 import { CLI_PATH, piCcSide } from "./sides/pi-cc.ts";
 
 type Verdict = "PASS" | "FAIL" | "SKIP" | "UNVERIFIED";
@@ -78,21 +78,22 @@ async function main(): Promise<number> {
 	}
 
 	const runRoot = join(process.env.CONFORMANCE_TMP ?? join(tmpdir(), "pi-cc-conformance"), runStamp());
-	const probeHome = join(runRoot, ".probe-home");
-	mkdirSync(probeHome, { recursive: true });
-	const claude = identifyClaude(probeHome);
+	const claude = await probeClaude(runRoot);
 	if (claude === null) {
 		console.log("claude is absent. Every case runs on the pi-cc side and is reported unverified.\n");
-	} else if (!claude.frozen && !values["allow-claude-version-drift"]) {
+	} else if (claude.sha256 !== CLAUDE_SHA256) {
 		console.log(
-			`claude at ${claude.path} is ${claude.banner} sha256 ${claude.sha256}, not the pinned ${CLAUDE_VERSION} ${CLAUDE_SHA256}.`,
+			`claude at ${claude.path} has sha256 ${claude.sha256}, not the pinned ${CLAUDE_VERSION} ${CLAUDE_SHA256}.`,
 		);
+		console.log("It was not executed. Every verdict is unverified.\n");
+	} else if (!claude.frozen && !values["allow-claude-version-drift"]) {
+		console.log(`claude at ${claude.path} is ${claude.banner}, not the pinned ${CLAUDE_VERSION} ${CLAUDE_SHA256}.`);
 		console.log("Every verdict is unverified. Pass --allow-claude-version-drift to compare anyway.\n");
 	}
 
 	const results = new Map<string, CaseRun>();
 	const allowDrift = values["allow-claude-version-drift"] === true;
-	const compareClaude = claude !== null && (claude.frozen || allowDrift);
+	const compareClaude = claude !== null && claude.sha256 === CLAUDE_SHA256 && (claude.frozen || allowDrift);
 	const execute = async (testCase: ConformanceCase): Promise<CaseRun> => {
 		const cached = results.get(testCase.id);
 		if (cached !== undefined) return cached;
@@ -126,13 +127,35 @@ async function main(): Promise<number> {
 
 	for (const testCase of selected) await execute(testCase);
 	const ordered = selected.map((testCase) => results.get(testCase.id)!);
-	const drift = claude !== null && !claude.frozen && allowDrift ? `claude ${claude.banner}` : null;
+	const drift =
+		claude !== null && !claude.frozen && compareClaude ? `claude ${claude.banner ?? "unknown version"}` : null;
 	for (const run of ordered) printRow(run, drift);
 	printTotals(ordered);
 	writeReport(runRoot, claude, ordered, false, drift);
 
 	const count = (verdict: Verdict) => ordered.filter((run) => run.verdict === verdict).length;
 	return count("FAIL") === 0 && count("UNVERIFIED") === 0 ? 0 : 1;
+}
+
+/**
+ * The pinned binary's identity. The digest is checked before anything runs, and the only version
+ * probe runs inside the same sandbox as the cases, so an unpinned claude is never executed.
+ */
+async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
+	const hashed = hashClaude();
+	if (hashed === null) return null;
+	if (hashed.sha256 !== CLAUDE_SHA256) return { ...hashed, banner: null, version: null, frozen: false };
+	const roots = createRoots(runRoot, ".claude-probe", "claude");
+	const profilePath = join(roots.out, "profile.sb");
+	writeFileSync(profilePath, renderProfile({ roots, executableRoots: claudeSide.executableRoots(), port: null }));
+	const probe = await runSandboxed(profilePath, [hashed.path, "--version"], roots, baseEnv(roots, null), null, 30_000);
+	const banner = probe.exitCode === 0 ? probe.stdout.trim() : null;
+	return {
+		...hashed,
+		banner,
+		version: banner === null ? null : banner.split(/\s+/)[0],
+		frozen: banner === CLAUDE_BANNER,
+	};
 }
 
 async function runCase(testCase: ConformanceCase, compareClaude: boolean, runRoot: string): Promise<CaseRun> {
@@ -159,7 +182,7 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		const profilePath = join(roots.out, "profile.sb");
 		writeFileSync(
 			profilePath,
-			renderProfile({ roots, executableRoots: side.executableRoots(), network: mock !== null }),
+			renderProfile({ roots, executableRoots: side.executableRoots(), port: mock?.port ?? null }),
 		);
 		const command = testCase.binary === undefined ? side.command() : [testCase.binary];
 		const argv = [...command, ...testCase.argv.map((argument) => expandPlaceholders(argument, roots))];
@@ -273,9 +296,11 @@ function printHeader(selected: number, total: number, claude: ClaudeIdentity | n
 	console.log(`pi-cc conformance: ${selected} of ${total} cases`);
 	if (claude === null) {
 		console.log("claude: absent");
+	} else if (claude.sha256 !== CLAUDE_SHA256) {
+		console.log(`claude: ${claude.path} sha256 ${claude.sha256} (not the pin, not executed)`);
 	} else {
 		const pin = claude.frozen ? "pinned" : allowDrift ? "drift allowed" : "unverified";
-		console.log(`claude: ${claude.path} ${claude.banner} sha256 ${claude.sha256} (${pin})`);
+		console.log(`claude: ${claude.path} ${claude.banner ?? "no version output"} sha256 ${claude.sha256} (${pin})`);
 	}
 	console.log(`pi-cc:  ${CLI_PATH}\n`);
 }

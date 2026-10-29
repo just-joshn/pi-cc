@@ -137,7 +137,8 @@ export function hashTree(dir: string): Map<string, string> {
 export interface ProfileOptions {
 	roots: Roots;
 	executableRoots: string[];
-	network: boolean;
+	/** The mock model server's port, the only loopback port the profile opens. Null for no network. */
+	port: number | null;
 }
 
 export function renderProfile(options: ProfileOptions): string {
@@ -176,11 +177,12 @@ export function renderProfile(options: ProfileOptions): string {
 		),
 		"(deny network*)",
 	];
-	if (options.network) {
+	if (options.port !== null) {
+		const loopback = `localhost:${options.port}`;
 		rules.push(
-			'(allow network-inbound (local ip "localhost:*"))',
-			'(allow network-outbound (remote ip "localhost:*"))',
-			'(allow network-bind (local ip "localhost:*"))',
+			`(allow network-inbound (local ip ${quote(loopback)}))`,
+			`(allow network-outbound (remote ip ${quote(loopback)}))`,
+			`(allow network-bind (local ip ${quote(loopback)}))`,
 		);
 	}
 	rules.push("");
