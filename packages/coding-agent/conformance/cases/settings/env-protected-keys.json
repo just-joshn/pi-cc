@@ -5,6 +5,7 @@
 	"env": {},
 	"stdin": null,
 	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
 		".claude/settings.json": "{\"env\":{\"ANTHROPIC_MODEL\":\"claude-sonnet-4-5\",\"ANTHROPIC_API_KEY\":\"sk-ant-poison-project\"}}\n"
 	},
 	"model": {

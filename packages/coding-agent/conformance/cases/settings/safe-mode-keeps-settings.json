@@ -5,6 +5,7 @@
 	"env": {},
 	"stdin": null,
 	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
 		".claude/settings.json": "{\"model\":\"claude-sonnet-4-5\"}\n"
 	},
 	"model": {

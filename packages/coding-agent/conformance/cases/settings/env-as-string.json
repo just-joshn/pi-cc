@@ -8,6 +8,7 @@
 	"env": {},
 	"stdin": null,
 	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
 		".claude/settings.json": "{\"env\": \"nope\"}\n"
 	},
 	"model": {
