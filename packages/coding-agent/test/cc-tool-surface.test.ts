@@ -1,14 +1,47 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
-import { projectDeclarations, projectToolCall } from "../src/core/tools/cc-surface.ts";
+import {
+	projectAssistantMessageForPi,
+	projectDeclarations,
+	projectMessagesForModel,
+	projectToolCall,
+} from "../src/core/tools/cc-surface.ts";
 import { CC_TOOL_TEXT } from "../src/core/tools/cc-text.ts";
 import { createEditTool } from "../src/core/tools/edit.ts";
 import { createReadTool } from "../src/core/tools/read.ts";
 import { createReadState } from "../src/core/tools/read-state.ts";
 import { createWriteTool } from "../src/core/tools/write.ts";
+
+function assistantCall(name: string, args: Record<string, string | number | boolean>): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call-1", name, arguments: args }],
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "claude-haiku-4-5",
+		stopReason: "toolUse",
+		timestamp: 0,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+	};
+}
+
+function callOf(message: { content?: unknown }): { name?: string; arguments?: unknown } {
+	const block = (message.content as Array<{ type?: string; name?: string; arguments?: unknown }> | undefined)?.find(
+		(part) => part.type === "toolCall",
+	);
+	return { name: block?.name, arguments: block?.arguments };
+}
 
 describe("Claude Code tool surface", () => {
 	it("rejects an unexpected field and coerces a numeric string", () => {
@@ -32,6 +65,99 @@ describe("Claude Code tool surface", () => {
 		});
 		expect(timeout.inputError).toBeUndefined();
 		expect(timeout.arguments).toEqual({ command: "echo t", timeout: 1 });
+	});
+
+	it("rejects a pi name of a covered tool with the name the model used", () => {
+		const result = projectToolCall({ name: "read", arguments: { path: "five.txt" } });
+		expect(result.inputError).toBe(
+			"<tool_use_error>Error: No such tool available: read. Tool names are case-sensitive: call Read instead.</tool_use_error>",
+		);
+		expect(result.arguments).toEqual({});
+	});
+
+	it("reports a disabled Claude Code name with that name, not the pi name", () => {
+		const result = projectToolCall({
+			name: "Bash",
+			arguments: { command: "echo x" },
+			active: new Set(["read"]),
+		});
+		expect(result.inputError).toBe(
+			"<tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>",
+		);
+	});
+
+	it("echoes the model's call, with Claude Code's defaults, on the next request", () => {
+		const history = projectMessagesForModel([
+			projectAssistantMessageForPi(
+				assistantCall("Edit", {
+					file_path: "q.txt",
+					old_string: "a",
+					new_string: "b",
+				}),
+			),
+			projectAssistantMessageForPi(
+				assistantCall("Bash", {
+					command: "echo t",
+					timeout: 1000,
+					description: "say hi",
+					run_in_background: false,
+				}),
+			),
+		]);
+		expect(callOf(history[0])).toEqual({
+			name: "Edit",
+			arguments: { file_path: "q.txt", old_string: "a", new_string: "b", replace_all: false },
+		});
+		expect(callOf(history[1])).toEqual({
+			name: "Bash",
+			arguments: {
+				command: "echo t",
+				timeout: 1000,
+				description: "say hi",
+				run_in_background: false,
+			},
+		});
+	});
+
+	it("reverse-maps a session written before the original call was recorded", () => {
+		const history = projectMessagesForModel([
+			assistantCall("write", { path: "n.txt", content: "z" }),
+			assistantCall("bash", { command: "echo t", timeout: 1 }),
+		]);
+		expect(callOf(history[0])).toEqual({ name: "Write", arguments: { file_path: "n.txt", content: "z" } });
+		expect(callOf(history[1])).toEqual({ name: "Bash", arguments: { command: "echo t", timeout: 1000 } });
+	});
+
+	it("says number for a non-numeric limit and int for a fractional one", () => {
+		const text = projectToolCall({ name: "Read", arguments: { file_path: "five.txt", limit: "abc" } }).inputError;
+		expect(text).toContain("expected as `number` but provided as `string`");
+		const fraction = projectToolCall({ name: "Read", arguments: { file_path: "five.txt", limit: 1.5 } }).inputError;
+		expect(fraction).toContain("expected as `int` but provided as `number`");
+	});
+
+	it("accepts replace_all as the string true", () => {
+		const result = projectToolCall({
+			name: "Edit",
+			arguments: { file_path: "r.txt", old_string: "a", new_string: "b", replace_all: "true" },
+		});
+		expect(result.inputError).toBeUndefined();
+		expect(result.arguments).toMatchObject({ replaceAll: true });
+	});
+
+	it("lets an extension registered as Read own that name", () => {
+		const tools = [
+			{ name: "read", description: "r", parameters: Type.Object({}) },
+			{ name: "Read", description: "extension", parameters: Type.Object({ file_path: Type.String() }) },
+		];
+		expect(projectDeclarations(tools, false).map((tool) => tool.name)).toEqual(["Read"]);
+		expect(projectDeclarations(tools, false)[0]?.description).toBe("extension");
+		const call = projectToolCall({
+			name: "Read",
+			arguments: { file_path: "a.txt" },
+			ownedNames: new Set(["Read"]),
+		});
+		expect(call.name).toBe("Read");
+		expect(call.arguments).toEqual({ file_path: "a.txt" });
 	});
 
 	it("reports every validation issue, one line each", () => {
@@ -84,6 +210,47 @@ describe("read and write gates", () => {
 		const page = await read.execute("5", { path: "five.txt", limit: 1 });
 		expect(page.content[0]).toEqual({ type: "text", text: "1\t1" });
 		expect(state.get(join(dir, "five.txt"))?.partial).toBe(true);
+	});
+
+	it("refuses a limited read whose selected text exceeds the token cap", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-read-cap-"));
+		writeFileSync(join(dir, "huge.txt"), "y".repeat(3 * 1024 * 1024));
+		const read = createReadTool(dir);
+		await expect(read.execute("1", { path: "huge.txt", limit: 1 })).rejects.toThrow(
+			/File content \(\d+ tokens\) exceeds maximum allowed tokens \(25000\)/,
+		);
+	});
+
+	it("refuses an offset read that still exceeds the token cap, instead of a partial notice", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-read-off-"));
+		const line = `x`.repeat(80);
+		writeFileSync(join(dir, "wide.txt"), Array.from({ length: 3001 }, (_, i) => `${i} ${line}`).join("\n") + "\n");
+		const read = createReadTool(dir);
+		await expect(read.execute("1", { path: "wide.txt", offset: 1000 })).rejects.toThrow(
+			/File content \(\d+ tokens\) exceeds maximum allowed tokens \(25000\)/,
+		);
+	});
+
+	it("creates missing directories when Edit creates a file", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-edit-mkdir-"));
+		const edit = createEditTool(dir);
+		const result = await edit.execute("1", {
+			path: "new/deep.txt",
+			edits: [{ oldText: "", newText: "made\n" }],
+		});
+		expect(result.content[0]).toMatchObject({ type: "text" });
+		expect(readFileSync(join(dir, "new/deep.txt"), "utf-8")).toBe("made\n");
+	});
+
+	it("applies an edit whose straight quotes match curly quotes in the file", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-edit-quotes-"));
+		writeFileSync(join(dir, "q.txt"), "say \u2018hi\u2019 and \u201cbye\u201d\n");
+		const edit = createEditTool(dir);
+		await edit.execute("1", {
+			path: "q.txt",
+			edits: [{ oldText: "say 'hi' and \"bye\"", newText: "say 'yo' and \"bye\"" }],
+		});
+		expect(readFileSync(join(dir, "q.txt"), "utf-8")).toBe("say \u2018yo\u2019 and \u201cbye\u201d\n");
 	});
 
 	it("refuses a gated write when the file content is not the content that was read", async () => {

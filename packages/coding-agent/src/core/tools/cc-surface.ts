@@ -221,6 +221,10 @@ export function projectToolCall(call: {
 	name: string;
 	arguments: unknown;
 	argumentsError?: string;
+	/** pi names currently offered to the model. A covered name absent here is disabled. */
+	active?: ReadonlySet<string>;
+	/** Registered tools whose name is already a Claude Code name. They own that name. */
+	ownedNames?: ReadonlySet<string>;
 }): ProjectedToolCall {
 	const covered = ccToolByDeclaredName(call.name);
 	if (!covered) return { name: call.name, arguments: (call.arguments ?? {}) as Record<string, unknown> };
