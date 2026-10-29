@@ -268,4 +268,10 @@ describe("seeding a case's files", () => {
 		const { roots } = seedRoot();
 		expect(expandPlaceholders("$CONFIG/settings.json", roots)).toBe(join(roots.config, "settings.json"));
 	});
+
+	test("$AGENT seeds the side's agent directory, and the content expands too", () => {
+		const { roots } = seedRoot();
+		seedFiles(roots, { "$AGENT/trust.json": '{"$WORKSPACE": true}\n' });
+		expect(readFileSync(join(roots.agent, "trust.json"), "utf8")).toBe(`{"${roots.workspace}": true}\n`);
+	});
 });

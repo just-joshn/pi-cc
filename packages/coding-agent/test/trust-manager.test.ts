@@ -64,4 +64,27 @@ describe("ProjectTrustStore", () => {
 			}
 		}
 	});
+
+	it("treats Claude Code's project and local settings files as trust-requiring", () => {
+		const originalHome = process.env.HOME;
+		process.env.HOME = tempDir;
+		try {
+			expect(hasTrustRequiringProjectResources(cwd)).toBe(false);
+
+			mkdirSync(join(cwd, ".claude"), { recursive: true });
+			writeFileSync(join(cwd, ".claude", "settings.json"), "{}");
+			expect(hasTrustRequiringProjectResources(cwd)).toBe(true);
+			rmSync(join(cwd, ".claude", "settings.json"), { force: true });
+
+			expect(hasTrustRequiringProjectResources(cwd)).toBe(false);
+			writeFileSync(join(cwd, ".claude", "settings.local.json"), "{}");
+			expect(hasTrustRequiringProjectResources(cwd)).toBe(true);
+		} finally {
+			if (originalHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = originalHome;
+			}
+		}
+	});
 });

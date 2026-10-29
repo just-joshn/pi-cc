@@ -2,17 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
-import {
-	type CcSettingsLocation,
-	ccPolicyGate,
-	ccProjectTrusted,
-	loadCcSettings,
-} from "../src/core/settings/cc/load.ts";
+import { type ProjectTrustSignals, readInitialProjectTrust } from "../src/core/project-trust.ts";
+import { type CcSettingsLocation, ccPolicyGate, loadCcSettings } from "../src/core/settings/cc/load.ts";
 import {
 	formatIgnoredProjectSettings,
 	formatSettingsFailures,
 	formatSkippedSettings,
 } from "../src/core/settings/cc/report.ts";
+import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 
 const tempDirs: string[] = [];
 
@@ -279,28 +276,60 @@ describe("project trust", () => {
 	test("an untrusted project with no .claude directory reports nothing", () => {
 		expect(loadCcSettings(location(side(), { projectTrusted: false })).ignored).toEqual([]);
 	});
+});
 
-	test("no trust decision allows the project tiers", () => {
-		expect(ccProjectTrusted({ decision: null })).toBe(true);
+describe("repo-tier trust is pi's trust rule", () => {
+	function signals(parts: Side, overrides: Partial<ProjectTrustSignals> = {}, hasUI = false) {
+		return {
+			cwd: parts.workspace,
+			trustStore: new ProjectTrustStore(join(parts.root, "agent")),
+			hasUI,
+			...overrides,
+		};
+	}
+
+	test("no decision in a mode without a UI denies the project tiers", () => {
+		const parts = side();
+		write(join(parts.workspace, ".claude", "settings.json"), '{"model":"claude-sonnet-4-5"}');
+		expect(readInitialProjectTrust(signals(parts))).toBe(false);
+	});
+
+	test("no decision with a UI defers to the prompt", () => {
+		const parts = side();
+		write(join(parts.workspace, ".claude", "settings.json"), '{"model":"claude-sonnet-4-5"}');
+		expect(readInitialProjectTrust(signals(parts, {}, true))).toBe("pending");
+	});
+
+	test("a project with no trust-requiring resource needs no decision", () => {
+		expect(readInitialProjectTrust(signals(side()))).toBe(true);
 	});
 
 	test("a false trust entry denies them", () => {
-		expect(ccProjectTrusted({ decision: false })).toBe(false);
+		const parts = side();
+		write(join(parts.workspace, ".claude", "settings.json"), "{}");
+		new ProjectTrustStore(join(parts.root, "agent")).set(parts.workspace, false);
+		expect(readInitialProjectTrust(signals(parts, {}, true))).toBe(false);
 	});
 
 	test("a true trust entry allows them", () => {
-		expect(ccProjectTrusted({ decision: true })).toBe(true);
+		const parts = side();
+		write(join(parts.workspace, ".claude", "settings.json"), "{}");
+		new ProjectTrustStore(join(parts.root, "agent")).set(parts.workspace, true);
+		expect(readInitialProjectTrust(signals(parts))).toBe(true);
 	});
 
 	test("--no-approve denies and --approve allows, over the store", () => {
-		expect(ccProjectTrusted({ decision: true, trustOverride: false })).toBe(false);
-		expect(ccProjectTrusted({ decision: false, trustOverride: true })).toBe(true);
+		const parts = side();
+		write(join(parts.workspace, ".claude", "settings.json"), "{}");
+		expect(readInitialProjectTrust(signals(parts, { trustOverride: false }, true))).toBe(false);
+		expect(readInitialProjectTrust(signals(parts, { trustOverride: true }))).toBe(true);
 	});
 
-	test("defaultProjectTrust never denies an undecided path", () => {
-		expect(ccProjectTrusted({ decision: null, defaultProjectTrust: "never" })).toBe(false);
-		expect(ccProjectTrusted({ decision: null, defaultProjectTrust: "always" })).toBe(true);
-		expect(ccProjectTrusted({ decision: true, defaultProjectTrust: "never" })).toBe(true);
+	test("defaultProjectTrust never denies an undecided path, always allows it", () => {
+		const parts = side();
+		write(join(parts.workspace, ".claude", "settings.json"), "{}");
+		expect(readInitialProjectTrust(signals(parts, { defaultProjectTrust: "never" }, true))).toBe(false);
+		expect(readInitialProjectTrust(signals(parts, { defaultProjectTrust: "always" }))).toBe(true);
 	});
 });
 

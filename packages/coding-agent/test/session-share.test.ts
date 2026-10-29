@@ -12,6 +12,7 @@ vi.mock("node:child_process", () => childProcessMocks);
 
 import { shareSession } from "../src/modes/interactive/session-share.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { startupEnv } from "../src/utils/internal-env.ts";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
 	let resolve!: () => void;
@@ -123,12 +124,11 @@ describe("shareSession", () => {
 		} as never);
 
 		expect(getProvider).not.toHaveBeenCalled();
-		expect(childProcessMocks.spawn).toHaveBeenCalledWith("gh", [
-			"gist",
-			"create",
-			"--public=false",
-			expect.any(String),
-		]);
+		expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+			"gh",
+			["gist", "create", "--public=false", expect.any(String)],
+			expect.objectContaining({ env: startupEnv() }),
+		);
 		expect(statuses[0]).toContain("https://pi.dev/session/#forced-gist");
 	});
 

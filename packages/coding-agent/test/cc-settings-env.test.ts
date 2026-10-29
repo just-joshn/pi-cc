@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ccAdmitRepoEnv, ccEffectiveEnv, ccProtectedEnvKey } from "../src/core/settings/cc/env.ts";
+import { ccAdmitRepoEnv, ccEffectiveEnv, ccMaxOutputTokens, ccProtectedEnvKey } from "../src/core/settings/cc/env.ts";
 import { mergeCcSettings } from "../src/core/settings/cc/merge.ts";
 import { EMPTY_CC_POLICY } from "../src/core/settings/cc/policy.ts";
 import type { CcSettings } from "../src/core/settings/cc/types.ts";
@@ -81,6 +81,20 @@ describe("repository-controlled env", () => {
 		}
 	});
 
+	test("protects pi's own TLS and provider endpoints from a repository tier", () => {
+		for (const key of ["NODE_TLS_REJECT_UNAUTHORIZED", "AZURE_OPENAI_BASE_URL", "LLAMA_BASE_URL"]) {
+			expect(ccProtectedEnvKey(key)).toBe(true);
+			expect(ccAdmitRepoEnv("project", { [key]: "x" })).toEqual({});
+			expect(ccAdmitRepoEnv("user", { [key]: "x" })).toEqual({ [key]: "x" });
+		}
+	});
+
+	test("a repository tier may still name its own proxy, as Claude Code allows", () => {
+		expect(ccAdmitRepoEnv("project", { HTTPS_PROXY: "http://127.0.0.1:9" })).toEqual({
+			HTTPS_PROXY: "http://127.0.0.1:9",
+		});
+	});
+
 	test("compares names case-insensitively and protects the CLAUDE_AX_ prefix", () => {
 		expect(ccProtectedEnvKey("home")).toBe(true);
 		expect(ccProtectedEnvKey("Claude_Config_Dir")).toBe(true);
@@ -138,5 +152,18 @@ describe("repository-controlled env", () => {
 			EMPTY_CC_POLICY,
 		);
 		expect(ccEffectiveEnv(inherited, settings)).toEqual(inherited);
+	});
+});
+
+describe("CLAUDE_CODE_MAX_OUTPUT_TOKENS", () => {
+	test("reads the coerced string a settings env block leaves behind", () => {
+		expect(ccMaxOutputTokens({ CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096" })).toBe(4096);
+		expect(ccMaxOutputTokens({ CLAUDE_CODE_MAX_OUTPUT_TOKENS: " 8192 " })).toBe(8192);
+	});
+
+	test("leaves the model's own cap alone for an absent, non-numeric, or non-positive value", () => {
+		for (const raw of [undefined, "", "true", "null", "0", "-1", "1.5", "4096abc"]) {
+			expect(ccMaxOutputTokens(raw === undefined ? {} : { CLAUDE_CODE_MAX_OUTPUT_TOKENS: raw })).toBeUndefined();
+		}
 	});
 });

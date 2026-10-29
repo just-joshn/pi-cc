@@ -94,6 +94,8 @@ export function expandPlaceholders(value: string, roots: Roots): string {
 		.join(roots.tmp)
 		.split("$CONFIG")
 		.join(roots.config)
+		.split("$AGENT")
+		.join(roots.agent)
 		.split("$HOME")
 		.join(roots.home)
 		.split("$REAL_HOME")
@@ -158,6 +160,8 @@ export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const target = seedTarget(roots, path);
 		mkdirp(dirname(target));
+		// Expanded in the content too, so a case can name its own workspace inside a file it seeds (a
+		// trust record, or a settings file that has to point at the side root).
 		writeFileSync(target, expandPlaceholders(content, roots));
 	}
 }
