@@ -73,7 +73,7 @@ describe("provider environment at auth resolution", () => {
 		expect(result?.auth.headers).toEqual({ Authorization: "Bearer case-bearer" });
 	});
 
-	it("adds no baseUrl key when the environment names no endpoint", async () => {
+	it("adds nothing when the environment names no endpoint", async () => {
 		const result = await resolveProviderAuth(
 			anthropicProvider(),
 			new InMemoryCredentialStore(),
@@ -81,7 +81,7 @@ describe("provider environment at auth resolution", () => {
 			{ signal },
 		);
 
-		expect(result === undefined ? true : "baseUrl" in result.auth).toBe(false);
+		expect(result).toEqual({ auth: { apiKey: "env-key" }, source: "ANTHROPIC_API_KEY" });
 	});
 
 	it("configures the provider from custom headers alone", async () => {
