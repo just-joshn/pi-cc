@@ -76,36 +76,47 @@ export function expandPlaceholders(value: string, roots: Roots): string {
 		.join(FIXTURES_DIR);
 }
 
+/**
+ * The environment every side runs with. The harness owns these keys: a case may add its own, but a case
+ * that replaced PATH, HOME, or a disable flag would measure itself instead of the pinned binary. The
+ * key list is derived from this table so the loader and the runner cannot disagree about what is owned.
+ */
+const HARNESS_ENV: Readonly<Record<string, (roots: Roots, port: number | null) => string | undefined>> = {
+	PATH: () => "/usr/bin:/bin:/usr/sbin:/sbin",
+	HOME: (roots) => roots.home,
+	CLAUDE_CONFIG_DIR: (roots) => roots.config,
+	TMPDIR: (roots) => roots.tmp,
+	SHELL: () => "/bin/sh",
+	USER: () => "probe",
+	LOGNAME: () => "probe",
+	LANG: () => "C",
+	LC_ALL: () => "C",
+	TZ: () => "UTC",
+	TERM: () => "dumb",
+	NO_COLOR: () => "1",
+	XDG_CONFIG_HOME: (roots) => roots.xdgConfig,
+	XDG_CACHE_HOME: (roots) => roots.xdgCache,
+	XDG_DATA_HOME: (roots) => roots.xdgData,
+	XDG_STATE_HOME: (roots) => roots.xdgState,
+	PI_OFFLINE: () => "1",
+	PI_CODING_AGENT_DIR: (roots) => roots.agent,
+	CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: () => "1",
+	DISABLE_TELEMETRY: () => "1",
+	DISABLE_AUTOUPDATER: () => "1",
+	DISABLE_ERROR_REPORTING: () => "1",
+	DISABLE_GROWTHBOOK: () => "1",
+	ANTHROPIC_BASE_URL: (_roots, port) => (port === null ? undefined : `http://127.0.0.1:${port}`),
+	ANTHROPIC_API_KEY: (_roots, port) => (port === null ? undefined : MODEL_API_KEY),
+	NO_PROXY: (_roots, port) => (port === null ? undefined : "127.0.0.1,localhost"),
+};
+
+export const HARNESS_ENV_KEYS: readonly string[] = Object.keys(HARNESS_ENV);
+
 export function baseEnv(roots: Roots, port: number | null): Record<string, string> {
-	const env: Record<string, string> = {
-		PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-		HOME: roots.home,
-		CLAUDE_CONFIG_DIR: roots.config,
-		TMPDIR: roots.tmp,
-		SHELL: "/bin/sh",
-		USER: "probe",
-		LOGNAME: "probe",
-		LANG: "C",
-		LC_ALL: "C",
-		TZ: "UTC",
-		TERM: "dumb",
-		NO_COLOR: "1",
-		XDG_CONFIG_HOME: roots.xdgConfig,
-		XDG_CACHE_HOME: roots.xdgCache,
-		XDG_DATA_HOME: roots.xdgData,
-		XDG_STATE_HOME: roots.xdgState,
-		PI_OFFLINE: "1",
-		PI_CODING_AGENT_DIR: roots.agent,
-		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-		DISABLE_TELEMETRY: "1",
-		DISABLE_AUTOUPDATER: "1",
-		DISABLE_ERROR_REPORTING: "1",
-		DISABLE_GROWTHBOOK: "1",
-	};
-	if (port !== null) {
-		env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}`;
-		env.ANTHROPIC_API_KEY = MODEL_API_KEY;
-		env.NO_PROXY = "127.0.0.1,localhost";
+	const env: Record<string, string> = {};
+	for (const [key, resolve] of Object.entries(HARNESS_ENV)) {
+		const value = resolve(roots, port);
+		if (value !== undefined) env[key] = value;
 	}
 	return env;
 }

@@ -2,7 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PROBES } from "./isolate.ts";
+import { HARNESS_ENV_KEYS, PROBES } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
@@ -118,12 +118,14 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	const model = object.model === null ? null : asCheckedObject(object.model, source, "model", MODEL_KEYS);
 	const argv = asOptionalStringArray(object.argv, source, "argv") ?? [];
 	assertArgvAllowed(argv, source);
+	const env = asStringRecord(object.env, source, "env");
+	assertEnvAllowed(env, source);
 	return {
 		id,
 		area,
 		binary: asProbePath(object.probe, source),
 		argv,
-		env: asStringRecord(object.env, source, "env"),
+		env,
 		stdin: asStdin(object.stdin, source),
 		files: asStringRecord(object.files, source, "files"),
 		model: model === null ? null : { turns: asTurns(model.turns, source) },
@@ -151,6 +153,13 @@ function assertArgvAllowed(argv: readonly string[], source: string): void {
 				`argv must not run "${token}": the harness never runs a claude subcommand that authenticates, installs, or mutates`,
 			);
 		}
+	}
+}
+
+/** A case may add environment, but the keys the harness sets are what make the two sides comparable. */
+function assertEnvAllowed(env: Record<string, string>, source: string): void {
+	for (const key of Object.keys(env)) {
+		if (HARNESS_ENV_KEYS.includes(key)) fail(source, `env cannot replace "${key}": the harness sets it`);
 	}
 }
 
