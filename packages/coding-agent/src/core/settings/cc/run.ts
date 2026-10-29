@@ -1,30 +1,15 @@
-/**
- * One run's settings, split by trust.
- *
- * The user, flag and policy tiers are always read. The project and local tiers live in the repository,
- * so they are read only when pi's own trust flow trusts the project: an `env` block there reaches the
- * model client and the agent's tools, and a repository may not redirect either without a decision.
- *
- * A prompt cannot be answered before the runtime exists, so an `ask` rule opens this in the `pending`
- * phase with the project tiers withheld, and `settleRepoTiers` admits them once the answer is in. Every
- * list a settle returns is only what the open phase did not report, so the caller reports each line once.
- */
-
 import type { CcSettingsLocation } from "./load.ts";
 import { loadCcSettings } from "./load.ts";
 import type { CcLoadResult, CcSettings, CcSettingsFailure, CcSettingsSkip, CcSettingsSource } from "./types.ts";
 
-/** Whether pi trusts the project, or `pending` when only a prompt can answer. */
 export type CcRepoTierTrust = boolean | "pending";
 
 export type CcRunLocation = Omit<CcSettingsLocation, "projectTrusted">;
 
 export interface CcSettleResult {
-	/** The effective settings, now including the project and local tiers when they were trusted. */
 	readonly settings: CcSettings;
 	readonly failures: readonly CcSettingsFailure[];
 	readonly skipped: readonly CcSettingsSkip[];
-	/** Present project and local files that were not admitted. */
 	readonly ignored: readonly string[];
 }
 
@@ -92,7 +77,6 @@ export function openCcRunSettings(location: CcRunLocation, trust: CcRepoTierTrus
 	};
 }
 
-/** One directory's settings, and the trust decision that admitted or withheld its repo tiers. */
 export interface CcDirectoryAdmission {
 	readonly cwd: string;
 	readonly run: CcRunSettings;
@@ -105,12 +89,6 @@ export interface CcDirectoryAdmitResult {
 	readonly opened: boolean;
 }
 
-/**
- * Admit or withhold the repo tiers of `cwd` on `trust`, which must be that directory's own decision.
- *
- * A different directory does not reuse the previous load. Settling one directory's files with another
- * directory's boolean is the bug this function exists to make unrepresentable.
- */
 export function admitCcDirectory(
 	previous: CcDirectoryAdmission | undefined,
 	location: CcRunLocation,

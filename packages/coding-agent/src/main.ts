@@ -101,7 +101,6 @@ import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.
 
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
 
-/** R7: the three tools a `--bare` run keeps; the harness observes exactly three in the request. */
 const CC_BARE_TOOLS: readonly string[] = ["read", "edit", "bash"];
 
 /**
@@ -146,12 +145,6 @@ function toSettingSources(value: string | undefined): string[] | undefined {
 		.filter((entry) => entry.length > 0);
 }
 
-/**
- * Opens the Claude Code settings for this run: every trust-independent tier, the failures reported once
- * on stderr, the env block applied over the inherited environment, and the policy gates. A malformed
- * file never stops the run; an operator policy that forbids it does. The project and local tiers arrive
- * with pi's trust decision: `bindCcDirectory` admits them only for that directory, once it is trusted.
- */
 function ccRunLocation(parsed: Args, cwd: string): CcRunLocation {
 	return {
 		cwd,
@@ -180,7 +173,6 @@ function openCcSettingsForRun(parsed: Args, cwd: string, trust: boolean | "pendi
 }
 
 function ccRunSettings(settings: CcSettings, parsed: Args): CcSettings {
-	// `--add-dir` records directories on the loaded value; P04 and P24 are the units that read them.
 	return withAdditionalDirectories(settings, parsed.addDir ?? []);
 }
 
@@ -188,7 +180,6 @@ function reportCcSettings(report: CcSettleResult): void {
 	const blocks = [
 		...formatSettingsFailures(report.failures),
 		...formatSkippedSettings(report.skipped),
-		// Trust suppression is pi's own line, so it stays next to the two blocks Claude Code prints.
 		...formatIgnoredProjectSettings(report.ignored),
 	];
 	for (const line of blocks) {
@@ -215,7 +206,6 @@ function applyCcEnv(settings: CcSettings): void {
 	}
 }
 
-/** R7 drops hooks, plugins, skills, memory and LSP; R8 drops extensions, skills, prompt templates and MCP. */
 export function ccResourceSuppression(parsed: Args): {
 	noExtensions: boolean;
 	noSkills: boolean;
@@ -627,8 +617,6 @@ function buildSessionOptions(
 	}
 
 	if (!options.model && ccModel !== undefined) {
-		// R5: the settings model is the session default, resolved the way `--model` is. `--model` above
-		// wins, and an id that does not resolve warns instead of failing the run.
 		const selected = resolveCliModel({ cliModel: ccModel, modelRuntime });
 		if (selected.model === undefined) {
 			diagnostics.push({
@@ -728,8 +716,6 @@ export async function main(args: string[], options?: MainOptions) {
 		process.env.PI_OFFLINE = "1";
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
-	// Pi's own subprocesses keep the environment pi started with; a settings `env` block reaches the
-	// agent's tools and the model client, but never `npm`, `git`, or a pi-internal launcher.
 	captureStartupEnv();
 	setInternalSpawnEnv(startupEnv());
 
@@ -829,10 +815,6 @@ export async function main(args: string[], options?: MainOptions) {
 
 	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
 
-	// Claude Code settings load before pi's own settings manager, because their env block is applied
-	// over the inherited process environment and every later resolution reads it. The project and local
-	// tiers are repository-controlled, so they wait for pi's trust decision like any other project
-	// resource: `bindCcDirectory` admits the runtime directory's tiers once that directory's decision is in.
 	const trustStore = new ProjectTrustStore(agentDir);
 	const readTrust = (directory: string): boolean | "pending" =>
 		readInitialProjectTrust({
@@ -848,8 +830,6 @@ export async function main(args: string[], options?: MainOptions) {
 		cwd,
 		run: openCcSettingsForRun(parsed, cwd, "pending"),
 	};
-	// A boolean admits only the directory it was decided for. A different directory opens its own tiers.
-	// Env already written into the process stays: application is monotone for the life of the process.
 	const bindCcDirectory = (directory: string, trust: boolean | "pending"): void => {
 		const result = admitCcDirectory(ccAdmission, ccRunLocation(parsed, directory), directory, trust);
 		ccAdmission = result.admission;
@@ -955,8 +935,6 @@ export async function main(args: string[], options?: MainOptions) {
 			: (cachedProjectTrust ??
 				parsed.projectTrustOverride ??
 				(!hasTrustRequiringResources || trustStore.get(cwd) === true));
-		// Repo tiers are this runtime directory's files, settled on this directory's decision.
-		// Their env block has to be in place before any provider or model resolution.
 		if (cwd !== ccAdmission.cwd) {
 			bindCcDirectory(cwd, shouldResolveProjectTrust ? "pending" : projectTrusted);
 		} else if (!shouldResolveProjectTrust) {
@@ -1038,8 +1016,6 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.buildSessionContext().messages.length > 0,
 			modelRuntime,
 			settingsManager,
-			// Every tier's env block is in process.env by now, so this one read covers the inherited
-			// environment and every tier. --model still wins over it in buildSessionOptions.
 			process.env.ANTHROPIC_MODEL ?? ccAdmission.run.settings.model,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
