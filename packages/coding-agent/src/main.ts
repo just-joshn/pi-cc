@@ -671,6 +671,7 @@ function buildSessionOptions(
 	// Tools
 	if (parsed.bare === true) {
 		options.tools = [...CC_BARE_TOOLS];
+		options.fixedTools = true;
 	} else {
 		if (parsed.noTools) {
 			options.noTools = "all";
@@ -1039,6 +1040,7 @@ export async function main(args: string[], options?: MainOptions) {
 			thinkingLevel: sessionOptions.thinkingLevel,
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
+			fixedTools: sessionOptions.fixedTools,
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,

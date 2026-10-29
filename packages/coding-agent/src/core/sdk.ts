@@ -86,6 +86,8 @@ export interface CreateAgentSessionOptions {
 	 * These entries take exact names. Mixing them with plain entries throws.
 	 */
 	tools?: string[];
+	/** Keep a fixed tool list on the wire without a deferred tool placeholder. */
+	fixedTools?: boolean;
 	/**
 	 * Optional denylist of tool names or patterns to disable. Applies after `tools` when both are
 	 * provided, MCP tools included.
@@ -286,6 +288,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const maxOutputTokens = ccMaxOutputTokens(process.env);
 	if (model && maxOutputTokens !== undefined) {
 		model = { ...model, maxTokens: maxOutputTokens };
+	}
+	if (model && options.fixedTools) {
+		model = { ...model, compat: { ...model.compat, supportsMidConvoToolChanges: false } };
 	}
 
 	const toolListError = options.tools ? getToolListError(options.tools) : undefined;
