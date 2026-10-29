@@ -185,7 +185,7 @@ export interface ResourceLoader {
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
-	/** Claude Code memory (CLAUDE.md files, rules, auto memory) found by the last reload. */
+	/** Claude Code memory (the project's CLAUDE.md and AGENTS.md files, rules, auto memory) found by the last reload. */
 	getMemory(): MemorySnapshot;
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
@@ -213,8 +213,7 @@ function resolvePromptInput(input: string | undefined, description: string): str
 }
 
 function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
-	// CLAUDE.md belongs to the memory loader (core/memory), which sends it with the first user message.
-	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD"];
+	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
@@ -700,14 +699,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}
 		}
 
-		const agentsFiles = {
-			agentsFiles: this.noContextFiles
-				? []
-				: loadProjectContextFiles({
-						cwd: this.cwd,
-						agentDir: this.agentDir,
-					}),
-		};
+		// The project tree's instruction files are Claude Code memory (core/memory); only the agent
+		// directory keeps a pi context file.
+		const globalContextFile = this.noContextFiles ? null : loadContextFileFromDir(resolvePath(this.agentDir));
+		const agentsFiles = { agentsFiles: globalContextFile ? [globalContextFile] : [] };
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
 

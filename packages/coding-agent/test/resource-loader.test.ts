@@ -511,23 +511,22 @@ Content`,
 			expect(themes.some((t) => t.sourcePath?.endsWith("skip.json"))).toBe(false);
 		});
 
-		it("should discover AGENTS.md context files", async () => {
+		it("should send a project's AGENTS.md as memory instead of a context file", async () => {
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			const { agentsFiles } = loader.getAgentsFiles();
-			expect(agentsFiles.some((f) => f.path.includes("AGENTS.md"))).toBe(true);
+			expect(loader.getAgentsFiles().agentsFiles).toEqual([]);
+			expect(loader.getMemory().files.map((file) => file.path)).toContain(join(cwd, "AGENTS.md"));
 		});
 
-		it("should prefer AGENTS.override.md within each directory while preserving ancestor layering", async () => {
+		it("should take context files only from the agent directory, preferring AGENTS.override.md", async () => {
 			const nestedCwd = join(cwd, "service");
 			mkdirSync(nestedCwd);
 			writeFileSync(join(agentDir, "AGENTS.md"), "global instructions");
 			writeFileSync(join(agentDir, "AGENTS.override.md"), "global override");
 			writeFileSync(join(cwd, "AGENTS.md"), "project instructions");
-			writeFileSync(join(nestedCwd, "AGENTS.md"), "service instructions");
 			writeFileSync(join(nestedCwd, "AGENTS.override.md"), "service override");
 
 			const loader = new DefaultResourceLoader({ cwd: nestedCwd, agentDir });
@@ -535,22 +534,34 @@ Content`,
 
 			expect(loader.getAgentsFiles().agentsFiles).toEqual([
 				{ path: join(agentDir, "AGENTS.override.md"), content: "global override" },
-				{ path: join(cwd, "AGENTS.md"), content: "project instructions" },
-				{ path: join(nestedCwd, "AGENTS.override.md"), content: "service override" },
+			]);
+		});
+
+		it("should load CLAUDE.md from the agent directory", async () => {
+			writeFileSync(join(agentDir, "CLAUDE.md"), "global claude instructions");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			expect(loader.getAgentsFiles().agentsFiles).toEqual([
+				{ path: join(agentDir, "CLAUDE.md"), content: "global claude instructions" },
 			]);
 		});
 
 		it("should ignore context file candidates that are directories", async () => {
-			mkdirSync(join(cwd, "AGENTS.override.md"));
-			mkdirSync(join(cwd, "AGENTS.md"));
+			mkdirSync(join(agentDir, "AGENTS.override.md"));
+			mkdirSync(join(agentDir, "AGENTS.md"));
+			writeFileSync(join(agentDir, "CLAUDE.md"), "Fallback instructions");
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getAgentsFiles().agentsFiles.some((file) => file.path.startsWith(cwd))).toBe(false);
-			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(cwd, "AGENTS.md")));
-			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(cwd, "AGENTS.override.md")));
+			expect(loader.getAgentsFiles().agentsFiles).toEqual([
+				{ path: join(agentDir, "CLAUDE.md"), content: "Fallback instructions" },
+			]);
+			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(agentDir, "AGENTS.md")));
+			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(agentDir, "AGENTS.override.md")));
 			consoleError.mockRestore();
 		});
 
@@ -558,12 +569,13 @@ Content`,
 			writeFileSync(join(cwd, "AGENTS.override.md"), "# Override Guidelines\n\nBe helpful.");
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
 			writeFileSync(join(cwd, "CLAUDE.md"), "# Claude Guidelines\n\nBe helpful.");
+			writeFileSync(join(agentDir, "AGENTS.md"), "Global instructions");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir, noContextFiles: true });
 			await loader.reload();
 
-			const { agentsFiles } = loader.getAgentsFiles();
-			expect(agentsFiles).toEqual([]);
+			expect(loader.getAgentsFiles().agentsFiles).toEqual([]);
+			expect(loader.getMemory().files).toEqual([]);
 		});
 
 		it("should discover SYSTEM.md from cwd/.pi", async () => {
@@ -615,7 +627,8 @@ Project skill content`,
 			expect(loader.getAgentsFiles().agentsFiles.some((file) => file.path === join(agentDir, "AGENTS.md"))).toBe(
 				true,
 			);
-			expect(loader.getAgentsFiles().agentsFiles.some((file) => file.path === join(cwd, "AGENTS.md"))).toBe(true);
+			expect(loader.getAgentsFiles().agentsFiles.some((file) => file.path === join(cwd, "AGENTS.md"))).toBe(false);
+			expect(loader.getMemory().files.some((file) => file.path === join(cwd, "AGENTS.md"))).toBe(false);
 			expect(loader.getExtensions().extensions).toHaveLength(0);
 			expect(loader.getExtensions().errors).toEqual([]);
 			expect(loader.getSkills().skills.some((skill) => skill.name === "project-skill")).toBe(false);
@@ -1356,10 +1369,11 @@ export default function(pi: ExtensionAPI) {
 		});
 
 		it("should only skip the same filename, not a differently named context file", () => {
-			// The repo tracks AGENTS.override.md; the worktree adds an AGENTS.md. The main
-			// repo's override is nobody's duplicate, so dropping it would lose its content.
+			// The repo tracks CLAUDE.md; the worktree adds an AGENTS.md, which
+			// loadContextFileFromDir prefers. The main repo's CLAUDE.md is nobody's
+			// duplicate, so dropping it would lose its content entirely.
 			const { main, worktree, worktreeSrc } = setupNestedWorktree();
-			writeFileSync(join(main, "AGENTS.override.md"), "main repo instructions");
+			writeFileSync(join(main, "CLAUDE.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
 			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
