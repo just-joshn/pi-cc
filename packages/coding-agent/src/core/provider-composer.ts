@@ -468,7 +468,12 @@ function composeApiKeyAuth(
 				result = inherited
 					? await inherited.resolve(input)
 					: input.credential.key
-						? { auth: { apiKey: input.credential.key }, env: input.credential.env, source: "stored credential" }
+						? {
+								auth: { apiKey: input.credential.key },
+								env: input.credential.env,
+								source: "stored credential",
+								sourceKind: "stored",
+							}
 						: undefined;
 			} else if (rawKey !== undefined) {
 				// For an env-first provider the environment outranks a key written into models.json.
@@ -476,9 +481,10 @@ function composeApiKeyAuth(
 				if (!result) {
 					const env = await configContextEnv([rawKey], input.ctx);
 					const key = resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);
-					result = inherited
+					const resolved = inherited
 						? await inherited.resolve({ ...input, credential: { type: "api_key", key } })
 						: { auth: { apiKey: key }, source: "configured API key" };
+					result = resolved && { ...resolved, sourceKind: "configured" };
 				}
 			} else {
 				result = await inherited?.resolve(input);

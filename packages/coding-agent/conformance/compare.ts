@@ -1,9 +1,10 @@
 /**
  * The per-case comparison: exit code, stdout, stderr, workspace writes, and recorded requests.
  *
- * `method` and every `headers` entry in a request spec must hold for every request the spec matched, so a
- * case that needs exactly one states `count: 1` alongside; only the names the case names are compared, which
- * is what keeps a side's unmodelled headers from failing the case. Recorded header names arrive lowercased
+ * `method` and every `headers` entry in a request spec must hold for every request the spec matched. A spec
+ * that names either and matches nothing fails, as `bodyEquals` does, so a side that sends no request cannot
+ * pass. Only the names the case names are compared, which keeps a side's unmodelled headers from failing the
+ * case. Recorded header names arrive lowercased
  * from node's http server, and a repeated header arrives as an array joined with ", ". A value the case only
  * partly knows (a comma-joined feature list) is compared by membership.
  */
@@ -248,12 +249,26 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				actual: `${matched.length} requests (${matched.map((record) => record.path).join(", ") || "none"})`,
 			});
 		}
-		for (const record of matched) {
-			if (request.method !== undefined && record.method !== request.method) {
-				diffs.push({ check: "requests.method", expected: request.method, actual: record.method });
+		const headerEntries = Object.entries(request.headers ?? {});
+		if (matched.length === 0) {
+			if (request.method !== undefined) {
+				diffs.push({ check: "requests.method", expected: request.method, actual: "no matching request" });
 			}
-			for (const [name, expected] of Object.entries(request.headers ?? {})) {
-				diffs.push(...headerDiffs(name, expected, recordedHeader(record.headers, name)));
+			if (headerEntries.length > 0) {
+				diffs.push({
+					check: "requests.headers",
+					expected: JSON.stringify(request.headers),
+					actual: "no matching request",
+				});
+			}
+		} else {
+			for (const record of matched) {
+				if (request.method !== undefined && record.method !== request.method) {
+					diffs.push({ check: "requests.method", expected: request.method, actual: record.method });
+				}
+				for (const [name, expected] of headerEntries) {
+					diffs.push(...headerDiffs(name, expected, recordedHeader(record.headers, name)));
+				}
 			}
 		}
 		if (request.bodyEquals !== undefined) {

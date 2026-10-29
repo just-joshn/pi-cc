@@ -29,26 +29,40 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 		resolve: async ({ ctx, credential, signal }) => {
 			signal.throwIfAborted();
 			if (credential?.key) {
-				return { auth: { apiKey: credential.key }, env: credential.env, source: "stored credential" };
+				return {
+					auth: { apiKey: credential.key },
+					env: credential.env,
+					source: "stored credential",
+					sourceKind: "stored",
+				};
 			}
 
 			// Claude Code sends the bearer and the key together when both variables are set, so the bearer
-			// rides along with whichever key source answers.
+			// rides along with whichever key source answers. ANTHROPIC_OAUTH_TOKEN alone does not disable a
+			// stored credential. The pinned 2.1.312 sends the stored one.
 			const authToken = await ctx.env(ANTHROPIC_AUTH_TOKEN_ENV);
 			signal.throwIfAborted();
 			const bearer = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
-
-			for (const envVar of [ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV]) {
-				const apiKey = await ctx.env(envVar);
-				signal.throwIfAborted();
-				if (apiKey) {
-					return {
-						auth: { apiKey, ...(bearer ? { headers: bearer } : {}) },
-						source: bearer ? ANTHROPIC_AUTH_TOKEN_ENV : envVar,
-					};
-				}
+			const oauthToken = await ctx.env(ANTHROPIC_OAUTH_TOKEN_ENV);
+			signal.throwIfAborted();
+			const apiKey = await ctx.env(ANTHROPIC_API_KEY_ENV);
+			signal.throwIfAborted();
+			const key = oauthToken || apiKey;
+			if (key) {
+				const source = bearer
+					? ANTHROPIC_AUTH_TOKEN_ENV
+					: oauthToken
+						? ANTHROPIC_OAUTH_TOKEN_ENV
+						: ANTHROPIC_API_KEY_ENV;
+				return {
+					auth: { apiKey: key, ...(bearer ? { headers: bearer } : {}) },
+					source,
+					sourceKind: bearer || apiKey ? "environment" : "oauth-token",
+				};
 			}
-			if (bearer) return { auth: { headers: bearer }, source: ANTHROPIC_AUTH_TOKEN_ENV };
+			if (bearer) {
+				return { auth: { headers: bearer }, source: ANTHROPIC_AUTH_TOKEN_ENV, sourceKind: "environment" };
+			}
 
 			// Workload identity federation: the Anthropic SDK exchanges the identity
 			// token for a short-lived access token and refreshes it itself. Last in
@@ -70,7 +84,12 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 				signal.throwIfAborted();
 				if (value) federation[envVar] = value;
 			}
-			return { auth: {}, env: federation, source: "workload identity federation" };
+			return {
+				auth: {},
+				env: federation,
+				source: "workload identity federation",
+				sourceKind: "environment",
+			};
 		},
 	};
 }
@@ -88,8 +107,7 @@ export function anthropicProvider(): Provider<"anthropic-messages"> {
 				load: loadAnthropicOAuth,
 			}),
 			environment: readAnthropicEnvironment,
-			// Claude Code's provider env is a complete answer on its own: any env token or key disables the
-			// stored subscription, and the env endpoint outranks a configured one.
+			// An auth token or an API key disables a stored credential. ANTHROPIC_OAUTH_TOKEN does not.
 			environmentFirst: true,
 		},
 		models: Object.values(ANTHROPIC_MODELS),

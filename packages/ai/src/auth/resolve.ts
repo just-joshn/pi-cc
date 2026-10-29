@@ -94,9 +94,9 @@ async function resolveCredentialAuth(
 		);
 	}
 
-	// An env-first provider reads an actual environment credential before the stored one, so an env token
-	// disables a stored subscription. A models.json key is not an environment source: the composed resolver
-	// returns it from this same call, and it must not beat auth.json when no env credential is set.
+	// An env-first provider reads an environment credential before the stored one. A models.json key and
+	// an ANTHROPIC_OAUTH_TOKEN are not that kind: both come back from this call, and neither may beat
+	// auth.json. The kind is the signal. The display label is not.
 	const apiKey = provider.auth.apiKey;
 	const ambient =
 		provider.auth.environmentFirst && apiKey
@@ -131,9 +131,8 @@ async function resolveCredentialAuth(
 	return apiKey ? resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal) : undefined;
 }
 
-/** A configured key is labeled as stored or configured. An environment source names the variable or federation. */
 function isEnvironmentCredential(result: AuthResult): boolean {
-	return result.source !== "stored credential" && result.source !== "configured API key";
+	return result.sourceKind === "environment";
 }
 
 function overlayEnvAuthContext(base: AuthContext, env: ProviderEnv): AuthContext {

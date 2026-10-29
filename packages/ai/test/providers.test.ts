@@ -297,6 +297,7 @@ describe("builtin providers", () => {
 		expect(await models.getAuth("anthropic")).toEqual({
 			auth: { apiKey: "oauth-token", headers: { Authorization: "Bearer auth-token" } },
 			source: "ANTHROPIC_AUTH_TOKEN",
+			sourceKind: "environment",
 		});
 	});
 

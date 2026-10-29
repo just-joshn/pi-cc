@@ -88,6 +88,7 @@ describe("Anthropic auth token env", () => {
 		expect(auth).toEqual({
 			auth: { apiKey: "oauth-token", headers: { Authorization: "Bearer auth-token" } },
 			source: ANTHROPIC_AUTH_TOKEN_ENV,
+			sourceKind: "environment",
 		});
 	});
 
@@ -104,6 +105,7 @@ describe("Anthropic auth token env", () => {
 		expect(auth).toEqual({
 			auth: { headers: { Authorization: "Bearer auth-token" } },
 			source: ANTHROPIC_AUTH_TOKEN_ENV,
+			sourceKind: "environment",
 		});
 	});
 
@@ -124,6 +126,7 @@ describe("Anthropic auth token env", () => {
 		expect(auth).toEqual({
 			auth: { apiKey: "oauth-token" },
 			source: ANTHROPIC_OAUTH_TOKEN_ENV,
+			sourceKind: "environment",
 		});
 	});
 

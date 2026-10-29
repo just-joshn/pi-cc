@@ -92,7 +92,7 @@ describe("provider environment at auth resolution", () => {
 			{ signal },
 		);
 
-		expect(result).toEqual({ auth: { apiKey: "env-key" }, source: "ANTHROPIC_API_KEY" });
+		expect(result).toEqual({ auth: { apiKey: "env-key" }, source: "ANTHROPIC_API_KEY", sourceKind: "environment" });
 	});
 
 	it("configures the provider from custom headers alone", async () => {
@@ -144,6 +144,17 @@ describe("provider environment at auth resolution", () => {
 		expect(result?.source).toBe("ANTHROPIC_API_KEY");
 	});
 
+	it("still accepts ANTHROPIC_OAUTH_TOKEN when no credential is stored", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			new InMemoryCredentialStore(),
+			envContext({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env" }),
+			{ signal },
+		);
+
+		expect(result?.auth.apiKey).toBe("sk-ant-oat01-env");
+	});
+
 	it("keeps a stored subscription over ANTHROPIC_OAUTH_TOKEN", async () => {
 		const result = await resolveProviderAuth(
 			anthropicProvider(),
@@ -166,18 +177,6 @@ describe("provider environment at auth resolution", () => {
 
 		expect(result?.auth.apiKey).toBe("stored-key");
 		expect(result?.source).toBe("stored credential");
-	});
-
-	it("still lets an env api key disable a stored subscription when ANTHROPIC_OAUTH_TOKEN is also set", async () => {
-		const result = await resolveProviderAuth(
-			anthropicProvider(),
-			await storedSubscription("sk-ant-oat01-stored"),
-			envContext({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env", ANTHROPIC_API_KEY: "env-key" }),
-			{ signal },
-		);
-
-		expect(result?.auth.apiKey).toBe("sk-ant-oat01-env");
-		expect(result?.source).toBe("ANTHROPIC_OAUTH_TOKEN");
 	});
 
 	it("trusts a typed source kind over the display label", async () => {

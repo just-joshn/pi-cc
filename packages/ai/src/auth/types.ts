@@ -110,6 +110,9 @@ export interface AuthEnvironment {
 	authenticated?: boolean;
 }
 
+/** What the resolver may trust a result as. A display `source` is not this. */
+export type AuthSourceKind = "environment" | "stored" | "configured" | "oauth-token";
+
 /** Result of resolving auth for a model. */
 export interface AuthResult {
 	auth: ModelAuth;
@@ -117,6 +120,8 @@ export interface AuthResult {
 	env?: ProviderEnv;
 	/** Human-readable label for status UI: "ANTHROPIC_API_KEY", "OAuth", "~/.aws/credentials". */
 	source?: string;
+	/** Absent does not preempt a stored credential. Renaming `source` must not change that. */
+	sourceKind?: AuthSourceKind;
 }
 
 export interface AuthCheck {
@@ -269,10 +274,10 @@ export interface ProviderAuth {
 	/** Ambient endpoint/header values, merged into whatever the credential ladder resolved. */
 	environment?: (context: AuthContext) => Promise<AuthEnvironment | undefined>;
 	/**
-	 * Read the ambient credential before any persisted one, and never let a persisted endpoint or key win.
+	 * Read an environment credential before any persisted one, and never let a persisted endpoint or key win.
 	 * Claude Code works this way for the Anthropic provider: an `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`
-	 * disables a stored subscription, and `ANTHROPIC_BASE_URL` outranks a configured endpoint. An explicit
-	 * `--api-key` still wins, because it is the operator's answer for this run.
+	 * disables a stored credential, and `ANTHROPIC_BASE_URL` outranks a configured endpoint. `ANTHROPIC_OAUTH_TOKEN`
+	 * does not. An explicit `--api-key` still wins, because it is the operator's answer for this run.
 	 */
 	environmentFirst?: boolean;
 }
