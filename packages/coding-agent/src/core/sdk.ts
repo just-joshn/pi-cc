@@ -289,9 +289,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (model && maxOutputTokens !== undefined) {
 		model = { ...model, maxTokens: maxOutputTokens };
 	}
-	if (model && options.fixedTools) {
-		model = { ...model, compat: { ...model.compat, supportsMidConvoToolChanges: false } };
-	}
 
 	const toolListError = options.tools ? getToolListError(options.tools) : undefined;
 	if (toolListError) throw new Error(`Invalid tools option: ${toolListError}`);
@@ -416,6 +413,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	};
 
+	const fixedTools = options.fixedTools === true;
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: "",
@@ -425,7 +423,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			messages: existingSession.messages,
 		},
 		convertToLlm: convertToLlmWithBlockImages,
-		streamFn: async (model, context, options) => {
+		streamFn: async (sessionModel, context, options) => {
+			const model = fixedTools
+				? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
+				: sessionModel;
 			const requestOptions = buildRequestOptions(options);
 			// Compaction and summaries use their own routing ids; only session requests
 			// replace the cache entry, so warming restarts from them. Keep warming while
