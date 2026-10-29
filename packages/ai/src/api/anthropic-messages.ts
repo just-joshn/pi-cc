@@ -1,15 +1,3 @@
-import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
-import type {
-	BetaInputTransformation,
-	BetaStopReason,
-	BetaTool,
-	BetaCacheControlEphemeral as CacheControlEphemeral,
-	BetaContentBlockParam as ContentBlockParam,
-	MessageCreateParamsStreaming,
-	BetaMessageParam as MessageParam,
-	BetaRawMessageStreamEvent as RawMessageStreamEvent,
-	BetaRefusalStopDetails as RefusalStopDetails,
-} from "@anthropic-ai/sdk/resources/beta/messages/messages.js";
 import {
 	ANTHROPIC_FEDERATION_RULE_ID_ENV,
 	ANTHROPIC_IDENTITY_TOKEN_FILE_ENV,
@@ -56,7 +44,20 @@ import {
 	resolveTranscript,
 	type TranscriptContext,
 } from "../utils/transcript.ts";
-
+import { type AnthropicFederationConfig, getFederationBearerToken } from "./anthropic-federation.ts";
+import { AnthropicRequestError, type AnthropicTransport, createAnthropicTransport } from "./anthropic-http.ts";
+import type {
+	AnthropicCacheControl,
+	AnthropicContentBlock,
+	AnthropicEffort,
+	AnthropicInputTransformation,
+	AnthropicMessageParam,
+	AnthropicMessageRequest,
+	AnthropicRefusalStopDetails,
+	AnthropicStreamEvent,
+	AnthropicThinkingDisplay,
+	AnthropicTool,
+} from "./anthropic-wire.ts";
 import {
 	getJsonSchemaToolParameters,
 	isStrictToolLimitErrorMessage,
@@ -86,7 +87,7 @@ function getCacheControl(
 	model: Model<"anthropic-messages">,
 	cacheRetention?: CacheRetention,
 	env?: ProviderEnv,
-): { retention: CacheRetention; cacheControl?: CacheControlEphemeral } {
+): { retention: CacheRetention; cacheControl?: AnthropicCacheControl } {
 	const retention = resolveCacheRetention(cacheRetention, env);
 	if (retention === "none") {
 		return { retention };
@@ -193,10 +194,6 @@ function convertContentBlocks(content: (TextContent | ImageContent)[]):
 	return blocks;
 }
 
-export type AnthropicEffort = "low" | "medium" | "high" | "xhigh" | "max";
-
-export type AnthropicThinkingDisplay = "summarized" | "omitted";
-
 const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -211,7 +208,7 @@ const INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
  * change does not invalidate the cache (measured: full miss without it). It is never
  * activated and the model cannot see it.
  */
-const DEFERRED_TOOL_PLACEHOLDER: BetaTool = {
+const DEFERRED_TOOL_PLACEHOLDER: AnthropicTool = {
 	name: "__pi_deferred_placeholder__",
 	description: "Reserved placeholder. Never available. Never call this.",
 	input_schema: { type: "object", properties: {}, required: [] },
@@ -292,12 +289,6 @@ export interface AnthropicOptions extends StreamOptions {
 	 * Default: omitted (Anthropic default behavior, currently equivalent to auto).
 	 */
 	toolChoice?: "auto" | "any" | "none" | { type: "tool"; name: string };
-	/**
-	 * Pre-built Anthropic client instance. When provided, skips internal client
-	 * construction entirely. Use this to inject alternative SDK clients such as
-	 * `AnthropicVertex` that shares the same messaging API.
-	 */
-	client?: Anthropic;
 }
 
 function mergeHeaders(...headerSources: (ProviderHeaders | undefined)[]): ProviderHeaders {
@@ -333,22 +324,6 @@ function assertRequestAuth(provider: string, apiKey: string | undefined, headers
 }
 
 /**
- * Anthropic SDK client that never runs the SDK's own credential chain
- * (ANTHROPIC_PROFILE config files, federation env vars). Without this, every
- * client built with `apiKey: null, authToken: null` for header-owned auth would
- * also resolve and exchange SDK credentials behind pi's auth resolver.
- */
-class PiAnthropic extends Anthropic {
-	protected override _shouldResolveDefaultCredentials(): boolean {
-		return false;
-	}
-}
-
-type AnthropicFederationConfig = NonNullable<ClientOptions["config"]>;
-
-/**
- * Workload identity federation config from the ANTHROPIC_* variables the
- * Anthropic SDK documents; the SDK performs the token exchange and refresh.
  * Only for the anthropic provider, since the exchange is an Anthropic API
  * endpoint, and only when no key or auth header was resolved.
  */
@@ -374,13 +349,6 @@ function getAnthropicFederation(
 		},
 	};
 }
-
-/**
- * The SDK caches the federated access token per client, but pi creates a client
- * per request. Keep one client for the current federation config and fetch, and
- * clone it per request with `withOptions()`, which shares the token cache.
- */
-let federationClient: { key: string; fetch: typeof globalThis.fetch | undefined; client: Anthropic } | undefined;
 
 interface ServerSentEvent {
 	event: string | null;
@@ -533,10 +501,7 @@ async function* iterateSseMessages(
 	}
 }
 
-async function* iterateAnthropicEvents(
-	response: Response,
-	signal?: AbortSignal,
-): AsyncGenerator<RawMessageStreamEvent> {
+async function* iterateAnthropicEvents(response: Response, signal?: AbortSignal): AsyncGenerator<AnthropicStreamEvent> {
 	if (!response.body) {
 		throw new Error("Attempted to iterate over an Anthropic response with no body");
 	}
@@ -554,7 +519,7 @@ async function* iterateAnthropicEvents(
 		}
 
 		try {
-			const event = parseJsonWithRepair<RawMessageStreamEvent>(sse.data);
+			const event = parseJsonWithRepair<AnthropicStreamEvent>(sse.data);
 			if (event.type === "message_start") {
 				sawMessageStart = true;
 			} else if (event.type === "message_stop") {
@@ -603,49 +568,36 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 		};
 
 		try {
-			let client: Anthropic;
-			let isOAuth: boolean;
-			let usageModel = model;
-			let inputTransformations: BetaInputTransformation[] | undefined;
+			const apiKey = options?.apiKey;
+			const federation = getAnthropicFederation(model, apiKey, options?.headers, options?.env);
+			if (!federation) assertRequestAuth(model.provider, apiKey, options?.headers);
 
-			if (options?.client) {
-				client = options.client;
-				isOAuth = false;
-			} else {
-				const apiKey = options?.apiKey;
-				const federation = getAnthropicFederation(model, apiKey, options?.headers, options?.env);
-				if (!federation) assertRequestAuth(model.provider, apiKey, options?.headers);
-
-				let copilotDynamicHeaders: Record<string, string> | undefined;
-				if (model.provider === "github-copilot") {
-					const hasImages = hasCopilotVisionInput(normalizedContext.messages);
-					copilotDynamicHeaders = buildCopilotDynamicHeaders({
-						messages: normalizedContext.messages,
-						hasImages,
-					});
-				}
-
-				const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
-				const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-
-				const created = createClient(
-					model,
-					apiKey,
-					options?.headers,
-					options?.fetch,
-					copilotDynamicHeaders,
-					cacheSessionId,
-					federation,
-					options?.identity,
-				);
-				client = created.client;
-				isOAuth = created.isOAuthToken;
+			let copilotDynamicHeaders: Record<string, string> | undefined;
+			if (model.provider === "github-copilot") {
+				const hasImages = hasCopilotVisionInput(normalizedContext.messages);
+				copilotDynamicHeaders = buildCopilotDynamicHeaders({
+					messages: normalizedContext.messages,
+					hasImages,
+				});
 			}
-			const requestOptions = {
-				...(options?.signal ? { signal: options.signal } : {}),
-				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-				maxRetries: 0,
-			};
+
+			const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
+			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
+
+			const created = createTransport(
+				model,
+				apiKey,
+				options?.headers,
+				options?.fetch,
+				copilotDynamicHeaders,
+				cacheSessionId,
+				federation,
+				options?.identity,
+			);
+			const transport = created.transport;
+			const isOAuth = created.isOAuthToken;
+			let usageModel = model;
+			let inputTransformations: AnthropicInputTransformation[] | undefined;
 			let disablePreferredStrictTools = false;
 			let response: Response;
 			for (;;) {
@@ -655,11 +607,15 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				let params = built.params;
 				const nextParams = await options?.onPayload?.(params, model);
 				if (nextParams !== undefined) {
-					params = { ...(nextParams as MessageCreateParamsStreaming), stream: true };
+					params = { ...(nextParams as AnthropicMessageRequest), stream: true };
 				}
 				try {
 					response = await retryProviderRequest(
-						() => client.beta.messages.create(params, requestOptions).asResponse(),
+						() =>
+							transport.postMessages(params, {
+								signal: options?.signal,
+								timeoutMs: options?.timeoutMs,
+							}),
 						{
 							maxRetries: options?.maxRetries,
 							maxRetryDelayMs: options?.maxRetryDelayMs,
@@ -673,7 +629,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 						options?.signal?.aborted ||
 						disablePreferredStrictTools ||
 						!built.hasPreferredStrictTools ||
-						!(error instanceof Anthropic.APIError) ||
+						!(error instanceof AnthropicRequestError) ||
 						error.status !== 400 ||
 						error.type !== "invalid_request_error" ||
 						!isStrictToolLimitErrorMessage(error.message)
@@ -1005,7 +961,7 @@ function isOAuthToken(apiKey: string): boolean {
 	return apiKey.includes("sk-ant-oat");
 }
 
-function createClient(
+function createTransport(
 	model: Model<"anthropic-messages">,
 	apiKey: string | undefined,
 	optionsHeaders?: ProviderHeaders,
@@ -1014,51 +970,48 @@ function createClient(
 	sessionId?: string,
 	federation?: AnthropicFederationConfig,
 	identity?: ClientIdentity,
-): { client: Anthropic; isOAuthToken: boolean } {
-	// Copilot: Bearer auth.
+): { transport: AnthropicTransport; isOAuthToken: boolean } {
 	if (model.provider === "github-copilot") {
-		const client = new PiAnthropic({
-			apiKey: null,
-			authToken: apiKey ?? null,
-			baseURL: model.baseUrl,
-			dangerouslyAllowBrowser: true,
-			fetch,
-			defaultHeaders: mergeHeaders(
-				getIdentityHeaders(model, identity),
-				{
-					accept: "application/json",
-					"anthropic-dangerous-direct-browser-access": "true",
-				},
-				model.headers,
-				dynamicHeaders,
-				optionsHeaders,
-			),
-		});
-
-		return { client, isOAuthToken: false };
+		return {
+			transport: createAnthropicTransport({
+				baseUrl: model.baseUrl,
+				fetch,
+				authHeaders: async (): Promise<ProviderHeaders> => (apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+				headers: mergeHeaders(
+					getIdentityHeaders(model, identity),
+					{
+						accept: "application/json",
+						"anthropic-dangerous-direct-browser-access": "true",
+					},
+					model.headers,
+					dynamicHeaders,
+					optionsHeaders,
+				),
+			}),
+			isOAuthToken: false,
+		};
 	}
 
 	// OAuth: Bearer auth, Claude Code identity headers instead of the client identity.
 	if (apiKey && isOAuthToken(apiKey)) {
-		const client = new PiAnthropic({
-			apiKey: null,
-			authToken: apiKey,
-			baseURL: model.baseUrl,
-			dangerouslyAllowBrowser: true,
-			fetch,
-			defaultHeaders: mergeHeaders(
-				{
-					accept: "application/json",
-					"anthropic-dangerous-direct-browser-access": "true",
-					"user-agent": `claude-cli/${claudeCodeVersion}`,
-					"x-app": "cli",
-				},
-				model.headers,
-				optionsHeaders,
-			),
-		});
-
-		return { client, isOAuthToken: true };
+		return {
+			transport: createAnthropicTransport({
+				baseUrl: model.baseUrl,
+				fetch,
+				authHeaders: async (): Promise<ProviderHeaders> => ({ authorization: `Bearer ${apiKey}` }),
+				headers: mergeHeaders(
+					{
+						accept: "application/json",
+						"anthropic-dangerous-direct-browser-access": "true",
+						"user-agent": `claude-cli/${claudeCodeVersion}`,
+						"x-app": "cli",
+					},
+					model.headers,
+					optionsHeaders,
+				),
+			}),
+			isOAuthToken: true,
+		};
 	}
 
 	// API key, header-owned auth, or workload identity federation.
@@ -1068,7 +1021,7 @@ function createClient(
 		const header = compat.sessionAffinityFormat === "openrouter" ? "x-session-id" : "x-session-affinity";
 		sessionAffinityHeaders[header] = sessionId;
 	}
-	const defaultHeaders = mergeHeaders(
+	const headers = mergeHeaders(
 		getIdentityHeaders(model, identity),
 		{
 			accept: "application/json",
@@ -1078,32 +1031,22 @@ function createClient(
 		model.headers,
 		optionsHeaders,
 	);
-	if (federation) {
-		const key = JSON.stringify([model.baseUrl, federation]);
-		if (federationClient?.key !== key || federationClient.fetch !== fetch) {
-			const client = new PiAnthropic({
-				apiKey: null,
-				authToken: null,
-				config: federation,
-				baseURL: model.baseUrl,
-				dangerouslyAllowBrowser: true,
-				fetch,
-			});
-			federationClient = { key, fetch, client };
-		}
-		return { client: federationClient.client.withOptions({ defaultHeaders }), isOAuthToken: false };
-	}
 
-	const client = new PiAnthropic({
-		apiKey: apiKey ?? null,
-		authToken: null,
-		baseURL: model.baseUrl,
-		dangerouslyAllowBrowser: true,
+	const transport = createAnthropicTransport({
+		baseUrl: model.baseUrl,
 		fetch,
-		defaultHeaders,
+		headers,
+		// Minted per request, so an expired federated bearer is refreshed.
+		authHeaders: async (): Promise<ProviderHeaders> => {
+			if (federation) {
+				const token = await getFederationBearerToken(federation, model.baseUrl, fetch ?? globalThis.fetch);
+				return { authorization: `Bearer ${token}` };
+			}
+			return apiKey === undefined ? {} : { "x-api-key": apiKey };
+		},
 	});
 
-	return { client, isOAuthToken: false };
+	return { transport, isOAuthToken: false };
 }
 
 function getBetaFeatures(
@@ -1112,7 +1055,7 @@ function getBetaFeatures(
 	isOAuthToken: boolean,
 	nativeToolChanges: boolean,
 	options?: AnthropicOptions,
-): NonNullable<MessageCreateParamsStreaming["betas"]> {
+): string[] {
 	let configuredFeatures: string | null | undefined;
 	for (const headers of [model.headers, options?.headers]) {
 		for (const [name, value] of Object.entries(headers ?? {})) {
@@ -1131,7 +1074,7 @@ function getBetaFeatures(
 		];
 	}
 
-	const features: NonNullable<MessageCreateParamsStreaming["betas"]> = [];
+	const features: string[] = [];
 	if (isOAuthToken) features.push("claude-code-20250219", "oauth-2025-04-20");
 	if (shouldUseFineGrainedToolStreamingBeta(model, context)) features.push(FINE_GRAINED_TOOL_STREAMING_BETA);
 	if (
@@ -1157,7 +1100,7 @@ function buildParams(
 	options?: AnthropicOptions,
 	disablePreferredStrictTools = false,
 ): {
-	params: MessageCreateParamsStreaming;
+	params: AnthropicMessageRequest;
 	hasPreferredStrictTools: boolean;
 	/** Effort of the final effort marker, recorded on the reply so later requests can replay it. */
 	providerThinkingLevel: AnthropicEffort | undefined;
@@ -1173,7 +1116,7 @@ function buildParams(
 	// Anthropic rejects a tool list where every tool is deferred, so there must be an initial
 	// active tool to anchor the placeholder. Otherwise the current tool list is sent.
 	let hasPreferredStrictTools = false;
-	const convertToolDefinitions = (tools: Tool[], toolCacheControl?: CacheControlEphemeral): BetaTool[] => {
+	const convertToolDefinitions = (tools: Tool[], toolCacheControl?: AnthropicCacheControl): AnthropicTool[] => {
 		const definitions = convertTools(
 			tools,
 			isOAuthToken,
@@ -1208,7 +1151,7 @@ function buildParams(
 	);
 	const activeEffort = options?.effort ?? "high";
 	const betaFeatures = getBetaFeatures(model, context, isOAuthToken, nativeToolChanges, options);
-	const params: MessageCreateParamsStreaming = {
+	const params: AnthropicMessageRequest = {
 		model: model.id,
 		messages: effortMessages ? insertThinkingLevelMessages(converted, activeEffort) : converted.messages,
 		max_tokens: options?.maxTokens ?? model.maxTokens,
@@ -1331,7 +1274,7 @@ function normalizeToolCallId(id: string): string {
 	return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 }
 
-function convertToolResult(msg: ToolResultMessage, content = msg.content): ContentBlockParam {
+function convertToolResult(msg: ToolResultMessage, content = msg.content): AnthropicContentBlock {
 	return {
 		type: "tool_result",
 		tool_use_id: msg.toolCallId,
@@ -1341,20 +1284,20 @@ function convertToolResult(msg: ToolResultMessage, content = msg.content): Conte
 }
 
 interface ConvertedAnthropicMessages {
-	messages: MessageParam[];
+	messages: AnthropicMessageParam[];
 	assistantLevels: Map<number, AnthropicEffort>;
 }
 
 function convertMessages(
 	transformedMessages: Message[],
 	isOAuthToken: boolean,
-	cacheControl?: CacheControlEphemeral,
+	cacheControl?: AnthropicCacheControl,
 	allowEmptySignature = false,
 	managedProvider?: string,
 	/** Converts tool definitions for native `tool_addition` blocks; undefined when tool changes are not native. */
-	convertToolDefinitions?: (tools: Tool[]) => BetaTool[],
+	convertToolDefinitions?: (tools: Tool[]) => AnthropicTool[],
 ): ConvertedAnthropicMessages {
-	const params: MessageParam[] = [];
+	const params: AnthropicMessageParam[] = [];
 	const assistantLevels = new Map<number, AnthropicEffort>();
 	// Later system messages are held back and emitted directly before the next assistant
 	// message that is sent (or at the end of the transcript). Assistant messages that convert to
@@ -1363,7 +1306,7 @@ function convertMessages(
 	// immediately follow their `tool_use`, so a system message between them is rejected; this
 	// also mirrors where the managed-effort system messages are inserted. As a result an
 	// update placed before a user message in the transcript lands after it on the wire.
-	const pendingSystemMessages: MessageParam[] = [];
+	const pendingSystemMessages: AnthropicMessageParam[] = [];
 	const flushPendingSystemMessages = (): void => {
 		params.push(...pendingSystemMessages);
 		pendingSystemMessages.length = 0;
@@ -1376,7 +1319,7 @@ function convertMessages(
 			// Later system messages only reach this point when the model accepts them natively;
 			// otherwise the transcript was collapsed into the leading message before conversion.
 			const text = renderSystemMessageUpdate(msg);
-			const blocks: ContentBlockParam[] = [];
+			const blocks: AnthropicContentBlock[] = [];
 			if (text.length > 0) blocks.push({ type: "text", text: sanitizeSurrogates(text) });
 			if (convertToolDefinitions) {
 				const added = msg.toolsAdded ?? [];
@@ -1403,7 +1346,7 @@ function convertMessages(
 					});
 				}
 			} else {
-				const blocks: ContentBlockParam[] = msg.content.map((item) => {
+				const blocks: AnthropicContentBlock[] = msg.content.map((item) => {
 					if (item.type === "text") {
 						return {
 							type: "text",
@@ -1426,7 +1369,7 @@ function convertMessages(
 				});
 			}
 		} else if (msg.role === "assistant") {
-			const blocks: ContentBlockParam[] = [];
+			const blocks: AnthropicContentBlock[] = [];
 
 			for (const block of msg.content) {
 				if (block.type === "text") {
@@ -1496,10 +1439,10 @@ function convertMessages(
 			}
 		} else if (msg.role === "toolResult") {
 			// Collect all consecutive toolResult messages, needed for z.ai Anthropic endpoint.
-			const toolResults: ContentBlockParam[] = [];
+			const toolResults: AnthropicContentBlock[] = [];
 			// Anthropic rejects error tool results that contain anything but text, so their images follow
 			// all tool results of the turn, which must come first in the user message (#10794).
-			const errorImages: ContentBlockParam[] = [];
+			const errorImages: AnthropicContentBlock[] = [];
 			let j = i;
 			while (j < transformedMessages.length && transformedMessages[j].role === "toolResult") {
 				const toolMsg = transformedMessages[j] as ToolResultMessage;
@@ -1561,8 +1504,8 @@ function isAnthropicEffort(value: unknown): value is AnthropicEffort {
 function insertThinkingLevelMessages(
 	converted: ConvertedAnthropicMessages,
 	activeEffort: AnthropicEffort,
-): MessageParam[] {
-	const messages: MessageParam[] = [];
+): AnthropicMessageParam[] {
+	const messages: AnthropicMessageParam[] = [];
 	for (let index = 0; index < converted.messages.length; index++) {
 		const historicalEffort = converted.assistantLevels.get(index);
 		if (historicalEffort !== undefined) {
@@ -1621,9 +1564,9 @@ function convertTools(
 	isOAuthToken: boolean,
 	supportsEagerToolInputStreaming: boolean,
 	supportsStrictTools: boolean,
-	cacheControl?: CacheControlEphemeral,
+	cacheControl?: AnthropicCacheControl,
 	disablePreferredStrictTools = false,
-): BetaTool[] {
+): AnthropicTool[] {
 	if (!tools) return [];
 
 	return tools.map((tool, index) => {
@@ -1658,8 +1601,8 @@ function convertTools(
 }
 
 function mapStopReason(
-	reason: BetaStopReason | string,
-	stopDetails?: RefusalStopDetails | null,
+	reason: string,
+	stopDetails?: AnthropicRefusalStopDetails | null,
 ): { stopReason: StopReason; errorMessage?: string } {
 	switch (reason) {
 		case "end_turn":

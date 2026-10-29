@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV } from "../src/env-api-keys.ts";
 import { createModels } from "../src/models.ts";
@@ -6,53 +6,38 @@ import { anthropicProvider } from "../src/providers/anthropic.ts";
 import type { Model } from "../src/types.ts";
 import { formatUserAgent } from "../src/utils/identity.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
+import { type RecordedAnthropicRequest, recordFetch } from "./anthropic-utils.ts";
 
-const mockState = vi.hoisted(() => ({
-	constructorOpts: undefined as Record<string, unknown> | undefined,
-	createParams: undefined as Record<string, unknown> | undefined,
-}));
-
-vi.mock("@anthropic-ai/sdk", () => {
-	function createSseResponse(): Response {
-		const body = [
-			`event: message_start\ndata: ${JSON.stringify({
-				type: "message_start",
-				message: {
-					id: "msg_test",
-					usage: { input_tokens: 1, output_tokens: 0 },
-				},
-			})}\n`,
-			`event: message_delta\ndata: ${JSON.stringify({
-				type: "message_delta",
-				delta: { stop_reason: "end_turn" },
-				usage: { output_tokens: 1 },
-			})}\n`,
-			`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n`,
-		].join("\n");
-
-		return new Response(body, {
-			status: 200,
-			headers: { "content-type": "text/event-stream" },
-		});
-	}
-
-	class FakeAnthropic {
-		constructor(opts: Record<string, unknown>) {
-			mockState.constructorOpts = opts;
-		}
-		beta = {
-			messages: {
-				create: (params: Record<string, unknown>) => {
-					mockState.createParams = params;
-					return {
-						asResponse: async () => createSseResponse(),
-					};
-				},
+function sseResponse(): Response {
+	const body = [
+		`event: message_start\ndata: ${JSON.stringify({
+			type: "message_start",
+			message: {
+				id: "msg_test",
+				usage: { input_tokens: 1, output_tokens: 0 },
 			},
-		};
-	}
+		})}\n`,
+		`event: message_delta\ndata: ${JSON.stringify({
+			type: "message_delta",
+			delta: { stop_reason: "end_turn" },
+			usage: { output_tokens: 1 },
+		})}\n`,
+		`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n`,
+	].join("\n");
 
-	return { default: FakeAnthropic };
+	return new Response(body, {
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+	});
+}
+
+let requests: RecordedAnthropicRequest[];
+let fetch: ReturnType<typeof recordFetch>["fetch"];
+
+beforeEach(() => {
+	const recorder = recordFetch(() => sseResponse());
+	requests = recorder.requests;
+	fetch = recorder.fetch;
 });
 
 const PI_USER_AGENT = formatUserAgent();
@@ -83,11 +68,6 @@ const kimiCodingModel: Model<"anthropic-messages"> = {
 	provider: "kimi-coding",
 	baseUrl: "https://api.kimi.com/coding",
 };
-
-afterEach(() => {
-	mockState.constructorOpts = undefined;
-	mockState.createParams = undefined;
-});
 
 describe("Anthropic auth token env", () => {
 	it("resolves ANTHROPIC_AUTH_TOKEN as a bearer Authorization header", async () => {
@@ -134,15 +114,15 @@ describe("Anthropic auth token env", () => {
 	it("uses Authorization headers without OAuth-mode request shaping", async () => {
 		const stream = streamAnthropic(anthropicModel, context, {
 			headers: { Authorization: "Bearer gateway-token" },
+			fetch,
 		});
 		await stream.result();
 
-		expect(mockState.constructorOpts?.apiKey).toBeNull();
-		expect(mockState.constructorOpts?.authToken).toBeNull();
-		const headers = mockState.constructorOpts?.defaultHeaders as Record<string, string | null>;
-		expect(headers.Authorization).toBe("Bearer gateway-token");
-		expect(mockState.createParams?.betas ?? []).not.toContain("oauth-2025-04-20");
-		expect(mockState.createParams?.system).toEqual([expect.objectContaining({ text: "System prompt." })]);
+		const [request] = requests;
+		expect(request.headers.get("authorization")).toBe("Bearer gateway-token");
+		expect(request.headers.get("x-api-key")).toBeNull();
+		expect(request.headers.get("anthropic-beta") ?? "").not.toContain("oauth-2025-04-20");
+		expect(request.body.system).toEqual([expect.objectContaining({ text: "System prompt." })]);
 	});
 
 	it("threads authContext ANTHROPIC_AUTH_TOKEN through request headers", async () => {
@@ -154,14 +134,13 @@ describe("Anthropic auth token env", () => {
 		});
 		models.setProvider(anthropicProvider());
 
-		await models.streamSimple(anthropicModel, context).result();
+		await models.streamSimple(anthropicModel, context, { fetch }).result();
 
-		expect(mockState.constructorOpts?.apiKey).toBeNull();
-		expect(mockState.constructorOpts?.authToken).toBeNull();
-		const headers = mockState.constructorOpts?.defaultHeaders as Record<string, string>;
-		expect(headers.Authorization).toBe("Bearer ctx-token");
-		expect(mockState.createParams?.betas ?? []).not.toContain("oauth-2025-04-20");
-		expect(mockState.createParams?.system).toEqual([expect.objectContaining({ text: "System prompt." })]);
+		const [request] = requests;
+		expect(request.headers.get("authorization")).toBe("Bearer ctx-token");
+		expect(request.headers.get("x-api-key")).toBeNull();
+		expect(request.headers.get("anthropic-beta") ?? "").not.toContain("oauth-2025-04-20");
+		expect(request.body.system).toEqual([expect.objectContaining({ text: "System prompt." })]);
 	});
 
 	it("preserves OAuth request shaping for ANTHROPIC_OAUTH_TOKEN", async () => {
@@ -173,11 +152,11 @@ describe("Anthropic auth token env", () => {
 		});
 		models.setProvider(anthropicProvider());
 
-		await models.streamSimple(anthropicModel, context).result();
+		await models.streamSimple(anthropicModel, context, { fetch }).result();
 
-		expect(mockState.constructorOpts?.apiKey).toBeNull();
-		expect(mockState.constructorOpts?.authToken).toBe("sk-ant-oat-test");
-		expect(mockState.createParams?.betas).toContain("oauth-2025-04-20");
+		const [request] = requests;
+		expect(request.headers.get("authorization")).toBe("Bearer sk-ant-oat-test");
+		expect(request.headers.get("anthropic-beta")?.split(",")).toContain("oauth-2025-04-20");
 	});
 
 	it("lets explicit request headers override ANTHROPIC_AUTH_TOKEN", async () => {
@@ -190,47 +169,50 @@ describe("Anthropic auth token env", () => {
 		models.setProvider(anthropicProvider());
 
 		await models
-			.streamSimple(anthropicModel, context, { headers: { Authorization: "Bearer explicit-token" } })
+			.streamSimple(anthropicModel, context, {
+				headers: { Authorization: "Bearer explicit-token" },
+				fetch,
+			})
 			.result();
 
-		const headers = mockState.constructorOpts?.defaultHeaders as Record<string, string>;
-		expect(headers.Authorization).toBe("Bearer explicit-token");
+		expect(requests[0].headers.get("authorization")).toBe("Bearer explicit-token");
 	});
 });
 
 describe("Anthropic-compatible user agents", () => {
 	it("uses pi's User-Agent by default for Anthropic Messages requests", async () => {
-		await streamAnthropic(anthropicModel, context, { apiKey: "anthropic-key" }).result();
+		await streamAnthropic(anthropicModel, context, { apiKey: "anthropic-key", fetch }).result();
 
-		const headers = mockState.constructorOpts?.defaultHeaders as Record<string, string>;
-		expect(headers["User-Agent"]).toBe(PI_USER_AGENT);
+		expect(requests[0].headers.get("user-agent")).toBe(PI_USER_AGENT);
 	});
 
 	it("lets explicit headers override the default Anthropic Messages User-Agent", async () => {
 		await streamAnthropic(kimiCodingModel, context, {
 			apiKey: "kimi-key",
 			headers: { "User-Agent": "custom-client" },
+			fetch,
 		}).result();
 
-		const headers = mockState.constructorOpts?.defaultHeaders as Record<string, string>;
-		expect(headers["User-Agent"]).toBe("custom-client");
+		expect(requests[0].headers.get("user-agent")).toBe("custom-client");
 	});
 
 	it("preserves explicit Anthropic beta header replacement", async () => {
 		await streamAnthropic(anthropicModel, context, {
 			apiKey: "anthropic-key",
 			headers: { "anthropic-beta": "custom-beta" },
+			fetch,
 		}).result();
 
-		expect(mockState.createParams?.betas).toEqual(["custom-beta"]);
+		expect(requests[0].headers.get("anthropic-beta")).toBe("custom-beta");
 	});
 
 	it("preserves explicit Anthropic beta header suppression", async () => {
 		await streamAnthropic(anthropicModel, context, {
 			apiKey: "anthropic-key",
 			headers: { "anthropic-beta": null },
+			fetch,
 		}).result();
 
-		expect(mockState.createParams?.betas).toBeUndefined();
+		expect(requests[0].headers.get("anthropic-beta")).toBeNull();
 	});
 });

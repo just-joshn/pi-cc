@@ -6,7 +6,7 @@ import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import type { Model } from "../src/types.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
 
-// Runs the real Anthropic SDK against a fake fetch to check how often the
+// Runs the real request path against a fake fetch to check how often the
 // workload identity federation token exchange happens.
 // https://github.com/earendil-works/pi/issues/10177
 
@@ -86,7 +86,7 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 });
 
-describe("Anthropic workload identity federation with the SDK", () => {
+describe("Anthropic workload identity federation token exchange", () => {
 	it("exchanges the identity token once across requests", async () => {
 		const requests: RecordedRequest[] = [];
 		const fetch = createFetch(requests);
@@ -104,7 +104,7 @@ describe("Anthropic workload identity federation with the SDK", () => {
 		}
 	});
 
-	it("does not run the SDK credential chain for header-owned auth", async () => {
+	it("does not exchange a federation token for header-owned auth", async () => {
 		for (const [name, value] of Object.entries(federationEnv)) vi.stubEnv(name, value);
 		const requests: RecordedRequest[] = [];
 

@@ -8,7 +8,7 @@ const aiEntryUrl = new URL("../src/index.ts", import.meta.url).href;
 const compatEntryUrl = new URL("../src/compat.ts", import.meta.url).href;
 const providersAllUrl = new URL("../src/providers/all.ts", import.meta.url).href;
 
-const SDK_SPECIFIERS = ["@anthropic-ai/sdk", "openai", "@google/genai", "@aws-sdk/client-bedrock-runtime"] as const;
+const SDK_SPECIFIERS = ["openai", "@google/genai", "@aws-sdk/client-bedrock-runtime"] as const;
 
 type ProbeResult = {
 	loadedSpecifiers: string[];
@@ -78,7 +78,7 @@ describe("lazy provider module loading", () => {
 		expect(result.loadedSpecifiers).toEqual([]);
 	});
 
-	it("loads only the Anthropic SDK when streaming through the lazy API wrapper", () => {
+	it("loads no provider SDK when streaming Anthropic Messages through the lazy API wrapper", () => {
 		const result = runProbe(`
 			const compat = await import(${JSON.stringify(compatEntryUrl)});
 			const model = {
@@ -97,10 +97,10 @@ describe("lazy provider module loading", () => {
 			await compat.anthropicMessagesApi().streamSimple(model, context).result();
 		`);
 
-		expect(result.loadedSpecifiers).toEqual(["@anthropic-ai/sdk"]);
+		expect(result.loadedSpecifiers).toEqual([]);
 	});
 
-	it("loads only the Anthropic SDK when dispatching through streamSimple", () => {
+	it("loads no provider SDK when dispatching Anthropic Messages through streamSimple", () => {
 		const result = runProbe(`
 			const compat = await import(${JSON.stringify(compatEntryUrl)});
 			const model = compat.getModel("anthropic", "claude-sonnet-4-6");
@@ -108,6 +108,6 @@ describe("lazy provider module loading", () => {
 			await compat.streamSimple(model, context).result();
 		`);
 
-		expect(result.loadedSpecifiers).toEqual(["@anthropic-ai/sdk"]);
+		expect(result.loadedSpecifiers).toEqual([]);
 	});
 });
