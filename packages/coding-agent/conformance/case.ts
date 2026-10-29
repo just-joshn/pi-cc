@@ -129,7 +129,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		stdin: asStdin(object.stdin, source),
 		files: asStringRecord(object.files, source, "files"),
 		model: model === null ? null : { turns: asTurns(model.turns, source) },
-		timeout_ms: asOptionalNumber(object.timeout_ms, source, "timeout_ms") ?? 60_000,
+		timeout_ms: asOptionalPositiveInteger(object.timeout_ms, source, "timeout_ms") ?? 60_000,
 		compare: asCompareSpec(object.compare, source),
 		skip,
 	};
