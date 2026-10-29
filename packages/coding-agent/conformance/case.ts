@@ -214,6 +214,10 @@ function assertWorkspaceRelative(path: string, source: string, field: string): v
 	if (path.startsWith("/") || path.split("/").includes("..")) {
 		fail(source, `${field} must be relative to the workspace, without ".."`);
 	}
+	// The scan keys a tree by the path it walked, so these spellings could never match one.
+	if (path.startsWith("./") || path.endsWith("/")) {
+		fail(source, `${field} must be a plain workspace-relative path, without "./" or a trailing "/"`);
+	}
 }
 
 function asAbsentPaths(value: unknown, source: string): string[] | undefined {
@@ -240,6 +244,9 @@ function asContainmentSpecs(value: unknown, source: string): ContainmentSpec[] |
 		if (kind === "survivor") {
 			if (path !== undefined) fail(source, `${field}.path is a process, not a path, so it cannot be named`);
 			return { kind: kind as ViolationKind };
+		}
+		if (path === undefined && (kind === "escaping-symlink" || kind === "dangling-symlink")) {
+			fail(source, `${field}.path is required: a link that escapes or dangles is always inside the tree`);
 		}
 		if (path !== undefined) assertWorkspaceRelative(path, source, `${field}.path`);
 		return { kind: kind as ViolationKind, path };

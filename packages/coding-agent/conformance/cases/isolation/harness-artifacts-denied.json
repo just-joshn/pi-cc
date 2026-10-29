@@ -32,7 +32,7 @@
 					"out-link-stderr.txt=denied",
 					"out-link-meta.json=denied",
 					"out-link-requests.jsonl=denied",
-					"out-alias=denied",
+					"out-alias=ok",
 					"alias-write=denied"
 				]
 			}

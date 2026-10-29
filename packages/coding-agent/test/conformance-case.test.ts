@@ -466,3 +466,21 @@ describe("containment declarations", () => {
 		).toThrow(/compare\.containment\[0\] has unknown key "target"/);
 	});
 });
+
+describe("containment declarations that could never match", () => {
+	test("rejects a link kind with no path", () => {
+		for (const kind of ["escaping-symlink", "dangling-symlink"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind }] } })).toThrow(
+				/\.path is required/,
+			);
+		}
+	});
+
+	test("rejects a path spelling the scan never produces", () => {
+		for (const path of ["./secret.log", "secret.log/"]) {
+			expect(() =>
+				loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "symlink", path }] } }),
+			).toThrow(/without "\.\/" or a trailing "\/"/);
+		}
+	});
+});
