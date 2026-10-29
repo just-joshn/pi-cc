@@ -522,10 +522,6 @@ export function sortMergedDeclarations(messages: readonly Message[], includePlac
 }
 
 /**
- * The system prompt's tool list and tool rules, with each covered tool under the name the model
- * calls it by: a `- read: ...` entry and a `- Use read ...` rule.
- */
-/**
  * System prompt lines that describe pi's input shape or tool names, and the line the model gets
  * instead. `null` drops a line that has no counterpart for a one-edit schema.
  */
@@ -566,6 +562,10 @@ function projectPromptLines(text: string): string {
 		.join("\n");
 }
 
+/**
+ * The system prompt's tool list and tool rules, with each covered tool under the name the model
+ * calls it by: a `- read: ...` entry and a `- Use read ...` rule.
+ */
 function projectToolList(text: string): string {
 	return text.replace(/^- (Use )?([A-Za-z_]+)(?=[: ])/gm, (line, use: string | undefined, name: string) => {
 		const covered = ccTool(name);
