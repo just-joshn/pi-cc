@@ -100,3 +100,17 @@ These variables are read by Pi itself:
 | `HTTP_PROXY`, `HTTPS_PROXY` | Proxy outbound HTTP requests |
 
 Provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and provider-specific configuration are listed in [Providers](providers.md#use-an-api-key-from-the-environment).
+
+## Anthropic Provider Environment
+
+The Anthropic provider reads the endpoint and model variables Claude Code reads:
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_BASE_URL` | Endpoint for Anthropic Messages requests, such as a gateway or proxy |
+| `ANTHROPIC_CUSTOM_HEADERS` | Extra request headers, one `Name: value` per line |
+| `ANTHROPIC_MODEL` | Session model, preferred over the saved default |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` | What the `opus`, `sonnet`, `haiku`, and `fable` aliases resolve to |
+| `ANTHROPIC_SMALL_FAST_MODEL` | Accepted for compatibility; it does not select the session model, `ANTHROPIC_DEFAULT_HAIKU_MODEL` does |
+
+A `baseUrl` configured for the provider in `models.json` wins over `ANTHROPIC_BASE_URL`.
