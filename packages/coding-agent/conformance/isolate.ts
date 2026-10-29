@@ -10,6 +10,9 @@ import { userInfo } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
+export const PROBES = { ls: "/bin/ls", nc: "/usr/bin/nc", open: "/usr/bin/open" } as const;
+
 export type SideName = "claude" | "pi-cc";
 
 export interface Side {
@@ -156,7 +159,7 @@ export function renderProfile(options: ProfileOptions): string {
 		...["com.apple.securityd", "com.apple.trustd", "com.apple.trustd.agent", "com.apple.keystore"].map(
 			(service) => `(deny mach-lookup (global-name ${quote(service)}))`,
 		),
-		...["/usr/bin/security", "/usr/sbin/securityd", "/usr/bin/ssh-add", "/usr/bin/osascript"].map(
+		...["/usr/bin/security", "/usr/sbin/securityd", "/usr/bin/ssh-add", "/usr/bin/osascript", "/usr/bin/open"].map(
 			(path) => `(deny process-exec (literal ${quote(path)}))`,
 		),
 		"(allow file-read-metadata)",

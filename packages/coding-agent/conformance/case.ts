@@ -2,6 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PROBES } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
@@ -36,7 +37,10 @@ export interface ConformanceCase {
 	/** `<area>/<case>`, stable forever. */
 	id: string;
 	area: string;
-	/** Absolute executable to run instead of the side's own CLI. Isolation cases use this. */
+	/**
+	 * Absolute executable to run instead of the side's own CLI. The loader sets it from `probe`; case
+	 * data can never name a path.
+	 */
 	binary?: string;
 	argv: string[];
 	env: Record<string, string>;
@@ -52,9 +56,22 @@ export interface ConformanceCase {
 
 const SKIP_REASONS = new Set(["macos-only", "needs-tty", "claude-binary-absent", "spec-gap"]);
 
-const FORBIDDEN_SUBCOMMANDS = new Set(["install", "login", "logout", "setup-token", "update"]);
+const DENIED_ARGV_TOKENS = new Set([
+	"auth",
+	"login",
+	"logout",
+	"install",
+	"uninstall",
+	"update",
+	"upgrade",
+	"setup-token",
+	"purge",
+	"respawn",
+	"plugin",
+	"migrate-installer",
+]);
 
-const CASE_KEYS = ["id", "area", "binary", "argv", "env", "stdin", "files", "model", "timeout_ms", "compare", "skip"];
+const CASE_KEYS = ["id", "area", "probe", "argv", "env", "stdin", "files", "model", "timeout_ms", "compare", "skip"];
 const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "requests"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
 const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
@@ -96,7 +113,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	return {
 		id,
 		area,
-		binary: asOptionalString(object.binary, source, "binary"),
+		binary: asProbePath(object.probe, source),
 		argv,
 		env: asStringRecord(object.env, source, "env"),
 		stdin: asStdin(object.stdin, source),
@@ -110,18 +127,31 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 
 /**
  * A case runs against the real Claude Code install, so it must never reach a subcommand that
- * authenticates, installs, or replaces that binary.
+ * authenticates, installs, or mutates that binary. Every token is checked, not just the first one,
+ * and it is matched lowercased with leading dashes stripped, so `--login` and `LOGIN` are refused too.
  */
 function assertArgvAllowed(argv: readonly string[], source: string): void {
-	const subcommand = argv[0];
-	if (subcommand !== undefined && FORBIDDEN_SUBCOMMANDS.has(subcommand)) {
-		fail(source, `argv must not run "${subcommand}": the harness never runs it against the installed claude`);
-	}
-	for (const argument of argv) {
-		if (argument === "--update" || argument.startsWith("--update=")) {
-			fail(source, `argv must not contain "${argument}": the harness never updates the installed claude`);
+	for (const token of argv) {
+		if (token.startsWith("--update")) {
+			fail(source, `argv must not contain "${token}": the harness never updates the installed claude`);
+		}
+		const name = token.replace(/^-+/, "").toLowerCase();
+		if (DENIED_ARGV_TOKENS.has(name)) {
+			fail(
+				source,
+				`argv must not run "${token}": the harness never runs a claude subcommand that authenticates, installs, or mutates`,
+			);
 		}
 	}
+}
+
+/** Resolves the case's probe name into the program it runs. Case data names a probe, never a path. */
+function asProbePath(value: unknown, source: string): string | undefined {
+	const probe = asOptionalString(value, source, "probe");
+	if (probe === undefined) return undefined;
+	const path = Object.entries(PROBES).find(([name]) => name === probe)?.[1];
+	if (path === undefined) fail(source, `unknown probe "${probe}"`);
+	return path;
 }
 
 function asCompareSpec(value: unknown, source: string): CompareSpec {

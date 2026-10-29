@@ -1,7 +1,7 @@
 {
 	"id": "isolation/home-empty",
 	"area": "isolation",
-	"binary": "/bin/ls",
+	"probe": "ls",
 	"argv": [
 		"-A",
 		"$HOME"

@@ -1,7 +1,7 @@
 {
 	"id": "isolation/real-home-denied",
 	"area": "isolation",
-	"binary": "/bin/ls",
+	"probe": "ls",
 	"argv": [
 		"-A",
 		"$REAL_HOME"

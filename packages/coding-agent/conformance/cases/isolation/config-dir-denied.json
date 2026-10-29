@@ -1,7 +1,7 @@
 {
 	"id": "isolation/config-dir-denied",
 	"area": "isolation",
-	"binary": "/bin/ls",
+	"probe": "ls",
 	"argv": [
 		"-A",
 		"$REAL_HOME/.claude"
