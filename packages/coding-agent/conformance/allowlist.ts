@@ -102,12 +102,13 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
 /**
  * The environment keys a case may set. The harness sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`
  * for every case that starts the mock model server and a case cannot replace them, so the keys left are
- * these. All eight are model-name selectors or request decoration: none of them switches provider,
- * redirects the endpoint, or loads code, which is what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and
- * `BUN_OPTIONS` would do and why they stay refused.
+ * these. The credential and header keys decorate the request the mock already receives. The model keys
+ * only select a name. None of them switches provider, redirects the endpoint, or loads code, which is
+ * what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and `BUN_OPTIONS` would do and why they stay refused.
  */
 const CASE_ENV_KEYS: readonly string[] = [
 	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_CUSTOM_HEADERS",
 	"ANTHROPIC_MODEL",
 	// PR #6 (`cc/provider-env`) resolves these five to a model name per alias.

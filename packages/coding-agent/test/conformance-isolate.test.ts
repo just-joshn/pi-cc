@@ -189,6 +189,21 @@ describe("seedFiles", () => {
 		expect(readFileSync(join(roots.workspace, "note.txt"), "utf8")).toBe("workspace");
 		expect(() => seedFiles(roots, { "$REAL_HOME/secret": "no" })).toThrow(/escapes the side root/);
 		expect(() => seedFiles(roots, { "$AGENT/../../outside": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "../zz": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "$WORKSPACE/../out/requests.jsonl": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "$FIXTURES/zz": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "/tmp/zz-abs": "no" })).toThrow(/escapes the side root/);
+
+		seedFiles(roots, {
+			"$CONFIG/.credentials.json": "config",
+			"$HOME/.profile": "home",
+			"$WORKSPACE/kept.txt": "workspace",
+		});
+		expect(readFileSync(join(roots.config, ".credentials.json"), "utf8")).toBe("config");
+		expect(readFileSync(join(roots.home, ".profile"), "utf8")).toBe("home");
+		expect(readFileSync(join(roots.workspace, "kept.txt"), "utf8")).toBe("workspace");
+		expect(() => readFileSync(join(roots.root, "zz"), "utf8")).toThrow();
+		expect(() => readFileSync(join(roots.out, "requests.jsonl"), "utf8")).toThrow();
 	});
 });
 

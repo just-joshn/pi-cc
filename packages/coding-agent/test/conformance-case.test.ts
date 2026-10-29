@@ -67,7 +67,12 @@ describe("loadCases", () => {
 	});
 
 	test("loads the env keys the ENV unit needs", () => {
-		for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_MODEL"]) {
+		for (const key of [
+			"ANTHROPIC_AUTH_TOKEN",
+			"ANTHROPIC_OAUTH_TOKEN",
+			"ANTHROPIC_CUSTOM_HEADERS",
+			"ANTHROPIC_MODEL",
+		]) {
 			expect(loadOne({ ...MINIMAL_CASE, env: { [key]: "probe" } }).env).toEqual({ [key]: "probe" });
 		}
 	});

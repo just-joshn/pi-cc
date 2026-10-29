@@ -157,6 +157,22 @@ describe("compare.requests", () => {
 		).toEqual([]);
 	});
 
+	test("fails a method or header assertion when the side sent no request", () => {
+		expect(
+			checks(
+				{
+					requests: [
+						{
+							method: "PUT",
+							headers: { authorization: "Bearer token" },
+						},
+					],
+				},
+				{ requests: [] },
+			),
+		).toEqual(["requests.method", "requests.headers"]);
+	});
+
 	test("names a method or header that does not match", () => {
 		expect(checks({ requests: [{ method: "GET" }] }, { requests: [posted] })).toEqual(["requests.method"]);
 		expect(checks({ requests: [{ headers: { authorization: null } }] }, { requests: [posted] })).toEqual([

@@ -1,0 +1,44 @@
+{
+	"id": "provider-env/oauth-token-loses-to-a-stored-api-key",
+	"area": "provider-env",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {
+		"ANTHROPIC_OAUTH_TOKEN": "sk-ant-oat01-ENVOAUTH"
+	},
+	"unset": [
+		"ANTHROPIC_API_KEY"
+	],
+	"stdin": null,
+	"files": {
+		"$AGENT/auth.json": "{\"anthropic\": {\"type\": \"api_key\", \"key\": \"sk-ant-api03-STORED-KEY\"}}",
+		"$CONFIG/.claude.json": "{\"primaryApiKey\": \"sk-ant-api03-STORED-KEY\", \"hasCompletedOnboarding\": true}"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"headers": {
+					"authorization": null,
+					"x-api-key": "sk-ant-api03-STORED-KEY"
+				}
+			}
+		]
+	},
+	"skip": []
+}

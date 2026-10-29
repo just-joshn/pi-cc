@@ -144,6 +144,88 @@ describe("provider environment at auth resolution", () => {
 		expect(result?.source).toBe("ANTHROPIC_API_KEY");
 	});
 
+	it("keeps a stored subscription over ANTHROPIC_OAUTH_TOKEN", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedSubscription("sk-ant-oat01-stored"),
+			envContext({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env" }),
+			{ signal },
+		);
+
+		expect(result?.auth.apiKey).toBe("sk-ant-oat01-stored");
+		expect(result?.source).toBe("OAuth");
+	});
+
+	it("keeps a stored api key over ANTHROPIC_OAUTH_TOKEN", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedKey("stored-key"),
+			envContext({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env" }),
+			{ signal },
+		);
+
+		expect(result?.auth.apiKey).toBe("stored-key");
+		expect(result?.source).toBe("stored credential");
+	});
+
+	it("still lets an env api key disable a stored subscription when ANTHROPIC_OAUTH_TOKEN is also set", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedSubscription("sk-ant-oat01-stored"),
+			envContext({ ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat01-env", ANTHROPIC_API_KEY: "env-key" }),
+			{ signal },
+		);
+
+		expect(result?.auth.apiKey).toBe("sk-ant-oat01-env");
+		expect(result?.source).toBe("ANTHROPIC_OAUTH_TOKEN");
+	});
+
+	it("trusts a typed source kind over the display label", async () => {
+		const store = new InMemoryCredentialStore();
+		await store.modify("labeled", async () => ({ type: "api_key", key: "stored-key" }));
+		const labeled = {
+			id: "labeled",
+			auth: {
+				environmentFirst: true,
+				apiKey: {
+					name: "Labeled key",
+					resolve: async ({ credential }: { credential?: ApiKeyCredential }) =>
+						credential?.key
+							? {
+									auth: { apiKey: credential.key },
+									source: "renamed stored label",
+									sourceKind: "stored" as const,
+								}
+							: {
+									auth: { apiKey: "models-json-key" },
+									source: "renamed configured label",
+									sourceKind: "configured" as const,
+								},
+				},
+			},
+		};
+
+		const storedWins = await resolveProviderAuth(labeled, store, envContext({}), { signal });
+		expect(storedWins?.auth.apiKey).toBe("stored-key");
+
+		const preempts = {
+			id: "labeled",
+			auth: {
+				environmentFirst: true,
+				apiKey: {
+					name: "Labeled key",
+					resolve: async () => ({
+						auth: { apiKey: "env-key" },
+						source: "stored credential",
+						sourceKind: "environment" as const,
+					}),
+				},
+			},
+		};
+		const envWins = await resolveProviderAuth(preempts, store, envContext({}), { signal });
+		expect(envWins?.auth.apiKey).toBe("env-key");
+	});
+
 	it("reads an env bearer before a stored api key", async () => {
 		const result = await resolveProviderAuth(
 			anthropicProvider(),
