@@ -14,7 +14,7 @@ async function check(t, files) {
 	for (const [path, contents] of Object.entries(files)) {
 		const fullPath = join(root, path);
 		await mkdir(join(fullPath, ".."), { recursive: true });
-		await writeFile(fullPath, typeof contents === "string" ? contents : JSON.stringify(contents, null, 2));
+		await writeFile(fullPath, JSON.stringify(contents, null, 2));
 	}
 	return spawnSync(process.execPath, [script], { cwd: root, encoding: "utf8" });
 }

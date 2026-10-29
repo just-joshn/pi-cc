@@ -36,7 +36,7 @@ for (const file of manifests.sort()) {
 if (failures.length > 0) {
 	console.error("Manifests must not name Anthropic packages:");
 	for (const failure of failures) console.error(`  ${failure}`);
-	console.error("A pi-native replacement belongs in its own change; see P07 for the OS sandbox.");
+	console.error("A pi-native replacement belongs in its own change.");
 	process.exit(1);
 }
 console.log("No manifest names an Anthropic package.");
