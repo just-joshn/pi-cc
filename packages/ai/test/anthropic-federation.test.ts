@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
+import { type AnthropicOptions, stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { createModels } from "../src/models.ts";
 import { anthropicProvider } from "../src/providers/anthropic.ts";
 import type { Model } from "../src/types.ts";
@@ -215,6 +215,118 @@ describe("Anthropic workload identity federation", () => {
 			"/v1/messages",
 		]);
 		expect(requests.at(-1)?.headers.get("authorization")).toBe("Bearer federated-token-2");
+	});
+
+	it("accepts a numeric string expires_in, like the SDK's Number() coercion", async () => {
+		const { requests, fetch } = recordFetch((request) =>
+			request.url.pathname === "/v1/oauth/token"
+				? Response.json({ access_token: "federated-token", token_type: "Bearer", expires_in: "3600" })
+				: sseResponse(),
+		);
+		// A fresh endpoint, so the previous test's cached token does not hide the exchange.
+		const endpoint: Model<"anthropic-messages"> = { ...anthropicModel, baseUrl: "https://federation-expires.example" };
+
+		const message = await streamAnthropic(endpoint, context, { env: federationEnv, fetch }).result();
+
+		expect(message.stopReason).toBe("stop");
+		expect(messageRequest(requests)?.headers.get("authorization")).toBe("Bearer federated-token");
+	});
+
+	it("keeps token values out of a rejected token response", async () => {
+		const noExpiry = recordFetch((request) =>
+			request.url.pathname === "/v1/oauth/token"
+				? Response.json({ access_token: "SECRET-ACCESS", token_type: "Bearer" })
+				: sseResponse(),
+		);
+		const missingExpiry = await streamAnthropic(
+			{ ...anthropicModel, baseUrl: "https://federation-no-expiry.example" },
+			context,
+			{ env: federationEnv, fetch: noExpiry.fetch },
+		).result();
+
+		expect(missingExpiry.stopReason).toBe("error");
+		expect(missingExpiry.errorMessage).toBe("Token endpoint response missing required fields: {}");
+
+		const noToken = recordFetch((request) =>
+			request.url.pathname === "/v1/oauth/token"
+				? Response.json({ token_type: "Bearer", expires_in: 3600, refresh_token: "SECRET-REFRESH" })
+				: sseResponse(),
+		);
+		const missingToken = await streamAnthropic(
+			{ ...anthropicModel, baseUrl: "https://federation-no-token.example" },
+			context,
+			{ env: federationEnv, fetch: noToken.fetch },
+		).result();
+
+		expect(missingToken.stopReason).toBe("error");
+		expect(missingToken.errorMessage).toBe("Token endpoint response missing access_token: {}");
+	});
+
+	it("reports the request id and the guidance the SDK gave for a 401", async () => {
+		const { fetch } = recordFetch(() =>
+			Response.json(
+				{ error: "invalid_grant", access_token: "SECRET-ACCESS" },
+				{ status: 401, headers: { "request-id": "req_tok" } },
+			),
+		);
+		const message = await streamAnthropic(
+			{ ...anthropicModel, baseUrl: "https://federation-401-error.example" },
+			context,
+			{ env: federationEnv, fetch },
+		).result();
+
+		expect(message.stopReason).toBe("error");
+		expect(message.errorMessage).toBe(
+			'Token exchange failed with status 401 (request-id req_tok): {"error":"invalid_grant"} Ensure your federation rule matches your identity token. If your federation rule is scoped to multiple workspaces, set the ANTHROPIC_WORKSPACE_ID environment variable, the \'workspace_id\' config key, or the `workspaceId` option. View your authentication events in the Workload identity page of Claude Console for more details.',
+		);
+	});
+
+	it("omits the workspace guidance from a 401 when a workspace id is configured", async () => {
+		const { fetch } = recordFetch(() =>
+			Response.json({ error: "invalid_grant" }, { status: 401, headers: { "request-id": "req_tok" } }),
+		);
+		const message = await streamAnthropic(
+			{ ...anthropicModel, baseUrl: "https://federation-401-workspace.example" },
+			context,
+			{ env: { ...federationEnv, ANTHROPIC_WORKSPACE_ID: "wrkspc_test" }, fetch },
+		).result();
+
+		expect(message.errorMessage).toBe(
+			'Token exchange failed with status 401 (request-id req_tok): {"error":"invalid_grant"} Ensure your federation rule matches your identity token. View your authentication events in the Workload identity page of Claude Console for more details.',
+		);
+	});
+
+	it("drops a token-shaped field from a non-2xx token endpoint body", async () => {
+		const { fetch } = recordFetch(() =>
+			Response.json(
+				{ error: "server_error", error_description: "boom", access_token: "SECRET-ACCESS" },
+				{ status: 500, headers: { "request-id": "req_tok" } },
+			),
+		);
+		const message = await streamAnthropic(
+			{ ...anthropicModel, baseUrl: "https://federation-500.example" },
+			context,
+			{ env: federationEnv, fetch },
+		).result();
+
+		expect(message.errorMessage).toBe(
+			'Token exchange failed with status 500 (request-id req_tok): {"error":"server_error","error_description":"boom"}',
+		);
+	});
+
+	it("names the token endpoint and the cause when the exchange cannot reach it", async () => {
+		const fetch: NonNullable<AnthropicOptions["fetch"]> = async () => {
+			throw new TypeError("fetch failed");
+		};
+		const message = await streamAnthropic(
+			{ ...anthropicModel, baseUrl: "https://federation-network.example" },
+			context,
+			{ env: federationEnv, fetch },
+		).result();
+
+		expect(message.errorMessage).toBe(
+			"Failed to reach token endpoint https://federation-network.example/v1/oauth/token: TypeError: fetch failed",
+		);
 	});
 
 	it("threads authContext federation variables through Models", async () => {
