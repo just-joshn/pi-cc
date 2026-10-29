@@ -953,17 +953,18 @@ export async function main(args: string[], options?: MainOptions) {
 		process.exit(1);
 	}
 
-	if (
-		(appMode === "print" || appMode === "json") &&
-		(!session.model || !modelRuntime.hasConfiguredAuth(session.model.provider))
-	) {
+	const model = session.model;
+	if ((appMode === "print" || appMode === "json") && model === undefined) {
+		console.error(chalk.red(formatNoModelsAvailableMessage()));
+		process.exit(1);
+	}
+
+	// Claude Code prints its not-logged-in line on stdout in text mode, where stdout is human output.
+	// A JSON mode carries records only, so it keeps pi's own path and reports the failure there.
+	if (appMode === "print" && model !== undefined && !modelRuntime.hasConfiguredAuth(model.provider)) {
 		writeRawStdout(`${NOT_LOGGED_IN_MESSAGE}\n`);
 		await flushRawStdout();
-		console.error(
-			chalk.red(
-				session.model ? formatNoApiKeyFoundMessage(session.model.provider) : formatNoModelsAvailableMessage(),
-			),
-		);
+		console.error(chalk.red(formatNoApiKeyFoundMessage(model.provider)));
 		process.exit(1);
 	}
 

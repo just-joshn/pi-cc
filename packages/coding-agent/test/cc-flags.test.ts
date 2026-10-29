@@ -266,8 +266,8 @@ describe("accepted flags", () => {
 describe("Claude Code output format", () => {
 	test("maps --output-format onto the pi mode and print mode", () => {
 		expect(parseArgs(["--output-format", "json"]).mode).toBe("json");
+		expect(parseArgs(["--output-format", "stream-json"]).mode).toBe("json");
 		expect(parseArgs(["--output-format", "text"]).print).toBe(true);
-		expect(parseArgs(["--output-format", "stream-json"]).print).toBe(true);
 	});
 });
 

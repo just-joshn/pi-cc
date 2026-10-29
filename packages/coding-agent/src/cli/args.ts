@@ -297,8 +297,9 @@ export function parseArgs(args: string[]): Args {
 		}
 	}
 
-	// Claude Code's --output-format selects the pi mode and implies print.
-	if (result.outputFormat === "json") {
+	// Claude Code's --output-format selects the pi mode and implies print. Both JSON formats stream
+	// records, so neither may print pi's text mode.
+	if (result.outputFormat === "json" || result.outputFormat === "stream-json") {
 		result.mode = "json";
 	} else if (result.outputFormat !== undefined) {
 		result.print = true;
