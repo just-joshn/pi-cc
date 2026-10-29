@@ -1,3 +1,4 @@
+import { resolveFlagSettings } from "./flag-tier.ts";
 import type { CcSettingsLocation } from "./load.ts";
 import { loadCcSettings } from "./load.ts";
 import type { CcLoadResult, CcSettings, CcSettingsFailure, CcSettingsSkip, CcSettingsSource } from "./types.ts";
@@ -17,6 +18,7 @@ export interface CcRunSettings {
 	/** The effective settings. Repo-tier values appear only after a trusted settle. */
 	readonly settings: CcSettings;
 	readonly flagError: string | undefined;
+	readonly flagSettings: string | undefined;
 	readonly refusal: string | undefined;
 	readonly failures: readonly CcSettingsFailure[];
 	readonly skipped: readonly CcSettingsSkip[];
@@ -29,11 +31,13 @@ function isRepoSource(source: CcSettingsSource): boolean {
 }
 
 export function openCcRunSettings(location: CcRunLocation, trust: CcRepoTierTrust): CcRunSettings {
+	const flagSettings = resolveFlagSettings(location.flagSettings, location.cwd);
 	if (trust !== "pending") {
-		const result: CcLoadResult = loadCcSettings({ ...location, projectTrusted: trust });
+		const result: CcLoadResult = loadCcSettings({ ...location, flagSettings, projectTrusted: trust });
 		return {
 			settings: result.settings,
 			flagError: result.flagError,
+			flagSettings,
 			refusal: result.refusal,
 			failures: result.failures,
 			skipped: result.skipped,
@@ -42,7 +46,7 @@ export function openCcRunSettings(location: CcRunLocation, trust: CcRepoTierTrus
 		};
 	}
 
-	const withheld = loadCcSettings({ ...location, projectTrusted: false });
+	const withheld = loadCcSettings({ ...location, flagSettings, projectTrusted: false });
 	let current = withheld.settings;
 	let settled = false;
 	return {
@@ -50,6 +54,7 @@ export function openCcRunSettings(location: CcRunLocation, trust: CcRepoTierTrus
 			return current;
 		},
 		flagError: withheld.flagError,
+		flagSettings,
 		refusal: withheld.refusal,
 		failures: withheld.failures,
 		skipped: withheld.skipped,
@@ -65,7 +70,7 @@ export function openCcRunSettings(location: CcRunLocation, trust: CcRepoTierTrus
 			if (!trusted) {
 				return { settings: current, failures: [], skipped: [], ignored: withheld.ignored };
 			}
-			const admitted = loadCcSettings({ ...location, projectTrusted: true });
+			const admitted = loadCcSettings({ ...location, flagSettings, projectTrusted: true });
 			current = admitted.settings;
 			return {
 				settings: admitted.settings,
@@ -106,7 +111,13 @@ export function admitCcDirectory(
 		};
 	}
 	return {
-		admission: { cwd, run: openCcRunSettings({ ...location, cwd }, trust) },
+		admission: {
+			cwd,
+			run: openCcRunSettings(
+				{ ...location, cwd, flagSettings: previous?.run.flagSettings ?? location.flagSettings },
+				trust,
+			),
+		},
 		settled: undefined,
 		opened: true,
 	};

@@ -44,6 +44,6 @@
 	},
 	"skip": [],
 	"not_applicable": {
-		"pi-cc": "pi-cc stores --settings on this branch and reads it only after PR #5 lands, so the hook never runs and this side cannot attempt the escapes"
+		"pi-cc": "P08 wires hooks from --settings; P02 loads the hook setting but does not run the hook, so this side cannot attempt the escapes"
 	}
 }

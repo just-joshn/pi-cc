@@ -163,7 +163,12 @@ describe("a trust decision admits only that directory", () => {
 		const session = side();
 		write(join(startup.workspace, "s.json"), '{"env":{"HTTPS_PROXY":"http://127.0.0.1:9"}}');
 		write(join(session.workspace, "s.json"), '{"env":{"HTTPS_PROXY":"http://127.0.0.1:1"}}');
-		const initial = admitCcDirectory(undefined, location(startup, { flagSettings: "s.json" }), startup.workspace, false);
+		const initial = admitCcDirectory(
+			undefined,
+			location(startup, { flagSettings: "s.json" }),
+			startup.workspace,
+			false,
+		);
 		const switched = admitCcDirectory(
 			initial.admission,
 			location(startup, { flagSettings: "s.json" }),

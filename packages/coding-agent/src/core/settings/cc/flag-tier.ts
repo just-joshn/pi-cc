@@ -25,6 +25,12 @@ export type CcFlagSettings =
 	| { readonly kind: "unreadable"; readonly path: string; readonly detail: string }
 	| { readonly kind: "shape"; readonly path: string; readonly problems: readonly CcDocumentProblem[] };
 
+export function resolveFlagSettings(value: string | undefined, cwd: string): string | undefined {
+	if (value === undefined) return undefined;
+	const trimmed = value.trim();
+	return trimmed.length === 0 || (trimmed.startsWith("{") && trimmed.endsWith("}")) ? value : resolvePath(value, cwd);
+}
+
 export function parseFlagSettings(value: string, cwd: string): CcFlagSettings {
 	const trimmed = value.trim();
 	if (trimmed.length === 0) {
