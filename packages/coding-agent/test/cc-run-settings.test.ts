@@ -158,6 +158,22 @@ describe("failures that never depend on trust", () => {
 });
 
 describe("a trust decision admits only that directory", () => {
+	test("a relative --settings file stays in the launch directory across session switches", () => {
+		const startup = side();
+		const session = side();
+		write(join(startup.workspace, "s.json"), '{"env":{"HTTPS_PROXY":"http://127.0.0.1:9"}}');
+		write(join(session.workspace, "s.json"), '{"env":{"HTTPS_PROXY":"http://127.0.0.1:1"}}');
+		const initial = admitCcDirectory(undefined, location(startup, { flagSettings: "s.json" }), startup.workspace, false);
+		const switched = admitCcDirectory(
+			initial.admission,
+			location(startup, { flagSettings: "s.json" }),
+			session.workspace,
+			false,
+		);
+		expect(switched.admission.run.flagError).toBeUndefined();
+		expect(switched.admission.run.settings.env.HTTPS_PROXY).toBe("http://127.0.0.1:9");
+	});
+
 	test("trusting the session directory does not admit the startup directory's proxy", () => {
 		const startup = side();
 		const session = side();
