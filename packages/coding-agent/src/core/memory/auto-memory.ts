@@ -1,7 +1,7 @@
 /** Auto memory: whether it is on, where its directory is, and how its `MEMORY.md` index is read. */
 
 import { mkdirSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, normalize, parse } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, parse, sep } from "node:path";
 import { canonicalizePath } from "../../utils/paths.ts";
 import { findGitPaths } from "../footer-data-provider.ts";
 
@@ -59,10 +59,22 @@ export function truncateMemoryIndex(content: string): string {
 	if (kept.length === trimmed.length) {
 		return trimmed;
 	}
+	const overLines = lines.length > MAX_INDEX_LINES;
+	const limit = [overLines && `${MAX_INDEX_LINES}-line`, overChars && `${MAX_INDEX_CHARS}-character`]
+		.filter(Boolean)
+		.join(" and ");
+	return `${kept}\n\n> Note: MEMORY.md is over the ${limit} limit, so ${cutSummary(kept, trimmed, lines.length)}. Keep each index entry to one short line and move details into topic files.`;
+}
+
+function cutSummary(kept: string, full: string, total: number): string {
+	if (full[kept.length] !== "\n") {
+		const rest = total - 1;
+		const others = rest === 0 ? "" : ` and the other ${rest === 1 ? "1 line was" : `${rest} lines were`} left out`;
+		return `only the first ${kept.length} characters of line 1 were loaded${others}`;
+	}
 	const keptLines = kept.split("\n").length;
-	const limit = overChars ? `${MAX_INDEX_LINES} lines and ${MAX_INDEX_CHARS} characters` : `${MAX_INDEX_LINES} lines`;
-	const cut = lines.length - keptLines;
-	return `${kept}\n\n> Note: MEMORY.md has ${lines.length} lines and only the first ${limit} are loaded, so ${cut} line${cut === 1 ? "" : "s"} from line ${keptLines + 1} on were left out. Keep each index entry to one short line and move details into topic files.`;
+	const cut = total - keptLines;
+	return `${cut} of ${total} lines ${cut === 1 ? "was" : "were"} left out, starting at line ${keptLines + 1}`;
 }
 
 /** Create the auto memory directory so the model can write into it. Failures are left to the first write. */
@@ -82,7 +94,11 @@ function validMemoryDirectory(value: unknown, home: string): string | undefined 
 	if (typeof value !== "string" || value.includes("\0")) {
 		return undefined;
 	}
-	const expanded = value.startsWith("~/") ? join(home, value.slice(2)) : value;
+	const fromHome = value.startsWith("~/") || value.startsWith("~\\") ? normalize(value.slice(2) || ".") : undefined;
+	if (fromHome === "." || fromHome === ".." || fromHome?.startsWith(`..${sep}`) || fromHome?.startsWith("../")) {
+		return undefined;
+	}
+	const expanded = fromHome === undefined ? value : join(home, value.slice(2));
 	const normalized = normalize(expanded).replace(/[\\/]+$/, "");
 	if (!isAbsolute(normalized) || normalized.length < 3 || parse(normalized).root === normalized) {
 		return undefined;
