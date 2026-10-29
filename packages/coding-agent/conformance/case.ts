@@ -2,7 +2,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HARNESS_ENV_KEYS, PROBES, UNSET_ENV_KEYS } from "./isolate.ts";
+import { argvProblem, envProblem } from "./allowlist.ts";
+import { PROBES, type ProbeName } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
@@ -57,47 +58,6 @@ export interface ConformanceCase {
 
 const SKIP_REASONS = new Set(["macos-only", "needs-tty", "claude-binary-absent", "spec-gap"]);
 
-interface DeniedCommand {
-	/** Matched in order, consecutively, against dash-stripped, lowercased argv tokens. */
-	words: readonly string[];
-	/** A word here counts only when written without a leading dash: `--agents` is a flag that defines agents. */
-	bare?: readonly string[];
-	/** The only tokens allowed after the match, and at least one must follow; every other tail is refused. */
-	readOnlyTail?: readonly string[];
-}
-
-/** The claude 2.1.312 command paths a case may never run. */
-const DENIED_COMMANDS: readonly DeniedCommand[] = [
-	{ words: ["auth"] },
-	{ words: ["login"] },
-	{ words: ["logout"] },
-	{ words: ["install"] },
-	{ words: ["uninstall"] },
-	{ words: ["update"] },
-	{ words: ["upgrade"] },
-	{ words: ["setup-token"] },
-	{ words: ["purge"] },
-	{ words: ["respawn"] },
-	{ words: ["plugin"] },
-	{ words: ["plugins"] },
-	{ words: ["migrate-installer"] },
-	{ words: ["import"] },
-	{ words: ["gateway"] },
-	{ words: ["ultrareview"] },
-	{ words: ["rm"] },
-	{ words: ["bg"] },
-	{ words: ["stop"] },
-	{ words: ["kill"] },
-	{ words: ["attach"] },
-	{ words: ["agents"], bare: ["agents"], readOnlyTail: ["--json", "--all", "-h", "--help"] },
-	{ words: ["auto-mode"], readOnlyTail: ["config", "defaults", "critique", "-h", "--help"] },
-	{ words: ["mcp", "add"] },
-	{ words: ["mcp", "remove"] },
-	{ words: ["mcp", "add-json"] },
-	{ words: ["mcp", "add-from-claude-desktop"] },
-	{ words: ["mcp", "reset-project-choices"] },
-];
-
 const CASE_KEYS = ["id", "area", "probe", "argv", "env", "stdin", "files", "model", "timeout_ms", "compare", "skip"];
 const COMPARE_KEYS = ["exit", "stdout", "stderr", "files", "requests"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
@@ -138,10 +98,13 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		if (!SKIP_REASONS.has(reason)) fail(source, `unknown skip reason "${reason}"`);
 	}
 	const model = object.model === null ? null : asCheckedObject(object.model, source, "model", MODEL_KEYS);
+	const probe = asProbeName(object.probe, source);
 	const argv = asOptionalStringArray(object.argv, source, "argv") ?? [];
-	assertArgvAllowed(argv, source);
+	const problem = argvProblem(argv, probe ?? "side");
+	if (problem !== undefined) fail(source, problem);
 	const env = asStringRecord(object.env, source, "env");
-	assertEnvAllowed(env, source);
+	const envIssue = envProblem(env);
+	if (envIssue !== undefined) fail(source, envIssue);
 	const timeout_ms = asOptionalPositiveInteger(object.timeout_ms, source, "timeout_ms") ?? 60_000;
 	if (timeout_ms > MAX_TIMER_MS) {
 		fail(source, `timeout_ms must be at most ${MAX_TIMER_MS}: Node clamps a longer timer to 1 ms`);
@@ -149,7 +112,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	return {
 		id,
 		area,
-		binary: asProbePath(object.probe, source),
+		binary: probe === undefined ? undefined : PROBES[probe],
 		argv,
 		env,
 		stdin: asStdin(object.stdin, source),
@@ -161,54 +124,12 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	};
 }
 
-/**
- * The second line, not the boundary: the Seatbelt profile in `isolate.ts` is what bounds a case. A case
- * still must never reach a subcommand that authenticates, installs, or mutates the installed claude.
- */
-function assertArgvAllowed(argv: readonly string[], source: string): void {
-	for (const [start, token] of argv.entries()) {
-		if (token.startsWith("--update")) {
-			fail(source, `argv must not contain "${token}": the harness never updates the installed claude`);
-		}
-		for (const command of DENIED_COMMANDS) {
-			const end = matchCommand(command, argv, start);
-			if (end === undefined) continue;
-			const tail = argv.slice(end);
-			const allowed = command.readOnlyTail;
-			if (allowed !== undefined && tail.length > 0 && tail.every((entry) => allowed.includes(entry))) continue;
-			const matched = argv.slice(start, end).join(" ");
-			fail(
-				source,
-				`argv must not run "${matched}": the harness never runs a claude subcommand that authenticates, installs, or mutates`,
-			);
-		}
-	}
-}
-
-function matchCommand(command: DeniedCommand, argv: readonly string[], start: number): number | undefined {
-	for (const [offset, word] of command.words.entries()) {
-		const token = argv[start + offset];
-		if (token === undefined) return undefined;
-		if (token.startsWith("-") && command.bare?.includes(word)) return undefined;
-		if (token.replace(/^-+/, "").toLowerCase() !== word) return undefined;
-	}
-	return start + command.words.length;
-}
-
-function assertEnvAllowed(env: Record<string, string>, source: string): void {
-	for (const key of Object.keys(env)) {
-		if (HARNESS_ENV_KEYS.includes(key)) fail(source, `env cannot replace "${key}": the harness sets it`);
-		if (UNSET_ENV_KEYS.includes(key)) fail(source, `env cannot set "${key}": the harness keeps it unset`);
-	}
-}
-
 /** Resolves the case's probe name into the program it runs. Case data names a probe, never a path. */
-function asProbePath(value: unknown, source: string): string | undefined {
+function asProbeName(value: unknown, source: string): ProbeName | undefined {
 	const probe = asOptionalString(value, source, "probe");
 	if (probe === undefined) return undefined;
-	const path = Object.entries(PROBES).find(([name]) => name === probe)?.[1];
-	if (path === undefined) fail(source, `unknown probe "${probe}"`);
-	return path;
+	if (!Object.hasOwn(PROBES, probe)) fail(source, `unknown probe "${probe}"`);
+	return probe as ProbeName;
 }
 
 function asCompareSpec(value: unknown, source: string): CompareSpec {
