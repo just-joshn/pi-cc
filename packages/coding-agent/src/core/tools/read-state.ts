@@ -9,6 +9,8 @@ export interface ReadRecord {
 	readonly content: string;
 	/** True when the Read returned only part of the file. */
 	readonly partial: boolean;
+	/** True when an Edit changed the file without the model having read it, so the content is not in its context. */
+	readonly unseen?: boolean;
 }
 
 export interface ReadState {

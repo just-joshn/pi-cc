@@ -31,8 +31,8 @@ export interface WriteOperations {
 	writeFile: (absolutePath: string, content: string) => Promise<void>;
 	/** Create directory recursively */
 	mkdir: (dir: string) => Promise<void>;
-	/** Read existing content. Default operations read the local file; custom operations must supply this or the prior-content check reads the local disk. */
-	readFile?: (absolutePath: string) => Promise<Buffer>;
+	/** Read existing content, for the prior-read check and Claude Code's created or updated wording. */
+	readFile: (absolutePath: string) => Promise<Buffer>;
 	stat?: (absolutePath: string) => Promise<{ isFile: () => boolean }>;
 }
 
@@ -132,16 +132,18 @@ export function createWriteTool(cwd: string, options?: WriteToolOptions): AgentT
 	return wrapToolDefinition(createWriteToolDefinition(cwd, options));
 }
 
-/** The file's text, or undefined when the path holds no file. A custom readFile is not paired with a local stat. */
+/** The file's text, or undefined when the path holds no file. Only the given operations touch the file. */
 async function readIfPresent(ops: WriteOperations, absolutePath: string): Promise<string | undefined> {
-	const readFile = ops.readFile ?? fsReadFile;
-	const stat = ops.stat ?? (ops.readFile ? undefined : fsStat);
+	// Operations come from extensions loaded without type checks, and a fallback would read the local disk.
+	if (typeof ops.readFile !== "function") {
+		throw new Error("Write operations must provide readFile to check the file it replaces.");
+	}
 	try {
-		if (stat) {
-			const stats = await stat(absolutePath);
+		if (ops.stat) {
+			const stats = await ops.stat(absolutePath);
 			if (!stats.isFile()) return undefined;
 		}
-		return (await readFile(absolutePath)).toString("utf-8");
+		return (await ops.readFile(absolutePath)).toString("utf-8");
 	} catch {
 		return undefined;
 	}

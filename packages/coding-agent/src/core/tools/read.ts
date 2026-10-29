@@ -59,7 +59,10 @@ export interface ReadToolDetails {
 	 * result that carries no content (a warning, a refusal) leaves this unset.
 	 */
 	firstLineNumber?: number;
-	/** Claude Code's partial-view notice, sent as the following system message rather than in the result. */
+	/**
+	 * Claude Code's partial-view notice. The model boundary sends it as the following system message,
+	 * or inside the result on a model that takes no mid-conversation system messages.
+	 */
 	ccNotice?: string;
 }
 
@@ -91,6 +94,8 @@ export interface ReadToolOptions {
 	operations?: ReadOperations;
 	/** Records what each successful read returned, for the Edit and Write read-state checks. */
 	readState?: ReadState;
+	/** Tokens of context left for this turn's reads, or undefined when unknown. */
+	contextRoomTokens?: () => number | undefined;
 }
 
 /** The image block and its note, or the text for text files and images that could not be processed. */
@@ -186,9 +191,15 @@ export function createReadToolDefinition(
 							if (looksBinary(buffer)) {
 								throw new Error(toolUseError(CC_TOOL_TEXT.readBinary(extname(absolutePath).toLowerCase())));
 							}
-							if (limit === undefined && !allowLarge && buffer.byteLength > CC_READ_MAX_BYTES) {
+							const room = options?.contextRoomTokens?.();
+							const limits = readLimits(room, allowLarge === true);
+							if (limit === undefined && buffer.byteLength > limits.maxBytes) {
 								throw new Error(
-									CC_TOOL_TEXT.readTooLarge(formatCcSize(buffer.byteLength), formatCcSize(CC_READ_MAX_BYTES)),
+									CC_TOOL_TEXT.readTooLarge(
+										formatCcSize(buffer.byteLength),
+										formatCcSize(limits.maxBytes),
+										largeReadAdvice(room, allowLarge === true, { bytes: buffer.byteLength }),
+									),
 								);
 							}
 							const fileContent = normalizeForComparison(buffer.toString("utf-8"));
@@ -215,15 +226,20 @@ export function createReadToolDefinition(
 									const tokens = estimateTextTokens(selectedText);
 									const fromStart = offset === undefined || offset <= 1;
 									const wholeFile = fromStart && lineLimit === undefined;
-									// allowLarge lifts the cap. A bounded or offset read that still exceeds it is refused;
-									// only a whole-file read from the start is truncated and announced.
-									if (!allowLarge && tokens > CC_READ_MAX_TOKENS && !wholeFile) {
-										throw new Error(CC_TOOL_TEXT.readTooManyTokens(tokens, CC_READ_MAX_TOKENS));
+									// A bounded or offset read over the cap is refused. A whole-file read from the start
+									// is cut to the default cap and announced; allowLarge raises the cap to the context
+									// left, and a file beyond even that is cut to the default cap as well (measured).
+									if (tokens > limits.maxTokens && !wholeFile) {
+										throw new Error(
+											CC_TOOL_TEXT.readTooManyTokens(
+												tokens,
+												CC_READ_MAX_TOKENS,
+												largeReadAdvice(room, allowLarge === true, { tokens }),
+											),
+										);
 									}
 									const kept =
-										!allowLarge && tokens > CC_READ_MAX_TOKENS
-											? keepLinesWithinTokenCap(selected, tokens)
-											: selected;
+										tokens > limits.maxTokens ? keepLinesWithinTokenCap(selected, tokens) : selected;
 									rawText = kept.join("\n");
 									const numbered = numberLines(rawText, firstLineNumber);
 									content = [{ type: "text", text: numbered }];
@@ -236,7 +252,10 @@ export function createReadToolDefinition(
 														absolutePath,
 														kept.length,
 														totalLines,
-														tokens,
+														allowLarge && room !== undefined
+															? CC_TOOL_TEXT.readPartialSizeOverRoom(tokens, room)
+															: CC_TOOL_TEXT.readPartialSize(tokens),
+														largeReadAdvice(room, allowLarge === true, { tokens }),
 													),
 													truncation: {
 														content: rawText,
@@ -282,6 +301,35 @@ export function createReadToolDefinition(
 		},
 		...readRenderers,
 	};
+}
+
+/**
+ * Claude Code's caps for one read. allowLarge raises them to the context left this turn when that
+ * is known and larger than the default; with no session to ask, it lifts them.
+ */
+function readLimits(room: number | undefined, allowLarge: boolean): { maxBytes: number; maxTokens: number } {
+	if (!allowLarge) return { maxBytes: CC_READ_MAX_BYTES, maxTokens: CC_READ_MAX_TOKENS };
+	if (room === undefined) return { maxBytes: Number.POSITIVE_INFINITY, maxTokens: Number.POSITIVE_INFINITY };
+	if (room <= CC_READ_MAX_TOKENS) return { maxBytes: CC_READ_MAX_BYTES, maxTokens: CC_READ_MAX_TOKENS };
+	return { maxBytes: Math.max(CC_READ_MAX_BYTES, room * BYTES_PER_TOKEN * 3), maxTokens: room };
+}
+
+const BYTES_PER_TOKEN = 4;
+
+/** The refusal's closing advice: retry with allow_large only when the content would fit the room. */
+function largeReadAdvice(
+	room: number | undefined,
+	optedIn: boolean,
+	size: { bytes?: number; tokens?: number },
+): string {
+	if (room === undefined) return optedIn ? CC_TOOL_TEXT.readNoRoomAdvice : CC_TOOL_TEXT.readRetryAdvice;
+	if (optedIn) return CC_TOOL_TEXT.readNoRoomAdvice;
+	const raised = readLimits(room, true);
+	if (raised.maxTokens === CC_READ_MAX_TOKENS) return CC_TOOL_TEXT.readNoRoomAdvice;
+	const fits =
+		(size.bytes === undefined || size.bytes <= raised.maxBytes) &&
+		(size.tokens === undefined || size.tokens <= raised.maxTokens);
+	return fits ? CC_TOOL_TEXT.readRetryAdvice : CC_TOOL_TEXT.readNoRoomAdvice;
 }
 
 export function createReadTool(cwd: string, options?: ReadToolOptions): AgentTool<typeof readSchema> {

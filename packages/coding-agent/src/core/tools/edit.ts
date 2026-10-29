@@ -186,6 +186,10 @@ export function createEditToolDefinition(
 				const record = options?.readState?.get(absolutePath);
 				const raw = await readIfPresent(ops, absolutePath, path);
 				throwIfAborted();
+				// Claude Code appends the file-state suffix when the content is in the model's context:
+				// it supplied the content of a new file, or it read the file and no unread edit followed.
+				const inContext = raw === undefined || (record !== undefined && record.unseen !== true);
+				const suffix = inContext ? ` ${CC_FILE_STATE_SUFFIX}` : "";
 
 				// Both refusals exist to avoid a prompt, so Claude Code raises them only for a path whose
 				// Read would need approval. In an auto-allowed workspace it applies the edit.
@@ -217,17 +221,19 @@ export function createEditToolDefinition(
 					if (normalizedContent.trim() !== "") {
 						throw new Error(toolUseError(CC_TOOL_TEXT.editFileExists));
 					}
-					await (ops.mkdir ?? defaultEditOperations.mkdir)!(dirname(absolutePath));
+					if (ops.mkdir === undefined) {
+						throw new Error("Edit operations must provide mkdir to create a file in a new directory.");
+					}
+					await ops.mkdir(dirname(absolutePath));
 					await ops.writeFile(absolutePath, normalizedEdits[0].rawNew);
 					throwIfAborted();
 					options?.readState?.record(absolutePath, {
 						content: normalizeForComparison(normalizedEdits[0].rawNew),
 						partial: false,
+						unseen: !inContext,
 					});
 					return {
-						content: [
-							{ type: "text", text: `The file ${path} has been updated successfully.${suffix(raw, record)}` },
-						],
+						content: [{ type: "text", text: `The file ${path} has been updated successfully.${suffix}` }],
 						details: undefined,
 					};
 				}
@@ -239,7 +245,11 @@ export function createEditToolDefinition(
 				const finalContent = bom + restoreLineEndings(applied.next, originalEnding);
 				await ops.writeFile(absolutePath, finalContent);
 				throwIfAborted();
-				options?.readState?.record(absolutePath, { content: normalizeForComparison(finalContent), partial: false });
+				options?.readState?.record(absolutePath, {
+					content: normalizeForComparison(finalContent),
+					partial: false,
+					unseen: !inContext,
+				});
 
 				const diffResult = generateDiffString(normalizedContent, applied.next);
 				const patch = generateUnifiedPatch(path, normalizedContent, applied.next);
@@ -247,21 +257,13 @@ export function createEditToolDefinition(
 					? `The file ${path} has been updated. All occurrences were successfully replaced.`
 					: `The file ${path} has been updated successfully.`;
 				return {
-					content: [{ type: "text", text: `${wording}${suffix(raw, record)}` }],
+					content: [{ type: "text", text: `${wording}${suffix}` }],
 					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },
 				};
 			});
 		},
 		...editRenderers,
 	};
-}
-
-/**
- * Claude Code appends the file-state suffix when the file's content is in the model's context:
- * it just supplied that content (a new file), or it read the file in this session.
- */
-function suffix(raw: string | undefined, record: { content: string } | undefined): string {
-	return raw === undefined || record !== undefined ? ` ${CC_FILE_STATE_SUFFIX}` : "";
 }
 
 async function readIfPresent(

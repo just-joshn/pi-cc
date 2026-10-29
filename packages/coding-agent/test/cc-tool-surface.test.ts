@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { convertMessages as convertOpenAIMessages } from "@earendil-works/pi-ai/api/openai-completions";
 import { getModel } from "@earendil-works/pi-ai/compat";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +13,7 @@ import {
 	projectDeclarations,
 	projectMessagesForModel,
 	projectToolCall,
+	wrapStreamFn,
 } from "../src/core/tools/cc-surface.ts";
 import { CC_TOOL_TEXT } from "../src/core/tools/cc-text.ts";
 import { createEditTool } from "../src/core/tools/edit.ts";
@@ -400,5 +402,149 @@ describe("read and write gates", () => {
 		writeFileSync(file, "changed-underneath\n");
 		await expect(write.execute("5", { path: file, content: "overwrite\n" })).rejects.toThrow(CC_TOOL_TEXT.editStale);
 		expect(readFileSync(file, "utf-8")).toBe("changed-underneath\n");
+	});
+});
+
+describe("Claude Code read advice, edit suffix, and custom operations", () => {
+	let dir: string;
+
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	const advice = { retry: "call Read again with allow_large: true", noRoom: "Even with allow_large, this is more" };
+
+	it("suggests allow_large only when the content fits the context left", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-room-"));
+		writeFileSync(join(dir, "mid.txt"), "y".repeat(400_000));
+		writeFileSync(join(dir, "mega.txt"), "y".repeat(3 * 1024 * 1024));
+		const read = createReadTool(dir, { contextRoomTokens: () => 140_000 });
+		await expect(read.execute("1", { path: "mid.txt", limit: 1 })).rejects.toThrow(advice.retry);
+		await expect(read.execute("2", { path: "mega.txt", limit: 1 })).rejects.toThrow(advice.noRoom);
+		await expect(read.execute("3", { path: "mega.txt", allowLarge: true })).rejects.toThrow(
+			/exceeds maximum allowed size \(1\.6MB\)\..*Even with allow_large/,
+		);
+		writeFileSync(
+			join(dir, "tall.txt"),
+			`${Array.from({ length: 12_000 }, (_, i) => `${i} ${"z".repeat(60)}`).join("\n")}\n`,
+		);
+		const cut = await read.execute("5", { path: "tall.txt", allowLarge: true });
+		expect(cut.details?.ccNotice).toMatch(
+			/tokens, allow_large had room for 140000 tokens this turn\)\..*Even with allow_large/,
+		);
+		const tight = createReadTool(dir, { contextRoomTokens: () => 20_000 });
+		await expect(tight.execute("4", { path: "mid.txt", limit: 1 })).rejects.toThrow(advice.noRoom);
+	});
+
+	it("leaves the file-state suffix off an edit of a file the model never read", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-suffix-"));
+		writeFileSync(join(dir, "e.txt"), "abc\n");
+		const edit = createEditTool(dir, { readState: createReadState() });
+		const first = await edit.execute("1", { path: "e.txt", edits: [{ oldText: "abc", newText: "xyz" }] });
+		const second = await edit.execute("2", {
+			path: "e.txt",
+			edits: [{ oldText: "xyz", newText: "q" }],
+			replaceAll: true,
+		});
+		expect(first.content[0]).toEqual({ type: "text", text: "The file e.txt has been updated successfully." });
+		expect(second.content[0]).toEqual({
+			type: "text",
+			text: "The file e.txt has been updated. All occurrences were successfully replaced.",
+		});
+	});
+
+	it("names a fractional numeric string for an integer field as a number", () => {
+		const result = projectToolCall({ name: "Read", arguments: { file_path: "five.txt", limit: "1.5" } });
+		expect(result.inputError).toContain("expected as `int` but provided as `number`");
+	});
+
+	it("fails an edit that creates a file when the custom operations have no mkdir", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-edit-nomkdir-"));
+		const missing = async () => {
+			throw Object.assign(new Error("missing"), { code: "ENOENT" });
+		};
+		const edit = createEditTool(dir, {
+			operations: { access: missing, readFile: missing, writeFile: async () => {} },
+		});
+		await expect(
+			edit.execute("1", { path: "new/deep.txt", edits: [{ oldText: "", newText: "made\n" }] }),
+		).rejects.toThrow(/mkdir/);
+		expect(() => readFileSync(join(dir, "new/deep.txt"))).toThrow();
+	});
+
+	it("fails a write when the custom operations have no readFile, without reading the local file", async () => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-write-noread-"));
+		writeFileSync(join(dir, "local.txt"), "local\n");
+		let written = false;
+		const write = createWriteTool(dir, {
+			operations: {
+				writeFile: async () => {
+					written = true;
+				},
+				mkdir: async () => {},
+			} as never,
+		});
+		await expect(write.execute("1", { path: "local.txt", content: "new\n" })).rejects.toThrow(/readFile/);
+		expect(written).toBe(false);
+	});
+
+	it("records a refused call under pi's name and keeps the model's name for replay", () => {
+		const disabled = projectToolCall({ name: "Bash", arguments: { command: "x" }, active: new Set(["read"]) });
+		expect(disabled.name).toBe("bash");
+		expect(disabled.modelCall?.name).toBe("Bash");
+		const wrongCase = projectToolCall({ name: "BASH", arguments: { command: "x" } });
+		expect(wrongCase.name).toBe("bash");
+		expect(wrongCase.modelCall?.name).toBe("BASH");
+	});
+
+	it("orders built-in tools before MCP tools, each by locale, with the placeholder second to last", () => {
+		const tool = (name: string) => ({ name, description: name, parameters: Type.Object({}) });
+		const declared = projectDeclarations(
+			[tool("mcp__srv__b"), tool("write"), tool("mcp__srv__A"), tool("read"), tool("grep")],
+			true,
+		);
+		expect(declared.map((entry) => entry.name)).toEqual([
+			"grep",
+			"Read",
+			"Write",
+			"mcp__srv__A",
+			"DeferredToolPlaceholder",
+			"mcp__srv__b",
+		]);
+	});
+
+	it("names the model's tools in the system prompt's tool list and tool rules", () => {
+		const history = projectMessagesForModel([
+			{
+				role: "system",
+				content: "",
+				timestamp: 0,
+				sections: {
+					preamble: "p",
+					tools: "<tools>\n- read: Read file contents\n- grep: Search\n- write: Write files\n\nMore.\n</tools>",
+					rules: "<rules>\n- Use read to examine files.\n- Use grep to search.\n- Be concise\n</rules>",
+				},
+			},
+		]);
+		expect(history[0]).toMatchObject({
+			sections: {
+				tools: "<tools>\n- Read: Read file contents\n- grep: Search\n- Write: Write files\n\nMore.\n</tools>",
+				rules: "<rules>\n- Use Read to examine files.\n- Use grep to search.\n- Be concise\n</rules>",
+			},
+		});
+	});
+});
+
+describe("streaming previews", () => {
+	it("shows a still-streaming call under pi's name and argument shape", async () => {
+		const partial = assistantCall("Read", { file_path: "a.txt", limit: 2 });
+		const source = new AssistantMessageEventStream();
+		const model = getModel("anthropic", "claude-haiku-4-5");
+		const stream = await wrapStreamFn(() => source)(model, normalizeContext({ messages: [] }), {});
+		source.push({ type: "toolcall_delta", contentIndex: 0, delta: "", partial });
+		source.end(partial);
+		const previews: unknown[] = [];
+		for await (const event of stream) if (event.type === "toolcall_delta") previews.push(event.partial.content[0]);
+		expect(previews).toEqual([expect.objectContaining({ name: "read", arguments: { path: "a.txt", limit: 2 } })]);
 	});
 });

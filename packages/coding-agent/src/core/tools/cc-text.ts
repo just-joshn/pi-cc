@@ -40,12 +40,22 @@ export const CC_TOOL_TEXT = {
 	readDirectory: (absolutePath: string) => `EISDIR: illegal operation on a directory, read '${absolutePath}'`,
 	readBinary: (extension: string) =>
 		`This tool cannot read binary files. The file appears to be a binary ${extension} file. Use a skill for this file type if one is available, or a shell command or script that can read the format.`,
-	readTooLarge: (size: string, maxSize: string) =>
-		`File content (${size}) exceeds maximum allowed size (${maxSize}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file. To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file.`,
-	readTooManyTokens: (tokens: number, maxTokens: number) =>
-		`File content (${tokens} tokens) exceeds maximum allowed tokens (${maxTokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file. To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file.`,
-	readPartialNotice: (absolutePath: string, shown: number, total: number, tokens: number) =>
-		`[Truncated: PARTIAL view — ${absolutePath}: showing lines 1-${shown} of ${total} total (${tokens} tokens, cap ${CC_READ_MAX_TOKENS}). Call Read with offset=${shown + 1} limit=${shown} for the next page, or Grep to find a specific section. To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file. Do NOT answer from this page alone if the answer may be further in the file.]`,
+	readTooLarge: (size: string, maxSize: string, advice: string) =>
+		`File content (${size}) exceeds maximum allowed size (${maxSize}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.${advice}`,
+	readTooManyTokens: (tokens: number, maxTokens: number, advice: string) =>
+		`File content (${tokens} tokens) exceeds maximum allowed tokens (${maxTokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.${advice}`,
+	/** The closing advice when the refused content would fit the context left this turn. */
+	readRetryAdvice:
+		" To read it anyway, up to what still fits in your context, call Read again with allow_large: true — only if you genuinely need all of it or the user asked for the whole file.",
+	/** The closing advice when even allow_large could not fit the content. */
+	readNoRoomAdvice:
+		" Even with allow_large, this is more than fits in the context you have left this turn (other large reads in the same turn share that room).",
+	readPartialNotice: (absolutePath: string, shown: number, total: number, size: string, advice: string) =>
+		`[Truncated: PARTIAL view — ${absolutePath}: showing lines 1-${shown} of ${total} total (${size}). Call Read with offset=${shown + 1} limit=${shown} for the next page, or Grep to find a specific section.${advice} Do NOT answer from this page alone if the answer may be further in the file.]`,
+	/** The partial notice's size note for a plain read, and for an allow_large read the room could not hold. */
+	readPartialSize: (tokens: number) => `${tokens} tokens, cap ${CC_READ_MAX_TOKENS}`,
+	readPartialSizeOverRoom: (tokens: number, room: number) =>
+		`${tokens} tokens, allow_large had room for ${room} tokens this turn`,
 	editNotRead: "File has not been read yet. Read it first before writing to it.",
 	editStale:
 		"File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.",

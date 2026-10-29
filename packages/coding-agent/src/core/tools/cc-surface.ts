@@ -209,13 +209,14 @@ export function projectDeclarations(tools: readonly Tool[], includePlaceholder: 
 			deferLoading: true,
 		});
 	}
-	// Claude Code declares its tools alphabetically and keeps the placeholder second to last.
-	const ordered = [...projected].sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
-	const placeholderIndex = ordered.findIndex((tool) => tool.name === CC_PLACEHOLDER_NAME);
-	if (placeholderIndex !== -1 && ordered.length > 1) {
-		const [placeholder] = ordered.splice(placeholderIndex, 1);
-		ordered.splice(ordered.length - 1, 0, placeholder);
-	}
+	// Claude Code sorts its built-in tools, then its MCP tools, each by locale, and splices the
+	// placeholder in second to last (analysis/readable/chunk-13f3hezx.js:3510, chunk-r5cyd28m.js:74897).
+	const byLocale = (left: Tool, right: Tool) => left.name.localeCompare(right.name);
+	const isMcp = (tool: Tool) => tool.name.startsWith("mcp__");
+	const listed = projected.filter((tool) => tool.name !== CC_PLACEHOLDER_NAME);
+	const ordered = [...listed.filter((tool) => !isMcp(tool)).sort(byLocale), ...listed.filter(isMcp).sort(byLocale)];
+	const placeholder = projected.find((tool) => tool.name === CC_PLACEHOLDER_NAME);
+	if (placeholder) ordered.splice(Math.max(ordered.length - 1, 0), 0, placeholder);
 	return ordered;
 }
 
@@ -250,7 +251,7 @@ export function projectToolCall(call: {
 	);
 	if (wrongCase) {
 		return {
-			name: call.name,
+			name: wrongCase.pi,
 			arguments: {},
 			inputError: unavailableToolText(call.name, `Tool names are case-sensitive: call ${wrongCase.name} instead.`),
 			modelCall,
@@ -260,7 +261,7 @@ export function projectToolCall(call: {
 	if (!covered) return { name: call.name, arguments: received, modelCall };
 	if (call.active && !call.active.has(covered.pi)) {
 		return {
-			name: call.name,
+			name: covered.pi,
 			arguments: {},
 			inputError: unavailableToolText(
 				call.name,
@@ -326,8 +327,11 @@ function validateInput(tool: CcTool, args: Record<string, unknown>): string[] {
 		if (declared === undefined || !(key in args) || value === undefined) continue;
 		const coerced = coerceToDeclaredType(value, declared);
 		if (coerced === undefined) {
+			// Claude Code reads a numeric string as its number before it reports the type.
+			const shown =
+				typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
 			issues.push(
-				`The parameter \`${key}\` type is expected as \`${expectedTypeName(declared, value)}\` but provided as \`${jsonType(value)}\``,
+				`The parameter \`${key}\` type is expected as \`${expectedTypeName(declared, shown)}\` but provided as \`${jsonType(shown)}\``,
 			);
 		}
 	}
@@ -431,6 +435,17 @@ export function projectMessagesForModel(messages: readonly Message[], options?: 
 	const includePlaceholder = options?.placeholder !== false;
 	const projected = messages.flatMap((message): Message[] => {
 		if (message.role === "system") {
+			const { tools, rules } = message.sections ?? {};
+			if (typeof tools === "string" || typeof rules === "string") {
+				message = {
+					...message,
+					sections: {
+						...message.sections,
+						...(typeof tools === "string" ? { tools: projectToolList(tools) } : {}),
+						...(typeof rules === "string" ? { rules: projectToolList(rules) } : {}),
+					},
+				};
+			}
 			const toolsAdded = message.toolsAdded;
 			if (toolsAdded === undefined) return [message];
 			const projected = projectDeclarations(toolsAdded, includePlaceholder);
@@ -486,6 +501,17 @@ export function sortMergedDeclarations(messages: readonly Message[], includePlac
 		}
 		const { toolsAdded: _added, toolsRemoved: _removed, ...rest } = message;
 		return rest;
+	});
+}
+
+/**
+ * The system prompt's tool list and tool rules, with each covered tool under the name the model
+ * calls it by: a `- read: ...` entry and a `- Use read ...` rule.
+ */
+function projectToolList(text: string): string {
+	return text.replace(/^- (Use )?([A-Za-z_]+)(?=[: ])/gm, (line, use: string | undefined, name: string) => {
+		const covered = ccTool(name);
+		return covered ? `- ${use ?? ""}${covered.name}` : line;
 	});
 }
 
@@ -592,14 +618,16 @@ export function projectAssistantMessageForPi(
 	return changed ? { ...message, content } : message;
 }
 
-/** Rename a still-streaming call without validating it. A partial's arguments are not the call yet. */
-function projectPartialNames(message: AssistantMessage, options?: ProjectCallOptions): AssistantMessage {
+/**
+ * Give a still-streaming call pi's name and argument shape without validating it, so a preview
+ * matches the call that runs. A partial's arguments are not the call yet.
+ */
+function projectPartialCalls(message: AssistantMessage, options?: ProjectCallOptions): AssistantMessage {
 	const content = message.content.map((block) => {
 		if (block.type !== "toolCall") return block;
-		if (options?.ownedNames?.has(block.name)) return { ...block, arguments: { ...block.arguments } };
-		const covered = ccToolByDeclaredName(block.name);
+		const covered = options?.ownedNames?.has(block.name) ? undefined : ccToolByDeclaredName(block.name);
 		if (!covered) return { ...block, arguments: { ...block.arguments } };
-		return { ...block, name: covered.pi, arguments: { ...block.arguments } };
+		return { ...block, name: covered.pi, arguments: covered.toPi({ ...block.arguments }) as JsonObject };
 	});
 	return { ...message, content };
 }
@@ -620,7 +648,7 @@ function projectStreamEvent(event: AssistantMessageEvent, options?: ProjectCallO
 			};
 		}
 		default:
-			return { ...event, partial: projectPartialNames(event.partial, options) };
+			return { ...event, partial: projectPartialCalls(event.partial, options) };
 	}
 }
 

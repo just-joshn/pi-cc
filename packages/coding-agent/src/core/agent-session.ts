@@ -3688,7 +3688,11 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
-					read: { autoResizeImages, readState: this._readState },
+					read: {
+						autoResizeImages,
+						readState: this._readState,
+						contextRoomTokens: () => this._readContextRoomTokens(),
+					},
 					edit: { readState: this._readState },
 					write: { readState: this._readState },
 				});
@@ -4302,6 +4306,17 @@ export class AgentSession {
 			cost: usageTotals.cost,
 			contextUsage: this.getContextUsage(),
 		};
+	}
+
+	/**
+	 * Claude Code's room for one turn's reads: 70% of what is left below the compaction threshold.
+	 * Unknown when the model has no context window; an unknown context size counts as empty.
+	 */
+	private _readContextRoomTokens(): number | undefined {
+		const usage = this.getContextUsage();
+		if (usage === undefined) return undefined;
+		const threshold = usage.contextWindow - this.settingsManager.getCompactionSettings(this.model).reserveTokens;
+		return Math.max(0, Math.floor((threshold - (usage.tokens ?? 0)) * 0.7));
 	}
 
 	getContextUsage(): ContextUsage | undefined {

@@ -176,14 +176,14 @@ describe("pi tool identity stays inside the process", () => {
 		expect(readFileSync(join(result.agentDir, "read-access.log"), "utf-8")).toContain("BLOCKED");
 	});
 
-	it("projects defaultTools read and grep to Read, the placeholder, and grep", async () => {
+	it("projects defaultTools read and grep to grep, the placeholder, and Read", async () => {
 		const result = await probe({
 			argv: ["-p", "go"],
 			settings: { defaultTools: ["read", "grep"] },
 			turns: [],
 		});
 		roots.push(join(result.workspace, ".."));
-		expect(result.declared.map((tool) => tool.name)).toEqual(["Read", "DeferredToolPlaceholder", "grep"]);
+		expect(result.declared.map((tool) => tool.name)).toEqual(["grep", "DeferredToolPlaceholder", "Read"]);
 		expect(result.declared.find((tool) => tool.name === "DeferredToolPlaceholder")?.defer_loading).toBe(true);
 	});
 
