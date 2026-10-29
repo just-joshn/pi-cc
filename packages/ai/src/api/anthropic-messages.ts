@@ -1215,7 +1215,12 @@ function buildParams(
 		// placeholder. The list never changes afterwards: later tools are defined by value in
 		// `tool_addition` blocks and withdrawn by `tool_removal`, so the cached prefix survives
 		// every tool change.
-		params.tools = [...convertToolDefinitions(initialTools, toolCacheControl), DEFERRED_TOOL_PLACEHOLDER];
+		// A deferred initial tool already keeps that scaffolding cached, so a second placeholder would
+		// only change the declared list.
+		const declared = convertToolDefinitions(initialTools, toolCacheControl);
+		params.tools = initialTools.some((tool) => tool.deferLoading === true)
+			? declared
+			: [...declared, DEFERRED_TOOL_PLACEHOLDER];
 	} else {
 		const tools = getCurrentTools(context.messages);
 		if (tools.length > 0) {
