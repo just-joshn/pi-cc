@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { startupEnv } from "./internal-env.ts";
 
 /** Undefined means the command failed; an empty buffer is a successful result. */
 export function runClipboardCommand(
@@ -14,6 +15,7 @@ export function runClipboardCommand(
 			stdio: ["pipe", options?.input === undefined ? "pipe" : "ignore", "ignore"],
 			detached: process.platform !== "win32",
 			windowsHide: true,
+			env: startupEnv(),
 		});
 		const chunks: Buffer[] = [];
 		let length = 0;

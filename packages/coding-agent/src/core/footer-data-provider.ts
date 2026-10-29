@@ -2,6 +2,7 @@ import { type ExecFileException, execFile, spawnSync } from "child_process";
 import { existsSync, type FSWatcher, readFileSync, type Stats, statSync, unwatchFile, watchFile } from "fs";
 import { dirname, join, resolve } from "path";
 import { closeWatcher, FS_WATCH_RETRY_DELAY_MS, watchWithErrorHandler } from "../utils/fs-watch.ts";
+import { startupEnv } from "../utils/internal-env.ts";
 
 export type GitPaths = {
 	repoDir: string;
@@ -53,6 +54,7 @@ function resolveBranchWithGitSync(repoDir: string): string | null {
 		cwd: repoDir,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
+		env: startupEnv(),
 	});
 	const branch = result.status === 0 ? result.stdout.trim() : "";
 	return branch || null;
@@ -67,6 +69,7 @@ function resolveBranchWithGitAsync(repoDir: string): Promise<string | null> {
 			{
 				cwd: repoDir,
 				encoding: "utf8",
+				env: startupEnv(),
 			},
 			(error: ExecFileException | null, stdout: string) => {
 				if (error) {

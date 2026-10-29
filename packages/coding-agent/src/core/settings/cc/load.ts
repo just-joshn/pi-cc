@@ -4,8 +4,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { SETTINGS_DEFAULTS } from "../../settings-defaults.ts";
-import type { DefaultProjectTrust } from "../../settings-manager.ts";
 import { parseFlagSettings } from "./flag-tier.ts";
 import { type CcFieldSkip, parseCcSettingsText } from "./keys.ts";
 import { mergeCcSettings } from "./merge.ts";
@@ -35,29 +33,10 @@ export interface CcSettingsLocation {
 	readonly flagSettings: string | undefined;
 }
 
-export interface CcTrustSignals {
-	/** The trust store's decision for this path, or null when it has none. */
-	readonly decision: boolean | null;
-	/** pi's `--approve` / `--no-approve`. */
-	readonly trustOverride?: boolean;
-	readonly defaultProjectTrust?: DefaultProjectTrust;
-}
-
 /**
- * R2: absence of a trust decision allows the project tiers, which is what a fresh-config print run of
- * 2.1.312 does. Only an explicit no denies them: a false entry, `--no-approve`, or
- * `defaultProjectTrust: "never"`.
+ * The trust decision is pi's, not a second rule: `readInitialProjectTrust` in `core/project-trust.ts`
+ * owns it and `openCcRunSettings` in `run.ts` applies it to the project and local tiers.
  */
-export function ccProjectTrusted(signals: CcTrustSignals): boolean {
-	if (signals.trustOverride !== undefined) {
-		return signals.trustOverride;
-	}
-	if (signals.decision !== null) {
-		return signals.decision;
-	}
-	return (signals.defaultProjectTrust ?? SETTINGS_DEFAULTS.defaultProjectTrust) !== "never";
-}
-
 export function loadCcSettings(location: CcSettingsLocation): CcLoadResult {
 	const admitted = admittedSources(location.settingSources);
 	const documents: CcSettingsDocument[] = [];

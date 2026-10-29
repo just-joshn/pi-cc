@@ -9,6 +9,7 @@ import { getAuthCredential } from "../../cli/auth-command.ts";
 import { getShareViewerUrl } from "../../config.ts";
 import type { AgentSession } from "../../core/agent-session.ts";
 import { exportSessionToJsonl } from "../../core/session-export.ts";
+import { startupEnv } from "../../utils/internal-env.ts";
 import { BorderedLoader } from "./components/bordered-loader.ts";
 import { theme } from "./theme/theme.ts";
 
@@ -76,7 +77,7 @@ export async function shareSession(context: SessionShareContext): Promise<void> 
 		}
 
 		try {
-			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
+			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8", env: startupEnv() });
 			if (authResult.status !== 0) {
 				context.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
 				return;
@@ -179,7 +180,7 @@ async function shareViaGist(tmpFile: string, context: SessionShareContext): Prom
 
 	try {
 		const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
-			proc = spawn("gh", ["gist", "create", "--public=false", tmpFile]);
+			proc = spawn("gh", ["gist", "create", "--public=false", tmpFile], { env: startupEnv() });
 			let stdout = "";
 			let stderr = "";
 			proc.stdout?.on("data", (data) => {

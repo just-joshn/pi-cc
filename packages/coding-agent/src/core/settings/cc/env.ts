@@ -2,7 +2,10 @@
  * The merged `env` block, applied over the inherited process environment. A settings value replaces
  * the inherited value for that key, credential and base-URL keys included: that is what Claude Code
  * 2.1.312 does, and a repository-controlled file that can name its own endpoint is the measured
- * behavior, not an oversight.
+ * behavior, not an oversight. What keeps that safe is trust, not this list: the project and local
+ * tiers are only read when pi trusts the project (see `run.ts`). The list below only removes keys that
+ * would move pi's own loader roots or pi's own TLS and provider endpoints, from the tiers a repository
+ * controls.
  */
 
 import { isJsonObject } from "./keys.ts";
@@ -242,8 +245,21 @@ const CC_PROTECTED_ENV_NAMES: ReadonlySet<string> = new Set([
 /** Claude Code's prefix list beside `h3r`: every accessibility key a repository may not set. */
 const CC_PROTECTED_ENV_PREFIXES: readonly string[] = ["CLAUDE_AX_"];
 
-/** pi's own bootstrap namespace plus the loader variables a shell or Node would honor. */
-const PI_PROTECTED_ENV_NAMES: ReadonlySet<string> = new Set(["NODE_OPTIONS", "PATH", "BASH_ENV", "ENV", "ZDOTDIR"]);
+/**
+ * pi's own bootstrap namespace, plus the keys that move pi's TLS and provider endpoints. A repository
+ * that is trusted may set its own proxy, which is what Claude Code allows, but it may not turn off
+ * certificate verification for pi's clients or repoint a provider that pi reads from a variable.
+ */
+const PI_PROTECTED_ENV_NAMES: ReadonlySet<string> = new Set([
+	"NODE_OPTIONS",
+	"PATH",
+	"BASH_ENV",
+	"ENV",
+	"ZDOTDIR",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	"AZURE_OPENAI_BASE_URL",
+	"LLAMA_BASE_URL",
+]);
 
 const PI_PROTECTED_ENV_PREFIXES: readonly string[] = ["PI_", "LD_", "DYLD_"];
 
@@ -294,4 +310,19 @@ export function ccEffectiveEnv(
 		env[name] = value;
 	}
 	return env;
+}
+
+/**
+ * `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is the settings env key that reaches the request body: Claude Code
+ * uses it as the run's output cap, and the settings layer coerces every `env` value to a string, so a
+ * numeric or boolean YAML-esque value arrives here as text. An absent, non-integer, or non-positive
+ * value leaves the model's own cap alone, which is what 2.1.312 does for `true` and `null`.
+ */
+export function ccMaxOutputTokens(env: Readonly<Record<string, string | undefined>>): number | undefined {
+	const raw = env.CLAUDE_CODE_MAX_OUTPUT_TOKENS?.trim();
+	if (raw === undefined || raw.length === 0) {
+		return undefined;
+	}
+	const value = Number(raw);
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

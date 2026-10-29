@@ -127,6 +127,7 @@ import { copyToClipboard, readClipboardFilePaths, readClipboardText } from "../.
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { ensurePngTranscoder } from "../../utils/image-convert.ts";
+import { startupEnv } from "../../utils/internal-env.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
@@ -1310,6 +1311,7 @@ export class InteractiveMode {
 			return new Promise((resolve) => {
 				const proc = spawn("tmux", ["show", "-gv", option], {
 					stdio: ["ignore", "pipe", "ignore"],
+					env: startupEnv(),
 				});
 				let stdout = "";
 				const timer = setTimeout(() => {
