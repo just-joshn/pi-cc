@@ -1,0 +1,52 @@
+{
+	"id": "memory/agents-md-yields-to-claude-md",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"cwd": "a",
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"AGENTS.md": "AG_ROOT\n",
+		"a/AGENTS.md": "AG_A\n",
+		"a/CLAUDE.md": "CL_A\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/a/CLAUDE\\.md (\\([^\\n]*\\)):\\n\\nCL_A\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"AG_"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"AG_"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

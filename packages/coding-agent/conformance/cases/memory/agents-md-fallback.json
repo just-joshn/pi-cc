@@ -1,0 +1,57 @@
+{
+	"id": "memory/agents-md-fallback",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"cwd": "a",
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/CLAUDE.md": "USER_A\n",
+		"AGENTS.md": "AG_ROOT @a/ag-import.md @ext.md\n",
+		"a/ag-import.md": "AG_IMPORT\n",
+		"ext.md": "EXT_SKIPPED\n",
+		".claude/AGENTS.md": "AG_DOT\n",
+		".claude/rules/r.md": "RULE_ROOT\n",
+		"a/AGENTS.md": "AG_A\n",
+		"a/.claude/rules/s.md": "RULE_A\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/config/CLAUDE\\.md \\([^\\n]*\\):\\n\\nUSER_A\\n\\nContents of [^\\n]*/workspace/.claude/rules/r\\.md (\\([^\\n]*\\)):\\n\\nRULE_ROOT\\n\\nContents of [^\\n]*/workspace/AGENTS\\.md \\1:\\n\\nAG_ROOT @a/ag-import\\.md @ext\\.md\\n\\nContents of [^\\n]*/workspace/a/ag-import\\.md \\1:\\n\\nAG_IMPORT\\n\\nContents of [^\\n]*/workspace/\\.claude/AGENTS\\.md \\1:\\n\\nAG_DOT\\n\\nContents of [^\\n]*/workspace/a/\\.claude/rules/s\\.md \\1:\\n\\nRULE_A\\n\\nContents of [^\\n]*/workspace/a/AGENTS\\.md \\1:\\n\\nAG_A\\n</system-reminder>$"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"AG_"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"EXT_SKIPPED"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

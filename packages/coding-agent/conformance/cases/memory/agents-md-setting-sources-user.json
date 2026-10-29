@@ -1,0 +1,52 @@
+{
+	"id": "memory/agents-md-setting-sources-user",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--setting-sources",
+		"user"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/CLAUDE.md": "USER_S\n",
+		"AGENTS.md": "AG_ROOT\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/config/CLAUDE\\.md \\([^\\n]*\\):\\n\\nUSER_S\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"AG_"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"AG_"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

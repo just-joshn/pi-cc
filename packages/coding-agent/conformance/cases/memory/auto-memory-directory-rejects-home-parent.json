@@ -1,0 +1,40 @@
+{
+	"id": "memory/auto-memory-directory-rejects-home-parent",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/settings.json": "{\"autoMemoryDirectory\": \"~/..\"}\n",
+		"CLAUDE.md": "PROJ\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"system": {
+						"match": [
+							"/config/projects/-[A-Za-z0-9-]*-workspace/memory/"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

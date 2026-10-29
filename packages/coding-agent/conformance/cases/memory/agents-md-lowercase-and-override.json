@@ -1,0 +1,50 @@
+{
+	"id": "memory/agents-md-lowercase-and-override",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"agents.md": "ag_lower\n",
+		"AGENTS.override.md": "OVR_X\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/AGENTS\\.md (\\([^\\n]*\\)):\\n\\nag_lower\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"OVR_X"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"OVR_X"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

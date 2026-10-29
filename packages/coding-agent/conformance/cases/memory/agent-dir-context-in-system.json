@@ -1,0 +1,54 @@
+{
+	"id": "memory/agent-dir-context-in-system",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$AGENT/CLAUDE.md": "AGENT_DIR_CL\n",
+		"CLAUDE.md": "PROJ_G\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"system": {
+						"match": [
+							"AGENT_DIR_CL"
+						],
+						"notMatch": [
+							"PROJ_G"
+						]
+					},
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md (\\([^\\n]*\\)):\\n\\nPROJ_G\\n</system-reminder>$"
+						],
+						"notMatch": [
+							"AGENT_DIR_CL"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "the pi agent directory ($PI_CODING_AGENT_DIR) is pi's own; claude does not read it"
+	}
+}

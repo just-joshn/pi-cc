@@ -1,0 +1,53 @@
+{
+	"id": "memory/rules-frontmatter-lenient",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		".claude/rules/b.md": "---\npaths: [unclosed\n---\nRB_BROKEN\n",
+		".claude/rules/c.md": "----\npaths: src/**\n----\nRC_FOURDASH\n",
+		".claude/rules/d.md": "---\r\npaths: src/**\r\n---\r\nRD_CRLF\r\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/\\.claude/rules/c\\.md (\\([^\\n]*\\)):\\n\\n----\\npaths: src/\\*\\*\\n----\\nRC_FOURDASH\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"RB_BROKEN",
+							"RD_CRLF"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"RB_BROKEN",
+							"RD_CRLF"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

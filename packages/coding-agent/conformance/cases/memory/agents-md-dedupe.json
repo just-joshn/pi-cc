@@ -1,0 +1,48 @@
+{
+	"id": "memory/agents-md-dedupe",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		".claude/rules/r.md": "SAME\n",
+		"AGENTS.md": "SAME\n",
+		".claude/AGENTS.md": "AG_DOT @imp.md\n",
+		"imp.md": "  SAME  \n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/\\.claude/rules/r\\.md (\\([^\\n]*\\)):\\n\\nSAME\\n\\nContents of [^\\n]*/workspace/\\.claude/AGENTS\\.md \\1:\\n\\nAG_DOT @imp\\.md\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"workspace/AGENTS\\.md",
+							"workspace/imp\\.md"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}
