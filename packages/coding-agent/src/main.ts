@@ -5,6 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
@@ -43,7 +44,7 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir } from "./config.ts";
+import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -55,7 +56,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
-import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
+import { findExactModelReferenceMatch, resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
@@ -67,8 +68,13 @@ import {
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
 import { SessionManager } from "./core/session-manager.ts";
+import { ccEffectiveEnv } from "./core/settings/cc/env.ts";
+import { ccProjectTrusted, loadCcSettings } from "./core/settings/cc/load.ts";
+import { withAdditionalDirectories } from "./core/settings/cc/merge.ts";
+import { formatIgnoredProjectSettings, formatSettingsFailures } from "./core/settings/cc/report.ts";
+import type { CcSettings } from "./core/settings/cc/types.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
-import { SettingsManager } from "./core/settings-manager.ts";
+import { SettingsManager, type DefaultProjectTrust } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { builtInExtensions } from "./extensions/index.ts";
@@ -82,6 +88,9 @@ import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
+
+/** R7: the three tools a `--bare` run keeps; the harness observes exactly three in the request. */
+const CC_BARE_TOOLS: readonly string[] = ["read", "edit", "bash"];
 
 /**
  * Read all content from piped stdin.
@@ -116,6 +125,71 @@ function reportDiagnostics(diagnostics: readonly AgentSessionRuntimeDiagnostic[]
 function isTruthyEnvFlag(value: string | undefined): boolean {
 	if (!value) return false;
 	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
+}
+
+function toSettingSources(value: string | undefined): string[] | undefined {
+	return value
+		?.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+}
+
+/**
+ * Loads the Claude Code settings for this run: every admitted tier, the failures reported once on
+ * stderr, the env block applied over the inherited environment, and the policy gates. A malformed file
+ * never stops the run; an operator policy that forbids it does.
+ */
+function loadCcSettingsForRun(
+	parsed: Args,
+	cwd: string,
+	trustStore: ProjectTrustStore,
+	defaultProjectTrust: DefaultProjectTrust,
+): CcSettings {
+	const loaded = loadCcSettings({
+		cwd,
+		home: homedir(),
+		env: process.env,
+		platform: process.platform,
+		version: VERSION,
+		settingSources: toSettingSources(parsed.settingSources),
+		projectTrusted: ccProjectTrusted({
+			decision: trustStore.get(cwd),
+			trustOverride: parsed.projectTrustOverride,
+			defaultProjectTrust,
+		}),
+		flagSettings: parsed.settings,
+	});
+	for (const line of [...formatIgnoredProjectSettings(loaded.ignored), ...formatSettingsFailures(loaded.failures)]) {
+		console.error(chalk.dim(line));
+	}
+	if (loaded.refusal !== undefined) {
+		console.error(chalk.red(`Error: ${loaded.refusal}`));
+		process.exit(1);
+	}
+	const effectiveEnv = ccEffectiveEnv(process.env, loaded.settings);
+	for (const [name, value] of Object.entries(effectiveEnv)) {
+		if (process.env[name] !== value) {
+			process.env[name] = value;
+		}
+	}
+	return withAdditionalDirectories(loaded.settings, parsed.addDir ?? []);
+}
+
+/** R7 drops hooks, plugins, skills, memory and LSP; R8 drops extensions, skills, prompt templates and MCP. */
+function ccResourceSuppression(parsed: Args): {
+	noExtensions: boolean;
+	noSkills: boolean;
+	noPromptTemplates: boolean;
+	noContextFiles: boolean;
+} {
+	const bare = parsed.bare === true;
+	const safeMode = parsed.safeMode === true;
+	return {
+		noExtensions: parsed.noExtensions === true || bare || safeMode,
+		noSkills: parsed.noSkills === true || bare || safeMode,
+		noPromptTemplates: parsed.noPromptTemplates === true || safeMode,
+		noContextFiles: parsed.noContextFiles === true || bare,
+	};
 }
 
 function resolveAppMode(parsed: Args, stdinIsTTY: boolean, stdoutIsTTY: boolean): AppMode {
@@ -465,6 +539,7 @@ function buildSessionOptions(
 	hasExistingSession: boolean,
 	modelRuntime: ModelRuntime,
 	settingsManager: SettingsManager,
+	ccModel: string | undefined,
 ): {
 	options: CreateAgentSessionOptions;
 	cliThinkingFromModel: boolean;
@@ -505,6 +580,19 @@ function buildSessionOptions(
 				options.thinkingLevel = resolved.thinkingLevel;
 				cliThinkingFromModel = true;
 			}
+		}
+	}
+
+	if (!options.model && ccModel !== undefined) {
+		// R5: the settings model is the session default. --model above wins; this beats the catalog default.
+		const selected = findExactModelReferenceMatch(ccModel, modelRuntime.getModels());
+		if (selected === undefined) {
+			diagnostics.push({
+				type: "warning",
+				message: `Model "${ccModel}" from Claude Code settings is not in the catalog. Using the default model.`,
+			});
+		} else {
+			options.model = selected;
 		}
 	}
 
@@ -549,13 +637,17 @@ function buildSessionOptions(
 	// (handled by caller before createAgentSession)
 
 	// Tools
-	if (parsed.noTools) {
-		options.noTools = "all";
-	} else if (parsed.noBuiltinTools) {
-		options.noTools = "builtin";
-	}
-	if (parsed.tools) {
-		options.tools = [...parsed.tools];
+	if (parsed.bare === true) {
+		options.tools = [...CC_BARE_TOOLS];
+	} else {
+		if (parsed.noTools) {
+			options.noTools = "all";
+		} else if (parsed.noBuiltinTools) {
+			options.noTools = "builtin";
+		}
+		if (parsed.tools) {
+			options.tools = [...parsed.tools];
+		}
 	}
 	if (parsed.excludeTools) {
 		options.excludeTools = [...parsed.excludeTools];
@@ -687,6 +779,18 @@ export async function main(args: string[], options?: MainOptions) {
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
 
+	// Claude Code settings load before pi's own settings manager, because their env block is applied
+	// over the inherited process environment and every later resolution reads it.
+	const trustStore = new ProjectTrustStore(agentDir);
+	const ccSettings = loadCcSettingsForRun(
+		parsed,
+		cwd,
+		trustStore,
+		bootstrapSettingsManager.getDefaultProjectTrust(),
+	);
+	const ccModel = ccSettings.model ?? ccSettings.env.ANTHROPIC_MODEL;
+	time("ccSettings");
+
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
 	time("runMigrations");
@@ -739,7 +843,6 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	time("createSessionManager");
 
-	const trustStore = new ProjectTrustStore(agentDir);
 	const sessionCwd = sessionManager.getCwd();
 	const autoTrustOnReloadCwd =
 		parsed.projectTrustOverride === undefined && !hasTrustRequiringProjectResources(sessionCwd)
@@ -806,12 +909,9 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalSkillPaths: resolvedSkillPaths,
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
-				noExtensions: parsed.noExtensions,
+				...ccResourceSuppression(parsed),
 				disabledBuiltinExtensions: parsed.noMcp ? ["mcp"] : undefined,
-				noSkills: parsed.noSkills,
-				noPromptTemplates: parsed.noPromptTemplates,
 				noThemes: parsed.noThemes,
-				noContextFiles: parsed.noContextFiles,
 				systemPrompt: parsed.systemPrompt,
 				appendSystemPrompt: parsed.appendSystemPrompt,
 				extensionFactories,
@@ -847,6 +947,7 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.buildSessionContext().messages.length > 0,
 			modelRuntime,
 			settingsManager,
+			ccModel,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
 
