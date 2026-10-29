@@ -220,7 +220,8 @@ export function projectDeclarations(tools: readonly Tool[], includePlaceholder: 
 	}
 	// Claude Code sorts its built-in tools, then its MCP tools, each by locale, and splices the
 	// placeholder in second to last (analysis/readable/chunk-13f3hezx.js:3510, chunk-r5cyd28m.js:74897).
-	const byLocale = (left: Tool, right: Tool) => left.name.localeCompare(right.name);
+	// The locale is fixed so the declared order, and with it the cache prefix, does not follow LANG.
+	const byLocale = (left: Tool, right: Tool) => left.name.localeCompare(right.name, "en");
 	const isMcp = (tool: Tool) => tool.name.startsWith("mcp__");
 	const listed = projected.filter((tool) => tool.name !== CC_PLACEHOLDER_NAME);
 	const ordered = [...listed.filter((tool) => !isMcp(tool)).sort(byLocale), ...listed.filter(isMcp).sort(byLocale)];
