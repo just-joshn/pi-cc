@@ -112,6 +112,31 @@ const HARNESS_ENV: Readonly<Record<string, (roots: Roots, port: number | null) =
 
 export const HARNESS_ENV_KEYS: readonly string[] = Object.keys(HARNESS_ENV);
 
+/**
+ * Keys the harness keeps unset: a case that set one would change which code runs, which credential is
+ * presented, or how the two sides trust and reach the network.
+ */
+export const UNSET_ENV_KEYS: readonly string[] = [
+	"NODE_OPTIONS",
+	"NODE_EXTRA_CA_CERTS",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	"DYLD_INSERT_LIBRARIES",
+	"LD_PRELOAD",
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_CUSTOM_HEADERS",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+	"CLAUDE_CODE_USE_BEDROCK",
+	"CLAUDE_CODE_USE_VERTEX",
+	"CLAUDE_CODE_USE_FOUNDRY",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"http_proxy",
+	"https_proxy",
+	"all_proxy",
+];
+
 export function baseEnv(roots: Roots, port: number | null): Record<string, string> {
 	const env: Record<string, string> = {};
 	for (const [key, resolve] of Object.entries(HARNESS_ENV)) {
