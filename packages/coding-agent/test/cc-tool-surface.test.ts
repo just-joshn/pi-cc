@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -287,6 +288,20 @@ describe("Claude Code tool surface", () => {
 		});
 		expect(result.inputError).toContain("failed due to the following issues:");
 		expect(result.inputError?.split("\n").slice(1)).toHaveLength(3);
+	});
+
+	// Lithuanian collation sorts "y" with "i", ahead of "j", so a default-locale sort reorders these.
+	it.each(["en_US.UTF-8", "lt_LT.UTF-8"])("orders declarations the same under %s", (locale) => {
+		const script = `
+			import { projectDeclarations } from ${JSON.stringify(new URL("../src/core/tools/cc-surface.ts", import.meta.url).href)};
+			const tool = (name) => ({ name, description: name, parameters: {} });
+			console.log(JSON.stringify(projectDeclarations([tool("yank"), tool("jq")], false).map((entry) => entry.name)));
+		`;
+		const output = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+			env: { ...process.env, LANG: locale, LC_ALL: locale },
+			encoding: "utf8",
+		});
+		expect(JSON.parse(output)).toEqual(["jq", "yank"]);
 	});
 
 	it("declares the placeholder second to last, with defer loading, and omits it when asked", () => {
