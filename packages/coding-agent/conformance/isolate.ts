@@ -26,7 +26,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { userInfo } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
@@ -85,7 +85,11 @@ export function createRoots(tmpRoot: string, caseId: string, side: SideName): Ro
 	return roots;
 }
 
-/** Expands the case-file placeholders. `$HOME` is the side's temp home, never the real one. */
+/**
+ * Expands the case-file placeholders. `$HOME` is the side's temp home, never the real one. `$AGENT` and
+ * `$CONFIG` are each side's own config store (`PI_CODING_AGENT_DIR`, `CLAUDE_CONFIG_DIR`), so one case can
+ * seed a credential into each side's store without naming either side.
+ */
 export function expandPlaceholders(value: string, roots: Roots): string {
 	return value
 		.split("$WORKSPACE")
@@ -150,12 +154,7 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 	return env;
 }
 
-/**
- * Writes the case's files. A bare path seeds the workspace. A `$`-rooted path seeds the directory it
- * names, and either target stays inside the side's own root. Content is expanded like argv, because a
- * seeded `settings.json` hook command needs an absolute host path that the sandboxed process cannot
- * learn from its own environment, such as `$REAL_HOME`.
- */
+/** Seeds a case's files inside its side root, expanding placeholders in paths and contents. */
 export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const target = seedTarget(roots, path);

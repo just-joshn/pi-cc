@@ -2,7 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { argvProblem, envProblem } from "./allowlist.ts";
+import { argvProblem, envProblem, unsetProblem } from "./allowlist.ts";
 import { PROBES, type ProbeName, type SideName, VIOLATION_KINDS, type ViolationKind } from "./isolate.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
@@ -24,9 +24,15 @@ export interface RequestSpec {
 	count?: number;
 	method?: string;
 	/** A `null` value asserts the header is absent. */
-	headers?: Record<string, string | null>;
+	headers?: Record<string, HeaderValueSpec>;
 	bodyEquals?: Record<string, unknown>;
 }
+
+/**
+ * A header the case asserts. A string is the whole value, `null` is absence, and an object is for a value
+ * whose exact text is not the point: a comma-joined feature list, or a credential the harness supplied.
+ */
+export type HeaderValueSpec = string | null | { present?: boolean; contains?: string[]; excludes?: string[] };
 
 export interface CompareSpec {
 	exit?: number | number[];
@@ -67,6 +73,8 @@ export interface ConformanceCase {
 	binary?: string;
 	argv: string[];
 	env: Record<string, string>;
+	/** Harness-provided keys this case removes, so it can measure what a side does with nothing seeded. */
+	unset: string[];
 	stdin: StdinSpec;
 	/**
 	 * Seeded into `workspace/`, relative paths. Content expands like argv, so a seeded settings hook can
@@ -93,6 +101,7 @@ const CASE_KEYS = [
 	"probe",
 	"argv",
 	"env",
+	"unset",
 	"stdin",
 	"files",
 	"model",
@@ -150,6 +159,9 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	const env = asStringRecord(object.env, source, "env");
 	const envIssue = envProblem(env);
 	if (envIssue !== undefined) fail(source, envIssue);
+	const unset = asOptionalStringArray(object.unset, source, "unset") ?? [];
+	const unsetIssue = unsetProblem(unset);
+	if (unsetIssue !== undefined) fail(source, unsetIssue);
 	const timeout_ms = asOptionalPositiveInteger(object.timeout_ms, source, "timeout_ms") ?? 60_000;
 	if (timeout_ms > MAX_TIMER_MS) {
 		fail(source, `timeout_ms must be at most ${MAX_TIMER_MS}: Node clamps a longer timer to 1 ms`);
@@ -160,6 +172,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		binary: probe === undefined ? undefined : PROBES[probe],
 		argv,
 		env,
+		unset,
 		stdin: asStdin(object.stdin, source),
 		files: asStringRecord(object.files, source, "files"),
 		model: model === null ? null : { turns: asTurns(model.turns, source) },
@@ -341,16 +354,33 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 }
 
 /** A name is what the case compares, so an empty one could never match a recorded header. */
-function asRequestHeaders(value: unknown, source: string, field: string): Record<string, string | null> | undefined {
+function asRequestHeaders(value: unknown, source: string, field: string): Record<string, HeaderValueSpec> | undefined {
 	if (value === undefined) return undefined;
 	const object = asObject(value, source, field);
-	const headers: Record<string, string | null> = {};
+	const headers: Record<string, HeaderValueSpec> = {};
 	for (const [name, entry] of Object.entries(object)) {
 		if (name.trim().length === 0) fail(source, `${field} has an empty header name`);
-		if (entry !== null && typeof entry !== "string") fail(source, `${field}.${name} must be a string or null`);
-		headers[name] = entry;
+		headers[name] = asHeaderValue(entry, source, `${field}.${name}`);
 	}
 	return headers;
+}
+
+const HEADER_VALUE_KEYS = ["present", "contains", "excludes"];
+
+function asHeaderValue(value: unknown, source: string, field: string): HeaderValueSpec {
+	if (value === null || typeof value === "string") return value;
+	const object = asCheckedObject(value, source, field, HEADER_VALUE_KEYS);
+	const present = asOptionalBoolean(object.present, source, `${field}.present`);
+	const contains = asOptionalStringArray(object.contains, source, `${field}.contains`);
+	const excludes = asOptionalStringArray(object.excludes, source, `${field}.excludes`);
+	if (present === undefined && contains === undefined && excludes === undefined) {
+		fail(source, `${field} must set present, contains, or excludes, or be a string or null`);
+	}
+	return {
+		...(present === undefined ? {} : { present }),
+		...(contains === undefined ? {} : { contains }),
+		...(excludes === undefined ? {} : { excludes }),
+	};
 }
 
 function asTurns(value: unknown, source: string): Turn[] {

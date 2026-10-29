@@ -208,6 +208,7 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		const command = testCase.binary === undefined ? side.command() : [testCase.binary];
 		const argv = [...command, ...testCase.argv.map((argument) => expandPlaceholders(argument, roots))];
 		const env = { ...baseEnv(roots, mock?.port ?? null) };
+		for (const key of testCase.unset) delete env[key];
 		for (const [key, value] of Object.entries(testCase.env)) env[key] = expandPlaceholders(value, roots);
 
 		const workspaceBefore = hashTree(roots.workspace);
