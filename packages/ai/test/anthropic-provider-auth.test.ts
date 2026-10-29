@@ -156,6 +156,22 @@ describe("provider environment at auth resolution", () => {
 		expect(result?.source).toBe("ANTHROPIC_AUTH_TOKEN");
 	});
 
+	it("lets workload identity federation outrank a stored credential, because it is ambient too", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedKey("stored-key"),
+			envContext({
+				ANTHROPIC_FEDERATION_RULE_ID: "fdrl_test",
+				ANTHROPIC_ORGANIZATION_ID: "org-test",
+				ANTHROPIC_IDENTITY_TOKEN_FILE: "/nonexistent/identity.jwt",
+			}),
+			{ signal },
+		);
+
+		expect(result?.source).toBe("workload identity federation");
+		expect(result?.auth.apiKey).toBeUndefined();
+	});
+
 	it("sends the bearer and the key when both env credentials are set", async () => {
 		const result = await resolveProviderAuth(
 			anthropicProvider(),
