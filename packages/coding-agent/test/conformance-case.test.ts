@@ -86,6 +86,37 @@ describe("loadCases", () => {
 		}
 	});
 
+	test("removes only the reviewed harness key", () => {
+		expect(loadOne({ ...MINIMAL_CASE, unset: ["ANTHROPIC_API_KEY"] }).unset).toEqual(["ANTHROPIC_API_KEY"]);
+		for (const key of ["PATH", "HOME", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, unset: [key] })).toThrow(
+				new RegExp(`unset names "${key}", which is not in the reviewed list`),
+			);
+		}
+	});
+
+	test("loads a request method and the header shapes a case asserts", () => {
+		const requests = [
+			{
+				pathStartsWith: "/v1/messages",
+				count: 1,
+				method: "POST",
+				headers: {
+					authorization: "Bearer token",
+					"x-api-key": null,
+					"anthropic-beta": { contains: ["oauth-2025-04-20"], excludes: ["custom-beta"] },
+				},
+			},
+		];
+		expect(loadOne({ ...MINIMAL_CASE, compare: { requests } }).compare.requests).toEqual(requests);
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { requests: [{ method: " " }] } })).toThrow(
+			/method must not be empty/,
+		);
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { requests: [{ headers: { "": "x" } }] } })).toThrow(
+			/empty header name/,
+		);
+	});
+
 	test("rejects a timeout that is not a positive integer", () => {
 		for (const value of [0, -1, 1.5]) {
 			expect(() => loadOne({ ...MINIMAL_CASE, timeout_ms: value })).toThrow(/timeout_ms must be a positive integer/);
@@ -313,6 +344,7 @@ const READ_ONLY_ARGV: [string[], string?][] = [
 	[["-p", "hello"]],
 	[["-p", "Reply with exactly PROBE_OK"]],
 	[["--output-format", "json"]],
+	[["--model", "sonnet"]],
 	[["--output-format=json"]],
 	[["--settings", "{}"]],
 	[["--setting-sources", "project"]],
@@ -343,7 +375,7 @@ const SUBTRACTED: string[][] = [
 	["--agents=probe"],
 	["--dangerously-skip-permissions"],
 	["--print"],
-	["--model", "probe"],
+	["probe"],
 	["--add-dir", "."],
 ];
 

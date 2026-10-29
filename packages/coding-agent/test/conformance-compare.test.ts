@@ -127,3 +127,46 @@ describe("compare.containment", () => {
 		]);
 	});
 });
+
+describe("compare.requests", () => {
+	const posted = {
+		index: 0,
+		path: "/v1/messages",
+		method: "POST",
+		headers: { authorization: "Bearer token", "anthropic-beta": "oauth-2025-04-20, other", "x-extra": "kept" },
+		body: { model: "claude-sonnet-5-5" },
+	};
+
+	test("passes when the method and the named headers match, and ignores the rest", () => {
+		expect(
+			checks(
+				{
+					requests: [
+						{
+							method: "POST",
+							headers: {
+								authorization: "Bearer token",
+								"x-api-key": null,
+								"anthropic-beta": { contains: ["oauth-2025-04-20"], excludes: ["custom-beta"] },
+							},
+						},
+					],
+				},
+				{ requests: [posted] },
+			),
+		).toEqual([]);
+	});
+
+	test("names a method or header that does not match", () => {
+		expect(checks({ requests: [{ method: "GET" }] }, { requests: [posted] })).toEqual(["requests.method"]);
+		expect(checks({ requests: [{ headers: { authorization: null } }] }, { requests: [posted] })).toEqual([
+			"requests.headers",
+		]);
+		expect(
+			checks(
+				{ requests: [{ headers: { "anthropic-beta": { excludes: ["oauth-2025-04-20"] } } }] },
+				{ requests: [posted] },
+			),
+		).toEqual(["requests.headers"]);
+	});
+});

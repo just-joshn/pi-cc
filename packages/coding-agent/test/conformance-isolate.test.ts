@@ -178,6 +178,20 @@ describe("scanning a side's tree", () => {
 	});
 });
 
+describe("seedFiles", () => {
+	test("lands a placeholder inside the side root and refuses one that leaves it", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-seed-")), "seed", "pi-cc");
+		tempDirs.push(roots.root);
+
+		seedFiles(roots, { "$AGENT/auth.json": '{"ok":true}', "note.txt": "workspace" });
+
+		expect(readFileSync(join(roots.agent, "auth.json"), "utf8")).toBe('{"ok":true}');
+		expect(readFileSync(join(roots.workspace, "note.txt"), "utf8")).toBe("workspace");
+		expect(() => seedFiles(roots, { "$REAL_HOME/secret": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "$AGENT/../../outside": "no" })).toThrow(/escapes the side root/);
+	});
+});
+
 describe("the profile keeps the harness artifacts out of the side's reach", () => {
 	test("denies writes to out after granting the run root", () => {
 		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-profile-")), "profile", "claude");
