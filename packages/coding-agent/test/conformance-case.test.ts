@@ -74,6 +74,26 @@ describe("loadCases", () => {
 			);
 		}
 	});
+
+	test("rejects env the harness owns", () => {
+		for (const key of [
+			"PATH",
+			"HOME",
+			"DISABLE_AUTOUPDATER",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+			"ANTHROPIC_BASE_URL",
+		]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, env: { [key]: "/tmp/elsewhere" } })).toThrow(
+				new RegExp(`env cannot replace "${key}"`),
+			);
+		}
+	});
+
+	test("keeps env a case owns", () => {
+		expect(loadOne({ ...MINIMAL_CASE, env: { PI_CONFORMANCE_PROBE: "1" } }).env).toEqual({
+			PI_CONFORMANCE_PROBE: "1",
+		});
+	});
 });
 
 describe("turn shapes", () => {
