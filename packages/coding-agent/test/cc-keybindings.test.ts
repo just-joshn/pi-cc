@@ -45,6 +45,23 @@ describe("CC keybinding file import", () => {
 		).toEqual([]);
 	});
 
+	it("rejects a malformed block on disk without applying an earlier valid block", () => {
+		const { manager, editor } = load({
+			bindings: [
+				{ context: "Chat", bindings: { enter: null, "ctrl+y": "chat:submit" } },
+				{ context: "Chat", bindings: { "ctrl+l": 4 } },
+			],
+		});
+		expect(manager.getImportDiagnostics()).toHaveLength(1);
+		expect(manager.getPromptKeys("tui.input.submit")).toEqual(["enter"]);
+		expect(manager.getPromptKeys("app.model.select")).toEqual(["ctrl+l"]);
+		const submitted: string[] = [];
+		editor.onSubmit = (text) => submitted.push(text);
+		editor.setText("draft");
+		editor.handleInput("\r");
+		expect(submitted).toEqual(["draft"]);
+	});
+
 	it("rejects mixed native and CC root fields with diagnostics", () => {
 		const mixed = { ...cc({ "ctrl+y": "chat:submit" }), "app.model.select": "ctrl+b" };
 		expect(Compile(KeybindingsSchema).Check(mixed)).toBe(false);
