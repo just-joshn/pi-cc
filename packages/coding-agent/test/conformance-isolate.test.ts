@@ -212,9 +212,11 @@ describe("seedFiles", () => {
 		const outside = mkdtempSync(join(tmpdir(), "pi-cc-seed-outside-"));
 		tempDirs.push(outside);
 		symlinkSync(outside, join(roots.workspace, "escape"));
+		symlinkSync(roots.agent, join(roots.workspace, "other-subtree"));
 		symlinkSync(join(outside, "leaf.txt"), join(roots.workspace, "leaf.txt"));
 
 		expect(() => seedFiles(roots, { "escape/parent.txt": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "other-subtree/parent.txt": "no" })).toThrow(/escapes the side root/);
 		expect(() => seedFiles(roots, { "leaf.txt": "no" })).toThrow(/escapes the side root/);
 		expect(() => readFileSync(join(outside, "parent.txt"))).toThrow();
 		expect(() => readFileSync(join(outside, "leaf.txt"))).toThrow();

@@ -37,37 +37,22 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 				};
 			}
 
-			// Claude Code sends the bearer and the key together when both variables are set, so the bearer
-			// rides along with whichever key source answers. ANTHROPIC_OAUTH_TOKEN alone does not disable a
-			// stored credential. The pinned 2.1.312 sends the stored one.
 			const authToken = await ctx.env(ANTHROPIC_AUTH_TOKEN_ENV);
 			signal.throwIfAborted();
 			const bearer = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
-			const oauthToken = await ctx.env(ANTHROPIC_OAUTH_TOKEN_ENV);
-			signal.throwIfAborted();
 			const apiKey = await ctx.env(ANTHROPIC_API_KEY_ENV);
 			signal.throwIfAborted();
-			const key = oauthToken || apiKey;
-			if (key) {
-				const source = bearer
-					? ANTHROPIC_AUTH_TOKEN_ENV
-					: oauthToken
-						? ANTHROPIC_OAUTH_TOKEN_ENV
-						: ANTHROPIC_API_KEY_ENV;
+			if (apiKey || bearer) {
 				return {
-					auth: { apiKey: key, ...(bearer ? { headers: bearer } : {}) },
-					source,
-					sourceKind: bearer || apiKey ? "environment" : "oauth-token",
+					auth: { ...(apiKey ? { apiKey } : {}), ...(bearer ? { headers: bearer } : {}) },
+					source: bearer ? ANTHROPIC_AUTH_TOKEN_ENV : ANTHROPIC_API_KEY_ENV,
+					sourceKind: "environment",
 				};
 			}
-			if (bearer) {
-				return { auth: { headers: bearer }, source: ANTHROPIC_AUTH_TOKEN_ENV, sourceKind: "environment" };
-			}
+			const oauthToken = await ctx.env(ANTHROPIC_OAUTH_TOKEN_ENV);
+			signal.throwIfAborted();
 
-			// Workload identity federation: the Anthropic SDK exchanges the identity
-			// token for a short-lived access token and refreshes it itself. Last in
-			// line so keys and ANTHROPIC_AUTH_TOKEN keep winning, as in the SDK. The
-			// ids are provider config rather than auth, so they travel in `env`.
+			// Federation beats the pi-only OAuth fallback. Its ids travel in `env` rather than auth.
 			const federation: ProviderEnv = {};
 			for (const envVar of [
 				ANTHROPIC_FEDERATION_RULE_ID_ENV,
@@ -76,7 +61,11 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 			]) {
 				const value = await ctx.env(envVar);
 				signal.throwIfAborted();
-				if (!value) return undefined;
+				if (!value) {
+					return oauthToken
+						? { auth: { apiKey: oauthToken }, source: ANTHROPIC_OAUTH_TOKEN_ENV, sourceKind: "oauth-token" }
+						: undefined;
+				}
 				federation[envVar] = value;
 			}
 			for (const envVar of [ANTHROPIC_SERVICE_ACCOUNT_ID_ENV, ANTHROPIC_WORKSPACE_ID_ENV]) {

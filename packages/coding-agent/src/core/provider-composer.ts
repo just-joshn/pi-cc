@@ -477,7 +477,10 @@ function composeApiKeyAuth(
 						: undefined;
 			} else if (rawKey !== undefined) {
 				// For an env-first provider the environment outranks a key written into models.json.
-				if (envFirst) result = await inherited?.resolve({ ctx: input.ctx, signal: input.signal });
+				if (envFirst) {
+					const ambient = await inherited?.resolve({ ctx: input.ctx, signal: input.signal });
+					if (ambient?.sourceKind === "environment") result = ambient;
+				}
 				if (!result) {
 					const env = await configContextEnv([rawKey], input.ctx);
 					const key = resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);

@@ -166,12 +166,14 @@ export function seedFiles(roots: Roots, files: Record<string, string>): void {
 	for (const [path, content] of Object.entries(files)) {
 		const expanded = expandPlaceholders(path, roots);
 		const target = isAbsolute(expanded) ? expanded : join(roots.workspace, expanded);
-		if (!SEED_SUBTREES.some((name) => isInside(roots[name], target))) {
+		const subtree = SEED_SUBTREES.find((name) => isInside(roots[name], target));
+		if (!subtree) {
 			throw new Error(`seeded path escapes the side root: ${path}`);
 		}
-		mkdirp(dirname(target));
-		// Expanded in the content too, so a case can name its own workspace inside a file it seeds (a
-		// trust record, or a settings file that has to point at the side root).
+		const parent = realpathSync(mkdirp(dirname(target)));
+		if (!isInside(roots[subtree], parent) || lstatOrNull(target)?.isSymbolicLink()) {
+			throw new Error(`seeded path escapes the side root: ${path}`);
+		}
 		writeFileSync(target, expandPlaceholders(content, roots));
 	}
 }
