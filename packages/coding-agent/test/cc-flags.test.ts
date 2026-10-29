@@ -157,9 +157,7 @@ describe("validation diagnostics", () => {
 	});
 
 	test("validates --setting-sources", () => {
-		expect(parseArgs(["--setting-sources", "user,project,local"]).diagnostics.map(render)).toEqual([
-			"Warning: --setting-sources is accepted but not implemented yet",
-		]);
+		expect(parseArgs(["--setting-sources", "user,project,local"]).diagnostics).toEqual([]);
 		expect(parseArgs(["--setting-sources", "user,bogus"]).diagnostics.map(render)).toEqual([
 			"Error: Invalid setting source: bogus. Valid options are: user, project, local",
 		]);
@@ -247,9 +245,14 @@ describe("table arity", () => {
 
 describe("accepted flags", () => {
 	test("warns once per flag that no code consumes", () => {
-		expect(parseArgs(["--bare", "--bare"]).diagnostics.map(render)).toEqual([
-			"Warning: --bare is accepted but not implemented yet",
+		expect(parseArgs(["--restricted", "--restricted"]).diagnostics.map(render)).toEqual([
+			"Warning: --restricted is accepted but not implemented yet",
 		]);
+	});
+
+	test("says nothing for the wired settings flags", () => {
+		expect(parseArgs(["--bare", "--safe-mode", "--settings", "{}"]).diagnostics).toEqual([]);
+		expect(parseArgs(["--setting-sources", "project"]).diagnostics).toEqual([]);
 	});
 
 	test("says nothing for a wired flag", () => {

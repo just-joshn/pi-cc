@@ -270,7 +270,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "bare",
 		arity: "boolean",
 		summary: "Minimal mode: no hooks, plugins, or context files",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("bare"),
 	},
 	{
@@ -614,7 +614,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "safe-mode",
 		arity: "boolean",
 		summary: "Start with all customizations disabled",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("safeMode"),
 	},
 	{
@@ -630,7 +630,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "sources",
 		summary: "Setting sources to load (user, project, local)",
-		status: "accepted",
+		status: "wired",
 		validate: validateSettingSources,
 		apply: setString("settingSources"),
 	},
@@ -639,7 +639,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "file-or-json",
 		summary: "Extra settings from a file or JSON string",
-		status: "accepted",
+		status: "wired",
 		apply: setString("settings"),
 	},
 	{
