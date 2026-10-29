@@ -100,3 +100,17 @@ These variables are read by Pi itself:
 | `HTTP_PROXY`, `HTTPS_PROXY` | Proxy outbound HTTP requests |
 
 Provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and provider-specific configuration are listed in [Providers](providers.md#use-an-api-key-from-the-environment).
+
+## Anthropic Provider Environment
+
+The Anthropic provider reads the endpoint and model variables Claude Code reads:
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_BASE_URL` | Endpoint for Anthropic Messages requests, such as a gateway or proxy |
+| `ANTHROPIC_CUSTOM_HEADERS` | Extra request headers, one `Name: value` per line |
+| `ANTHROPIC_MODEL` | Session model, preferred over the saved default and over a resumed session's model |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` | What the `opus`, `sonnet`, `haiku`, and `fable` aliases resolve to |
+| `ANTHROPIC_SMALL_FAST_MODEL` | Accepted for compatibility; it does not select the session model, `ANTHROPIC_DEFAULT_HAIKU_MODEL` does |
+
+A bare alias names the current model for that family (`opus` is `claude-opus-5-5`, `sonnet` is `claude-sonnet-5-5`, `haiku` is `claude-haiku-5-5`, `fable` is `claude-fable-5-1`), and any other value is a model id sent as written. For Anthropic, a runtime `--api-key` wins first. `ANTHROPIC_AUTH_TOKEN` supplies the bearer header, and `ANTHROPIC_API_KEY` supplies the API key header when set, even if `auth.json` or `models.json` contains a key. Without those variables, `auth.json` wins over a `models.json` key. Pi accepts `ANTHROPIC_OAUTH_TOKEN` only as a last resort after the environment, stored credentials, and `models.json` key. The pinned Claude Code binary ignores that variable. `ANTHROPIC_BASE_URL` outranks a `baseUrl` in `models.json`. A custom `anthropic-beta` header is ignored, because the request's beta list is computed from the features in use.

@@ -1,0 +1,43 @@
+{
+	"id": "provider-env/auth-token-beats-a-stored-api-key",
+	"area": "provider-env",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {
+		"ANTHROPIC_AUTH_TOKEN": "case-bearer-token"
+	},
+	"stdin": null,
+	"files": {
+		"$AGENT/auth.json": "{\"anthropic\": {\"type\": \"api_key\", \"key\": \"stored-api-key\"}}"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"headers": {
+					"authorization": "Bearer case-bearer-token",
+					"x-api-key": null
+				}
+			}
+		]
+	},
+	"skip": [],
+	"unset": [
+		"ANTHROPIC_API_KEY"
+	]
+}

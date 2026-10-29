@@ -12,7 +12,7 @@ import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { createToolNameMatcher } from "./mcp-servers.ts";
 import { convertToLlm } from "./messages.ts";
-import { findInitialModel } from "./model-resolver.ts";
+import { anthropicEnvModel, findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
@@ -86,6 +86,8 @@ export interface CreateAgentSessionOptions {
 	 * These entries take exact names. Mixing them with plain entries throws.
 	 */
 	tools?: string[];
+	/** Keep a fixed tool list on the wire without a deferred tool placeholder. */
+	fixedTools?: boolean;
 	/**
 	 * Optional denylist of tool names or patterns to disable. Applies after `tools` when both are
 	 * provided, MCP tools included.
@@ -221,8 +223,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRuntime.getModel(provider, modelId),
 	);
 
-	// If session has data, try to restore model from it
-	if (!model && hasExistingSession && sessionModel) {
+	// `ANTHROPIC_MODEL` owns the session model when the Anthropic provider can serve it, so a restored
+	// model would contradict what the operator set.
+	const envModel = anthropicEnvModel(modelRuntime);
+	if (!model && hasExistingSession && sessionModel && !envModel) {
 		const restoredModel = modelRuntime.getModel(sessionModel.provider, sessionModel.modelId);
 		if (restoredModel && modelRuntime.hasConfiguredAuth(restoredModel.provider)) {
 			model = restoredModel;
@@ -409,6 +413,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	};
 
+	const fixedTools = options.fixedTools === true;
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: "",
@@ -418,7 +423,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			messages: existingSession.messages,
 		},
 		convertToLlm: convertToLlmWithBlockImages,
-		streamFn: async (model, context, options) => {
+		streamFn: async (sessionModel, context, options) => {
+			const model = fixedTools
+				? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
+				: sessionModel;
 			const requestOptions = buildRequestOptions(options);
 			// Compaction and summaries use their own routing ids; only session requests
 			// replace the cache entry, so warming restarts from them. Keep warming while

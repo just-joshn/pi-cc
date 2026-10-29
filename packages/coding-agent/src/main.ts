@@ -56,7 +56,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
-import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
+import { anthropicCcModel, resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
 import { type AppMode, readInitialProjectTrust, resolveProjectTrusted } from "./core/project-trust.ts";
@@ -566,13 +566,20 @@ export async function createSessionManager(
 	return SessionManager.create(cwd, sessionDir, { id: parsed.sessionId });
 }
 
+/** Claude Code's session model: `ANTHROPIC_MODEL`, then the settings `model`. */
+function ccSessionModel(settingsModel: string | undefined): { name: string; source: string } | undefined {
+	const envModel = process.env.ANTHROPIC_MODEL?.trim();
+	if (envModel) return { name: envModel, source: "ANTHROPIC_MODEL" };
+	return settingsModel === undefined ? undefined : { name: settingsModel, source: "Claude Code settings" };
+}
+
 function buildSessionOptions(
 	parsed: Args,
 	scopedModels: ScopedModel[],
 	hasExistingSession: boolean,
 	modelRuntime: ModelRuntime,
 	settingsManager: SettingsManager,
-	ccModel: string | undefined,
+	ccModel: { name: string; source: string } | undefined,
 ): {
 	options: CreateAgentSessionOptions;
 	cliThinkingFromModel: boolean;
@@ -617,11 +624,16 @@ function buildSessionOptions(
 	}
 
 	if (!options.model && ccModel !== undefined) {
-		const selected = resolveCliModel({ cliModel: ccModel, modelRuntime });
+		// Claude Code sends its model to the Anthropic endpoint, so another provider's look-alike must not
+		// claim it. Without Anthropic auth the name is an ordinary pi model search.
+		const anthropicModel = anthropicCcModel(modelRuntime, ccModel.name);
+		const selected = anthropicModel
+			? { model: anthropicModel, error: undefined }
+			: resolveCliModel({ cliModel: ccModel.name, modelRuntime });
 		if (selected.model === undefined) {
 			diagnostics.push({
 				type: "warning",
-				message: `Model "${ccModel}" from Claude Code settings did not resolve (${selected.error ?? "no match"}). Using the default model.`,
+				message: `Model "${ccModel.name}" from ${ccModel.source} did not resolve (${selected.error ?? "no match"}). Using the default model.`,
 			});
 		} else {
 			options.model = selected.model;
@@ -671,6 +683,7 @@ function buildSessionOptions(
 	// Tools
 	if (parsed.bare === true) {
 		options.tools = [...CC_BARE_TOOLS];
+		options.fixedTools = true;
 	} else {
 		if (parsed.noTools) {
 			options.noTools = "all";
@@ -1016,7 +1029,7 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.buildSessionContext().messages.length > 0,
 			modelRuntime,
 			settingsManager,
-			process.env.ANTHROPIC_MODEL ?? ccAdmission.run.settings.model,
+			ccSessionModel(ccAdmission.run.settings.model),
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
 
@@ -1039,6 +1052,7 @@ export async function main(args: string[], options?: MainOptions) {
 			thinkingLevel: sessionOptions.thinkingLevel,
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
+			fixedTools: sessionOptions.fixedTools,
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,

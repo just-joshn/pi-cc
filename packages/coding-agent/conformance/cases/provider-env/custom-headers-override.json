@@ -1,0 +1,33 @@
+{
+	"id": "provider-env/custom-headers-override",
+	"area": "provider-env",
+	"argv": ["-p", "Reply with exactly PROBE_OK", "--output-format", "json"],
+	"env": {
+		"ANTHROPIC_CUSTOM_HEADERS": "anthropic-version: 2024-01-01\nx-api-key: case-custom-key"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"headers": {
+					"anthropic-version": "2024-01-01",
+					"x-api-key": "case-custom-key"
+				}
+			}
+		]
+	},
+	"skip": []
+}

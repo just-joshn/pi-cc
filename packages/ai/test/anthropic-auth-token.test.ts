@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
-import { ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV } from "../src/env-api-keys.ts";
+import { ANTHROPIC_API_KEY_ENV, ANTHROPIC_AUTH_TOKEN_ENV } from "../src/env-api-keys.ts";
 import { createModels } from "../src/models.ts";
 import { anthropicProvider } from "../src/providers/anthropic.ts";
 import type { Model } from "../src/types.ts";
@@ -70,7 +70,7 @@ const kimiCodingModel: Model<"anthropic-messages"> = {
 };
 
 describe("Anthropic auth token env", () => {
-	it("resolves ANTHROPIC_AUTH_TOKEN as a bearer Authorization header", async () => {
+	it("sends ANTHROPIC_AUTH_TOKEN as a bearer alongside the key, as Claude Code does", async () => {
 		const provider = anthropicProvider();
 		const auth = await provider.auth.apiKey?.resolve({
 			ctx: {
@@ -86,12 +86,30 @@ describe("Anthropic auth token env", () => {
 		});
 
 		expect(auth).toEqual({
-			auth: { headers: { Authorization: "Bearer auth-token" } },
+			auth: { apiKey: "api-key", headers: { Authorization: "Bearer auth-token" } },
 			source: ANTHROPIC_AUTH_TOKEN_ENV,
+			sourceKind: "environment",
 		});
 	});
 
-	it("preserves ANTHROPIC_OAUTH_TOKEN as OAuth-shaped API auth", async () => {
+	it("sends ANTHROPIC_AUTH_TOKEN alone as a bearer when no key variable is set", async () => {
+		const provider = anthropicProvider();
+		const auth = await provider.auth.apiKey?.resolve({
+			ctx: {
+				env: async (name) => ({ ANTHROPIC_AUTH_TOKEN: "auth-token" })[name],
+				fileExists: async () => false,
+			},
+			signal: neverAbortedSignal,
+		});
+
+		expect(auth).toEqual({
+			auth: { headers: { Authorization: "Bearer auth-token" } },
+			source: ANTHROPIC_AUTH_TOKEN_ENV,
+			sourceKind: "environment",
+		});
+	});
+
+	it("prefers ANTHROPIC_API_KEY to ANTHROPIC_OAUTH_TOKEN", async () => {
 		const provider = anthropicProvider();
 		const auth = await provider.auth.apiKey?.resolve({
 			ctx: {
@@ -106,8 +124,9 @@ describe("Anthropic auth token env", () => {
 		});
 
 		expect(auth).toEqual({
-			auth: { apiKey: "oauth-token" },
-			source: ANTHROPIC_OAUTH_TOKEN_ENV,
+			auth: { apiKey: "api-key" },
+			source: ANTHROPIC_API_KEY_ENV,
+			sourceKind: "environment",
 		});
 	});
 

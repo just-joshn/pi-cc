@@ -178,6 +178,62 @@ describe("scanning a side's tree", () => {
 	});
 });
 
+describe("seedFiles", () => {
+	test("lands a placeholder inside the side root and refuses one that leaves it", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-seed-")), "seed", "pi-cc");
+		tempDirs.push(roots.root);
+
+		seedFiles(roots, { "$AGENT/auth.json": '{"ok":true}', "note.txt": "workspace" });
+
+		expect(readFileSync(join(roots.agent, "auth.json"), "utf8")).toBe('{"ok":true}');
+		expect(readFileSync(join(roots.workspace, "note.txt"), "utf8")).toBe("workspace");
+		expect(() => seedFiles(roots, { "$REAL_HOME/secret": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "$AGENT/../../outside": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "../zz": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "$WORKSPACE/../out/requests.jsonl": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "$FIXTURES/zz": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "/tmp/zz-abs": "no" })).toThrow(/escapes the side root/);
+
+		seedFiles(roots, {
+			"$CONFIG/.credentials.json": "config",
+			"$HOME/.profile": "home",
+			"$WORKSPACE/kept.txt": "workspace",
+		});
+		expect(readFileSync(join(roots.config, ".credentials.json"), "utf8")).toBe("config");
+		expect(readFileSync(join(roots.home, ".profile"), "utf8")).toBe("home");
+		expect(readFileSync(join(roots.workspace, "kept.txt"), "utf8")).toBe("workspace");
+		expect(() => readFileSync(join(roots.root, "zz"), "utf8")).toThrow();
+		expect(() => readFileSync(join(roots.out, "requests.jsonl"), "utf8")).toThrow();
+	});
+
+	test("refuses a seeded path whose parent or leaf is a symlink outside an allowed subtree", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-seed-")), "links", "pi-cc");
+		tempDirs.push(roots.root);
+		const outside = mkdtempSync(join(tmpdir(), "pi-cc-seed-outside-"));
+		tempDirs.push(outside);
+		symlinkSync(outside, join(roots.workspace, "escape"));
+		symlinkSync(roots.agent, join(roots.workspace, "other-subtree"));
+		symlinkSync(join(outside, "leaf.txt"), join(roots.workspace, "leaf.txt"));
+
+		expect(() => seedFiles(roots, { "escape/parent.txt": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "other-subtree/parent.txt": "no" })).toThrow(/escapes the side root/);
+		expect(() => seedFiles(roots, { "leaf.txt": "no" })).toThrow(/escapes the side root/);
+		expect(() => readFileSync(join(outside, "parent.txt"))).toThrow();
+		expect(() => readFileSync(join(outside, "leaf.txt"))).toThrow();
+	});
+
+	test("creates no directory through a link it refuses", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-seed-")), "mkdir", "pi-cc");
+		tempDirs.push(roots.root);
+		const outside = mkdtempSync(join(tmpdir(), "pi-cc-seed-outside-"));
+		tempDirs.push(outside);
+		symlinkSync(outside, join(roots.workspace, "escape"));
+
+		expect(() => seedFiles(roots, { "escape/deep/file.txt": "no" })).toThrow(/escapes the side root/);
+		expect(existsSync(join(outside, "deep"))).toBe(false);
+	});
+});
+
 describe("the profile keeps the harness artifacts out of the side's reach", () => {
 	test("denies writes to out after granting the run root", () => {
 		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-profile-")), "profile", "claude");
@@ -259,17 +315,17 @@ describe("seeding a case's files", () => {
 
 	test("a root path that escapes the side root is refused", () => {
 		const { roots } = seedRoot();
-		expect(() => seedFiles(roots, { "$HOME/../../escape.json": "{}" })).toThrow(/escapes the case root/);
+		expect(() => seedFiles(roots, { "$HOME/../../escape.json": "{}" })).toThrow(/escapes the side root/);
 	});
 
 	test("the real home is refused", () => {
 		const { roots } = seedRoot();
-		expect(() => seedFiles(roots, { "$REAL_HOME/escape.json": "{}" })).toThrow(/escapes the case root/);
+		expect(() => seedFiles(roots, { "$REAL_HOME/escape.json": "{}" })).toThrow(/escapes the side root/);
 	});
 
 	test("a workspace path that escapes the workspace is refused", () => {
 		const { roots } = seedRoot();
-		expect(() => seedFiles(roots, { "../escape.json": "{}" })).toThrow(/escapes workspace/);
+		expect(() => seedFiles(roots, { "../escape.json": "{}" })).toThrow(/escapes the side root/);
 	});
 
 	test("expands the config placeholder in argv as well", () => {

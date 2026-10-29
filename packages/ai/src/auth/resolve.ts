@@ -1,5 +1,6 @@
 import type { ProviderEnv } from "../types.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
+import { providerHeadersToRecord } from "../utils/headers.ts";
 import { ModelsError } from "../utils/models-error.ts";
 
 export { ModelsError, type ModelsErrorCode } from "../utils/models-error.ts";
@@ -52,7 +53,33 @@ async function resolveProviderAuthWithSignal(
 ): Promise<AuthResult | undefined> {
 	signal.throwIfAborted();
 	const requestAuthContext = overrides?.env ? overlayEnvAuthContext(authContext, overrides.env) : authContext;
+	const ladder = await resolveCredentialAuth(provider, credentials, requestAuthContext, overrides, signal);
+	const environment = await provider.auth.environment?.(requestAuthContext);
+	if (!environment) return ladder;
 
+	// Order matters. The ladder's own header wins here, so a custom `authorization` cannot displace the
+	// `ANTHROPIC_AUTH_TOKEN` bearer; a custom `x-api-key` still wins on the wire, because `auth.headers`
+	// merges after the key-derived header in the transport. A base URL the ladder resolved is per
+	// credential, so it outranks the ambient one; with nothing resolved, the ambient one is all there is.
+	const headers = providerHeadersToRecord(environment.headers, ladder?.auth.headers);
+	const baseUrl = ladder?.auth.baseUrl ?? environment.baseUrl;
+	if (!ladder) {
+		if (!environment.authenticated) return undefined;
+		return {
+			auth: { ...(baseUrl ? { baseUrl } : {}), ...(headers ? { headers } : {}) },
+			source: "environment",
+		};
+	}
+	return { ...ladder, auth: { ...ladder.auth, ...(baseUrl ? { baseUrl } : {}), ...(headers ? { headers } : {}) } };
+}
+
+async function resolveCredentialAuth(
+	provider: { id: string; auth: ProviderAuth },
+	credentials: CredentialStore,
+	requestAuthContext: AuthContext,
+	overrides: AuthResolutionOverrides | undefined,
+	signal: AbortSignal,
+): Promise<AuthResult | undefined> {
 	if (overrides?.apiKey !== undefined && provider.auth.apiKey) {
 		return resolveApiKey(
 			requestAuthContext,
@@ -66,6 +93,17 @@ async function resolveProviderAuthWithSignal(
 			signal,
 		);
 	}
+
+	// An env-first provider reads an environment credential before the stored one. A models.json key and
+	// an ANTHROPIC_OAUTH_TOKEN are not that kind: both come back from this call, and neither may beat
+	// auth.json. The kind is the signal. The display label is not.
+	const apiKey = provider.auth.apiKey;
+	const ambient =
+		provider.auth.environmentFirst && apiKey
+			? await resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal)
+			: undefined;
+	const configured = ambient && !isEnvironmentCredential(ambient) ? ambient : undefined;
+	if (ambient && !configured) return ambient;
 
 	const stored = await readCredential(credentials, provider.id, signal);
 	if (stored) {
@@ -86,10 +124,15 @@ async function resolveProviderAuthWithSignal(
 		return undefined;
 	}
 
+	if (configured) return configured;
+
 	// Ambient (env vars, AWS profiles, ADC files).
-	return provider.auth.apiKey
-		? resolveApiKey(requestAuthContext, provider.auth.apiKey, provider.id, undefined, signal)
-		: undefined;
+	if (provider.auth.environmentFirst) return undefined;
+	return apiKey ? resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal) : undefined;
+}
+
+function isEnvironmentCredential(result: AuthResult): boolean {
+	return result.sourceKind === "environment";
 }
 
 function overlayEnvAuthContext(base: AuthContext, env: ProviderEnv): AuthContext {

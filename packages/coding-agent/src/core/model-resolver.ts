@@ -13,6 +13,7 @@ import {
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
+import { ccModelAlias, hasModelEnvironment, isModelAlias, parseAnthropicModelEnv } from "./anthropic-model-env.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
@@ -461,6 +462,8 @@ export function resolveCliModel(options: {
 		return { model: undefined, warning: undefined, error: undefined };
 	}
 
+	const modelEnvironment = parseAnthropicModelEnv(process.env);
+
 	// Important: use *all* models here, not just models with pre-configured auth.
 	// This allows "--api-key" to be used for first-time setup.
 	const models = [...modelRuntime.getModels()];
@@ -483,8 +486,17 @@ export function resolveCliModel(options: {
 		};
 	}
 
+	const aliasApplies = hasModelEnvironment(modelEnvironment) && (provider === undefined || provider === "anthropic");
+
 	const result = resolveModelReference(
-		{ text: cliModel, provider, thinkingSuffix: "strict", fuzzy: true },
+		{
+			// A bare `haiku` and friends are Claude Code aliases once its model variables are in play, and an
+			// alias names a model on the Anthropic provider rather than a model to search every provider for.
+			text: aliasApplies ? ccModelAlias(cliModel, modelEnvironment) : cliModel,
+			provider: provider ?? (aliasApplies && isModelAlias(cliModel) ? "anthropic" : undefined),
+			thinkingSuffix: "strict",
+			fuzzy: true,
+		},
 		models,
 		// An inline key goes to whichever provider is selected, so stored credentials must not choose it
 		inlineApiKey ? () => false : (providerId) => modelRuntime.hasConfiguredAuth(providerId),
@@ -540,10 +552,37 @@ export interface InitialModelResult {
 }
 
 /**
+ * The Anthropic model a Claude Code model name selects. An id the catalog does not carry becomes a
+ * custom model on the Anthropic provider, because Claude Code sends the name as written.
+ */
+export function anthropicCcModel(
+	modelRuntime: ModelRuntime,
+	name: string,
+	env: Record<string, string | undefined> = process.env,
+): Model<Api> | undefined {
+	if (!modelRuntime.hasConfiguredAuth("anthropic")) return undefined;
+	const modelId = ccModelAlias(name.trim(), parseAnthropicModelEnv(env));
+	const known = modelRuntime.getModel("anthropic", modelId);
+	if (known) return known;
+	const [first, ...rest] = modelRuntime.getModels("anthropic");
+	return first === undefined ? undefined : buildFallbackModel([first, ...rest], modelId);
+}
+
+/** The model `ANTHROPIC_MODEL` selects. */
+export function anthropicEnvModel(
+	modelRuntime: ModelRuntime,
+	env: Record<string, string | undefined> = process.env,
+): Model<Api> | undefined {
+	const requested = parseAnthropicModelEnv(env).model;
+	return requested === undefined ? undefined : anthropicCcModel(modelRuntime, requested, env);
+}
+
+/**
  * Find the initial model to use based on priority:
  * 1. First model from scoped models (if not continuing/resuming)
- * 2. Saved default from settings
- * 3. First available model with valid API key
+ * 2. `ANTHROPIC_MODEL` for the Anthropic provider
+ * 3. Saved default from settings
+ * 4. First available model with valid API key
  */
 export async function findInitialModel(options: {
 	scopedModels: ScopedModel[];
@@ -553,6 +592,8 @@ export async function findInitialModel(options: {
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>;
 	modelRuntime: ModelRuntime;
+	/** Defaults to `process.env`. */
+	env?: Record<string, string | undefined>;
 }): Promise<InitialModelResult> {
 	const {
 		scopedModels,
@@ -562,6 +603,7 @@ export async function findInitialModel(options: {
 		defaultThinkingLevel,
 		modelThinkingLevels,
 		modelRuntime,
+		env,
 	} = options;
 
 	let model: Model<Api> | undefined;
@@ -578,7 +620,18 @@ export async function findInitialModel(options: {
 		};
 	}
 
-	// 2. Try saved default from settings if auth is configured.
+	// 2. `ANTHROPIC_MODEL` names the session model, ahead of the saved default.
+	const requestedModel = anthropicEnvModel(modelRuntime, env ?? process.env);
+	if (requestedModel) {
+		const perModel = modelThinkingLevels?.[`${requestedModel.provider}/${requestedModel.id}`];
+		return {
+			model: requestedModel,
+			thinkingLevel: perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			fallbackMessage: undefined,
+		};
+	}
+
+	// 3. Try saved default from settings if auth is configured.
 	if (defaultProvider && defaultModelId) {
 		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
 		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
@@ -593,7 +646,7 @@ export async function findInitialModel(options: {
 		}
 	}
 
-	// 3. Try first available model with valid API key
+	// 4. Try first available model with valid API key
 	const availableModels = [...modelRuntime.getAvailableSnapshot()];
 
 	if (availableModels.length > 0) {
@@ -610,7 +663,7 @@ export async function findInitialModel(options: {
 		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
 	}
 
-	// 4. No model found
+	// 5. No model found
 	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
 }
 

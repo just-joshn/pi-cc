@@ -18,6 +18,7 @@ import {
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
 	type Provider,
+	type ProviderAuth,
 	type ProviderClassifier,
 	type ProviderHeaders,
 	type ProviderImages,
@@ -432,6 +433,8 @@ function composeApiKeyAuth(
 	if (!inherited && rawKey === undefined && oauth) return undefined;
 	const rawHeaders = configuredHeaders(config, extension);
 	const authHeader = extension?.authHeader ?? config?.authHeader ?? false;
+	// An env-first provider reads the environment before a key written into models.json.
+	const envFirst = base?.auth.environmentFirst === true;
 	return {
 		name: inherited?.name ?? "API key",
 		login:
@@ -465,14 +468,27 @@ function composeApiKeyAuth(
 				result = inherited
 					? await inherited.resolve(input)
 					: input.credential.key
-						? { auth: { apiKey: input.credential.key }, env: input.credential.env, source: "stored credential" }
+						? {
+								auth: { apiKey: input.credential.key },
+								env: input.credential.env,
+								source: "stored credential",
+								sourceKind: "stored",
+							}
 						: undefined;
 			} else if (rawKey !== undefined) {
-				const env = await configContextEnv([rawKey], input.ctx);
-				const key = resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);
-				result = inherited
-					? await inherited.resolve({ ...input, credential: { type: "api_key", key } })
-					: { auth: { apiKey: key }, source: "configured API key" };
+				// For an env-first provider the environment outranks a key written into models.json.
+				if (envFirst) {
+					const ambient = await inherited?.resolve({ ctx: input.ctx, signal: input.signal });
+					if (ambient?.sourceKind === "environment") result = ambient;
+				}
+				if (!result) {
+					const env = await configContextEnv([rawKey], input.ctx);
+					const key = resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);
+					const resolved = inherited
+						? await inherited.resolve({ ...input, credential: { type: "api_key", key } })
+						: { auth: { apiKey: key }, source: "configured API key" };
+					result = resolved && { ...resolved, sourceKind: "configured" };
+				}
 			} else {
 				result = await inherited?.resolve(input);
 			}
@@ -612,7 +628,20 @@ export function composeModelProvider(
 		name: extension?.name ?? config?.name ?? base?.name ?? extension?.oauth?.name ?? providerId,
 		baseUrl: extension?.baseUrl ?? config?.baseUrl ?? base?.baseUrl,
 		headers: base?.headers,
-		auth: { ...(apiKey ? { apiKey } : {}), ...(oauth ? { oauth } : {}) },
+		auth: {
+			...(apiKey ? { apiKey } : {}),
+			...(oauth ? { oauth } : {}),
+			...(base?.auth.environment
+				? {
+						environment: composeProviderEnvironment(
+							base.auth.environment,
+							extension?.baseUrl ?? config?.baseUrl,
+							base.auth.environmentFirst === true,
+						),
+					}
+				: {}),
+			...(base?.auth.environmentFirst ? { environmentFirst: true } : {}),
+		},
 		getModels: () => getAllModels().filter((model) => isModelType(model, "chat")),
 		getAllModels,
 		refreshModels:
@@ -685,6 +714,24 @@ export function composeModelProvider(
 	}
 
 	return provider;
+}
+
+/**
+ * A `baseUrl` in models.json or in an extension is a decision about which endpoint serves the provider, so
+ * the ambient one must not displace it. Everything else the environment contributes still applies. A
+ * provider whose environment outranks persisted config is the exception: there the environment owns the
+ * endpoint too, because `ANTHROPIC_BASE_URL` is how Claude Code is pointed at a gateway.
+ */
+function composeProviderEnvironment(
+	environment: NonNullable<ProviderAuth["environment"]>,
+	configuredBaseUrl: string | undefined,
+	environmentFirst: boolean,
+): NonNullable<ProviderAuth["environment"]> {
+	if (environmentFirst || configuredBaseUrl === undefined) return environment;
+	return async (context) => {
+		const values = await environment(context);
+		return values === undefined ? undefined : { ...values, baseUrl: undefined };
+	};
 }
 
 export function resolveConfiguredModelHeaders(

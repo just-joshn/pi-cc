@@ -1,4 +1,16 @@
-import type { CompareSpec, ContainmentSpec, FileSpec, StdoutSpec } from "./case.ts";
+/**
+ * The per-case comparison: exit code, stdout, stderr, workspace writes, and recorded requests.
+ *
+ * `method` and every `headers` entry in a request spec must hold for every request the spec matched. A spec
+ * that names either and matches nothing fails, as `bodyEquals` does, so a side that sends no request cannot
+ * pass. Only the names the case names are compared, which keeps a side's unmodelled headers from failing the
+ * case. Recorded header names arrive lowercased
+ * from node's http server, and a repeated header arrives as an array joined with ", ". A value the case only
+ * partly knows (a comma-joined feature list) is compared by membership.
+ */
+
+import type { IncomingHttpHeaders } from "node:http";
+import type { CompareSpec, ContainmentSpec, FileSpec, HeaderValueSpec, StdoutSpec } from "./case.ts";
 import type { Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
@@ -237,6 +249,28 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				actual: `${matched.length} requests (${matched.map((record) => record.path).join(", ") || "none"})`,
 			});
 		}
+		const headerEntries = Object.entries(request.headers ?? {});
+		if (matched.length === 0) {
+			if (request.method !== undefined) {
+				diffs.push({ check: "requests.method", expected: request.method, actual: "no matching request" });
+			}
+			if (headerEntries.length > 0) {
+				diffs.push({
+					check: "requests.headers",
+					expected: JSON.stringify(request.headers),
+					actual: "no matching request",
+				});
+			}
+		} else {
+			for (const record of matched) {
+				if (request.method !== undefined && record.method !== request.method) {
+					diffs.push({ check: "requests.method", expected: request.method, actual: record.method });
+				}
+				for (const [name, expected] of headerEntries) {
+					diffs.push(...headerDiffs(name, expected, recordedHeader(record.headers, name)));
+				}
+			}
+		}
 		if (request.bodyEquals !== undefined) {
 			const hit = matched.find((record) => matchesSubset(record.body, request.bodyEquals));
 			if (hit === undefined) {
@@ -248,6 +282,37 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 			}
 		}
 	}
+}
+
+function recordedHeader(headers: IncomingHttpHeaders, name: string): string | undefined {
+	const value = headers[name.toLowerCase()];
+	return Array.isArray(value) ? value.join(", ") : value;
+}
+
+function headerDiffs(name: string, expected: HeaderValueSpec, actual: string | undefined): Diff[] {
+	const check = "requests.headers";
+	const found = actual === undefined ? "(absent)" : `${name}: ${actual}`;
+	if (expected === null) {
+		return actual === undefined ? [] : [{ check, expected: `${name}: (absent)`, actual: found }];
+	}
+	if (typeof expected === "string") {
+		return actual === expected ? [] : [{ check, expected: `${name}: ${expected}`, actual: found }];
+	}
+	const diffs: Diff[] = [];
+	if (expected.present !== undefined && (actual !== undefined) !== expected.present) {
+		diffs.push({ check, expected: `${name}: ${expected.present ? "present" : "absent"}`, actual: found });
+	}
+	for (const member of expected.contains ?? []) {
+		if (actual === undefined || !actual.includes(member)) {
+			diffs.push({ check, expected: `${name} contains ${member}`, actual: found });
+		}
+	}
+	for (const member of expected.excludes ?? []) {
+		if (actual?.includes(member)) {
+			diffs.push({ check, expected: `${name} excludes ${member}`, actual: found });
+		}
+	}
+	return diffs;
 }
 
 function parseHelpNames(text: string): { flags: Set<string>; commands: Set<string> } {

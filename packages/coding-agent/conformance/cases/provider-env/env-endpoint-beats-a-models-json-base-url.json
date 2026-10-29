@@ -1,0 +1,39 @@
+{
+	"id": "provider-env/env-endpoint-beats-a-models-json-base-url",
+	"area": "provider-env",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/models.json": "{\"providers\": {\"anthropic\": {\"baseUrl\": \"https://api.anthropic.com\"}}}"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"headers": {
+					"x-api-key": {
+						"present": true
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

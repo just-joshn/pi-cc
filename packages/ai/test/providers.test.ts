@@ -284,7 +284,7 @@ describe("builtin providers", () => {
 		}
 	});
 
-	it("resolves Anthropic bearer auth from env with auth token precedence", async () => {
+	it("sends the Anthropic bearer and the key together, as Claude Code does", async () => {
 		const models = createModels({
 			authContext: fakeAuthContext({
 				ANTHROPIC_AUTH_TOKEN: "auth-token",
@@ -295,20 +295,21 @@ describe("builtin providers", () => {
 		models.setProvider(anthropicProvider());
 
 		expect(await models.getAuth("anthropic")).toEqual({
-			auth: { headers: { Authorization: "Bearer auth-token" } },
+			auth: { apiKey: "api-key", headers: { Authorization: "Bearer auth-token" } },
 			source: "ANTHROPIC_AUTH_TOKEN",
+			sourceKind: "environment",
 		});
 	});
 
-	it("preserves Anthropic OAuth token precedence over the API key", async () => {
+	it("uses the Anthropic API key ahead of the OAuth token", async () => {
 		const models = createModels({
 			authContext: fakeAuthContext({ ANTHROPIC_API_KEY: "key", ANTHROPIC_OAUTH_TOKEN: "oauth-token" }),
 		});
 		models.setProvider(anthropicProvider());
 
 		const result = await models.getAuth("anthropic");
-		expect(result?.auth.apiKey).toBe("oauth-token");
-		expect(result?.source).toBe("ANTHROPIC_OAUTH_TOKEN");
+		expect(result?.auth.apiKey).toBe("key");
+		expect(result?.source).toBe("ANTHROPIC_API_KEY");
 	});
 
 	it("runs provider-owned Bedrock bearer token and AWS profile login flows", async () => {

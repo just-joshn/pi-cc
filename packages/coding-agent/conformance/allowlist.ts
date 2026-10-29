@@ -58,13 +58,13 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--verbose",
 		"--session-id",
 		"--permission-mode",
+		// model selection, which both sides share and which PR #6's cases pin
+		"--model",
 		// settings sources, which PR #5's cases read from the case's own roots
 		"--settings",
 		"--setting-sources",
 		"--bare",
 		"--safe-mode",
-		// PR #5's model case. PR #6 adds the same flag; keep one entry.
-		"--model",
 		// a token that exists to be rejected, so a case can pin the unknown-flag error
 		"--no-such-flag-probe",
 	],
@@ -78,6 +78,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"abc",
 		"json",
 		"stream-json",
+		// a value of `--model` in PR #6's family-alias case
+		"sonnet",
 		// a value of `--setting-sources` in PR #5's case
 		"project",
 		// the model id PR #5's `--model` case writes
@@ -98,12 +100,13 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
 /**
  * The environment keys a case may set. The harness sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`
  * for every case that starts the mock model server and a case cannot replace them, so the keys left are
- * these. All eight are model-name selectors or request decoration: none of them switches provider,
- * redirects the endpoint, or loads code, which is what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and
- * `BUN_OPTIONS` would do and why they stay refused.
+ * these. The credential and header keys decorate the request the mock already receives. The model keys
+ * only select a name. None of them switches provider, redirects the endpoint, or loads code, which is
+ * what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and `BUN_OPTIONS` would do and why they stay refused.
  */
 const CASE_ENV_KEYS: readonly string[] = [
 	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_CUSTOM_HEADERS",
 	"ANTHROPIC_MODEL",
 	// PR #6 (`cc/provider-env`) resolves these five to a model name per alias.
@@ -113,6 +116,15 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
 ];
+
+/**
+ * Harness keys a case may remove. The gate otherwise forbids changing a harness-owned key, because those
+ * keys are what keep the run inside the harness's control. `ANTHROPIC_API_KEY` is the exception a stored
+ * or header credential needs: the harness sets it so every model case reaches the mock, and removing it
+ * is how a case measures a side that has only `ANTHROPIC_AUTH_TOKEN` or a header. The mock URL stays
+ * harness-owned (`ANTHROPIC_BASE_URL` is not in this list), so the request still cannot leave the sandbox.
+ */
+const UNSET_ENV_KEYS: readonly string[] = ["ANTHROPIC_API_KEY"];
 
 const BARE_WORD = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
@@ -138,6 +150,15 @@ export function envProblem(env: Record<string, string>): string | undefined {
 		if (HARNESS_ENV_KEYS.includes(key)) return `env cannot replace "${key}" because the harness sets it`;
 		if (CASE_ENV_KEYS.includes(key)) continue;
 		return `env key "${key}" is not in the reviewed allowlist, so add it to CASE_ENV_KEYS in conformance/allowlist.ts after review`;
+	}
+	return undefined;
+}
+
+/** What a case may not remove, or undefined. Only the reviewed list, never an arbitrary harness key. */
+export function unsetProblem(unset: readonly string[]): string | undefined {
+	for (const key of unset) {
+		if (UNSET_ENV_KEYS.includes(key)) continue;
+		return `unset names "${key}", which is not in the reviewed list, so add it to UNSET_ENV_KEYS in conformance/allowlist.ts after review`;
 	}
 	return undefined;
 }

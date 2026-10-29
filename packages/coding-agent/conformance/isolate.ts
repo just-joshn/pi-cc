@@ -26,7 +26,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { userInfo } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
@@ -85,7 +85,11 @@ export function createRoots(tmpRoot: string, caseId: string, side: SideName): Ro
 	return roots;
 }
 
-/** Expands the case-file placeholders. `$HOME` is the side's temp home, never the real one. */
+/**
+ * Expands the case-file placeholders. `$HOME` is the side's temp home, never the real one. `$AGENT` and
+ * `$CONFIG` are each side's own config store (`PI_CODING_AGENT_DIR`, `CLAUDE_CONFIG_DIR`), so one case can
+ * seed a credential into each side's store without naming either side.
+ */
 export function expandPlaceholders(value: string, roots: Roots): string {
 	return value
 		.split("$WORKSPACE")
@@ -150,36 +154,30 @@ export function baseEnv(roots: Roots, port: number | null): Record<string, strin
 	return env;
 }
 
-/**
- * Writes the case's files. A bare path seeds the workspace. A `$`-rooted path seeds the directory it
- * names, and either target stays inside the side's own root. Content is expanded like argv, because a
- * seeded `settings.json` hook command needs an absolute host path that the sandboxed process cannot
- * learn from its own environment, such as `$REAL_HOME`.
- */
-export function seedFiles(roots: Roots, files: Record<string, string>): void {
-	for (const [path, content] of Object.entries(files)) {
-		const target = seedTarget(roots, path);
-		mkdirp(dirname(target));
-		// Expanded in the content too, so a case can name its own workspace inside a file it seeds (a
-		// trust record, or a settings file that has to point at the side root).
-		writeFileSync(target, expandPlaceholders(content, roots));
-	}
+const SEED_SUBTREES = ["workspace", "agent", "config", "home", "tmp"] as const;
+
+function isInside(root: string, target: string): boolean {
+	const rel = relative(root, target);
+	return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-/**
- * A bare path seeds the workspace. A `$`-rooted path seeds the directory it names, so a case can write
- * the user settings file or a home-directory file the side reads before the workspace exists. Either
- * way the target stays inside the side's own root.
- */
-function seedTarget(roots: Roots, path: string): string {
-	if (!path.startsWith("$")) {
-		const target = join(roots.workspace, path);
-		if (relative(roots.workspace, target).startsWith("..")) throw new Error(`seeded path escapes workspace: ${path}`);
-		return target;
+/** A seeded path must land in a side-owned tree. */
+export function seedFiles(roots: Roots, files: Record<string, string>): void {
+	for (const [path, content] of Object.entries(files)) {
+		const expanded = expandPlaceholders(path, roots);
+		const target = isAbsolute(expanded) ? expanded : join(roots.workspace, expanded);
+		const subtree = SEED_SUBTREES.find((name) => isInside(roots[name], target));
+		if (!subtree) {
+			throw new Error(`seeded path escapes the side root: ${path}`);
+		}
+		let existing = dirname(target);
+		while (lstatOrNull(existing) === null) existing = dirname(existing);
+		if (!isInside(roots[subtree], realpathSync(existing)) || lstatOrNull(target)?.isSymbolicLink()) {
+			throw new Error(`seeded path escapes the side root: ${path}`);
+		}
+		mkdirp(dirname(target));
+		writeFileSync(target, expandPlaceholders(content, roots));
 	}
-	const target = expandPlaceholders(path, roots);
-	if (relative(roots.root, target).startsWith("..")) throw new Error(`seeded path escapes the case root: ${path}`);
-	return target;
 }
 
 /** Every violation the harness can report against a side. Case data names one of these. */

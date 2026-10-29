@@ -15,6 +15,7 @@ import {
 import { createProvider, type Provider } from "../models.ts";
 import type { ProviderEnv } from "../types.ts";
 import { ANTHROPIC_MODELS } from "./anthropic.models.ts";
+import { readAnthropicEnvironment } from "./anthropic-env.ts";
 
 function anthropicApiKeyAuth(): ApiKeyAuth {
 	return {
@@ -28,28 +29,30 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 		resolve: async ({ ctx, credential, signal }) => {
 			signal.throwIfAborted();
 			if (credential?.key) {
-				return { auth: { apiKey: credential.key }, env: credential.env, source: "stored credential" };
+				return {
+					auth: { apiKey: credential.key },
+					env: credential.env,
+					source: "stored credential",
+					sourceKind: "stored",
+				};
 			}
 
 			const authToken = await ctx.env(ANTHROPIC_AUTH_TOKEN_ENV);
 			signal.throwIfAborted();
-			if (authToken) {
+			const bearer = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
+			const apiKey = await ctx.env(ANTHROPIC_API_KEY_ENV);
+			signal.throwIfAborted();
+			if (apiKey || bearer) {
 				return {
-					auth: { headers: { Authorization: `Bearer ${authToken}` } },
-					source: ANTHROPIC_AUTH_TOKEN_ENV,
+					auth: { ...(apiKey ? { apiKey } : {}), ...(bearer ? { headers: bearer } : {}) },
+					source: bearer ? ANTHROPIC_AUTH_TOKEN_ENV : ANTHROPIC_API_KEY_ENV,
+					sourceKind: "environment",
 				};
 			}
+			const oauthToken = await ctx.env(ANTHROPIC_OAUTH_TOKEN_ENV);
+			signal.throwIfAborted();
 
-			for (const envVar of [ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV]) {
-				const apiKey = await ctx.env(envVar);
-				signal.throwIfAborted();
-				if (apiKey) return { auth: { apiKey }, source: envVar };
-			}
-
-			// Workload identity federation: the Anthropic SDK exchanges the identity
-			// token for a short-lived access token and refreshes it itself. Last in
-			// line so keys and ANTHROPIC_AUTH_TOKEN keep winning, as in the SDK. The
-			// ids are provider config rather than auth, so they travel in `env`.
+			// Federation beats the pi-only OAuth fallback. Its ids travel in `env` rather than auth.
 			const federation: ProviderEnv = {};
 			for (const envVar of [
 				ANTHROPIC_FEDERATION_RULE_ID_ENV,
@@ -58,7 +61,11 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 			]) {
 				const value = await ctx.env(envVar);
 				signal.throwIfAborted();
-				if (!value) return undefined;
+				if (!value) {
+					return oauthToken
+						? { auth: { apiKey: oauthToken }, source: ANTHROPIC_OAUTH_TOKEN_ENV, sourceKind: "oauth-token" }
+						: undefined;
+				}
 				federation[envVar] = value;
 			}
 			for (const envVar of [ANTHROPIC_SERVICE_ACCOUNT_ID_ENV, ANTHROPIC_WORKSPACE_ID_ENV]) {
@@ -66,7 +73,12 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 				signal.throwIfAborted();
 				if (value) federation[envVar] = value;
 			}
-			return { auth: {}, env: federation, source: "workload identity federation" };
+			return {
+				auth: {},
+				env: federation,
+				source: "workload identity federation",
+				sourceKind: "environment",
+			};
 		},
 	};
 }
@@ -83,6 +95,9 @@ export function anthropicProvider(): Provider<"anthropic-messages"> {
 				isSubscription: true,
 				load: loadAnthropicOAuth,
 			}),
+			environment: readAnthropicEnvironment,
+			// An auth token or an API key disables a stored credential. ANTHROPIC_OAUTH_TOKEN does not.
+			environmentFirst: true,
 		},
 		models: Object.values(ANTHROPIC_MODELS),
 		api: anthropicMessagesApi(),

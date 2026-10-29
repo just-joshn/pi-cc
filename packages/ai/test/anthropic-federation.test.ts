@@ -95,6 +95,7 @@ describe("Anthropic workload identity federation", () => {
 			auth: {},
 			env: federationEnv,
 			source: "workload identity federation",
+			sourceKind: "environment",
 		});
 	});
 
@@ -114,6 +115,7 @@ describe("Anthropic workload identity federation", () => {
 			auth: {},
 			env: partial,
 			source: "workload identity federation",
+			sourceKind: "environment",
 		});
 
 		const { requests, fetch } = federationFetch();
@@ -132,10 +134,12 @@ describe("Anthropic workload identity federation", () => {
 		expect(await resolveWithEnv({ ...federationEnv, ANTHROPIC_API_KEY: "api-key" })).toEqual({
 			auth: { apiKey: "api-key" },
 			source: "ANTHROPIC_API_KEY",
+			sourceKind: "environment",
 		});
 		expect(await resolveWithEnv({ ...federationEnv, ANTHROPIC_AUTH_TOKEN: "auth-token" })).toEqual({
 			auth: { headers: { Authorization: "Bearer auth-token" } },
 			source: "ANTHROPIC_AUTH_TOKEN",
+			sourceKind: "environment",
 		});
 	});
 

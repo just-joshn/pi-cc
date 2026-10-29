@@ -559,8 +559,10 @@ export class ModelRuntime implements Models {
 		providerOrModel: string | AnyModel,
 		overrides: ModelRuntimeAuthOverrides = {},
 	): Promise<AuthResult | undefined> {
-		if (typeof providerOrModel === "string") return this.models.getAuth(providerOrModel, overrides);
-		const resolution = await this.models.getAuth(providerOrModel, overrides);
+		const providerId = typeof providerOrModel === "string" ? providerOrModel : providerOrModel.provider;
+		const resolvedOverrides = await this.withRuntimeApiKey(providerId, overrides);
+		if (typeof providerOrModel === "string") return this.models.getAuth(providerOrModel, resolvedOverrides);
+		const resolution = await this.models.getAuth(providerOrModel, resolvedOverrides);
 		if (!resolution) return undefined;
 		const configuredHeaders = resolveConfiguredModelHeaders(
 			providerOrModel,
@@ -575,6 +577,17 @@ export class ModelRuntime implements Models {
 				headers: mergeHeaders(resolution.auth.headers, configuredHeaders),
 			},
 		};
+	}
+
+	/** `--api-key` lives in the runtime overlay. It outranks env and models.json, so it is passed as the override. */
+	private async withRuntimeApiKey(
+		providerId: string,
+		overrides: ModelRuntimeAuthOverrides,
+	): Promise<ModelRuntimeAuthOverrides> {
+		if (overrides.apiKey !== undefined || !this.credentials.hasRuntimeApiKey(providerId)) return overrides;
+		const credential = await this.credentials.read(providerId);
+		if (credential?.type !== "api_key" || credential.key === undefined) return overrides;
+		return { ...overrides, apiKey: credential.key };
 	}
 
 	private enqueueCredentialOperation<T>(providerId: string, signal: AbortSignal, task: () => Promise<T>): Promise<T> {

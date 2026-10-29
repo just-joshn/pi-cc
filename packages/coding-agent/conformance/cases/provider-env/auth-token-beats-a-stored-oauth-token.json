@@ -1,0 +1,43 @@
+{
+	"id": "provider-env/auth-token-beats-a-stored-oauth-token",
+	"area": "provider-env",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {
+		"ANTHROPIC_AUTH_TOKEN": "case-bearer-token"
+	},
+	"unset": [
+		"ANTHROPIC_API_KEY"
+	],
+	"stdin": null,
+	"files": {
+		"$AGENT/auth.json": "{\"anthropic\": {\"type\": \"oauth\", \"access\": \"sk-ant-oat01-fixture-access\", \"refresh\": \"sk-ant-ort01-fixture-refresh\", \"expires\": 4102444800000}}",
+		"$CONFIG/.credentials.json": "{\"claudeAiOauth\": {\"accessToken\": \"sk-ant-oat01-fixture-access\", \"refreshToken\": \"sk-ant-ort01-fixture-refresh\", \"expiresAt\": 4102444800000, \"scopes\": [\"user:inference\"], \"subscriptionType\": \"max\"}}"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"headers": {
+					"authorization": "Bearer case-bearer-token"
+				}
+			}
+		]
+	},
+	"skip": []
+}
