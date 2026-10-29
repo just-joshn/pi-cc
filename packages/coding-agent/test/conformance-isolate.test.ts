@@ -2,10 +2,12 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	closeSync,
+	existsSync,
 	ftruncateSync,
 	mkdirSync,
 	mkdtempSync,
 	openSync,
+	readFileSync,
 	renameSync,
 	rmSync,
 	symlinkSync,
@@ -14,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
-import { baseEnv, createRoots, findPresentPaths, hashTree, renderProfile } from "../conformance/isolate.ts";
+import { baseEnv, createRoots, expandPlaceholders, findPresentPaths, hashTree, renderProfile, seedFiles } from "../conformance/isolate.ts";
 
 const darwin = process.platform === "darwin";
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
@@ -211,5 +213,59 @@ describe("what a side can plant without crashing the scan", () => {
 		expect(scan.entries.get("huge.bin")).toBe("unreadable:too-large");
 		expect(scan.violations).toEqual([{ kind: "unreadable", path: "huge.bin" }]);
 		expect(scan.text.size).toBe(0);
+	});
+});
+
+// A case writes the user settings file and a home-directory file, so `files` keys may name a root
+// instead of the workspace. Either way the target stays inside the side's own root.
+describe("seeding a case's files", () => {
+	const seedRoot = (): { tmpRoot: string; roots: ReturnType<typeof createRoots> } => {
+		const tmpRoot = mkdtempSync(join(tmpdir(), "pi-cc-seed-"));
+		tempDirs.push(tmpRoot);
+		return { tmpRoot, roots: createRoots(tmpRoot, "seed", "claude") };
+	};
+
+	test("a bare path seeds the workspace", () => {
+		const { roots } = seedRoot();
+		seedFiles(roots, { ".claude/settings.json": "{}\n" });
+		expect(readFileSync(join(roots.workspace, ".claude", "settings.json"), "utf8")).toBe("{}\n");
+	});
+
+	test("$CONFIG seeds the side's config directory", () => {
+		const { roots } = seedRoot();
+		seedFiles(roots, { "$CONFIG/settings.json": '{"model":"claude-haiku-4-5"}\n' });
+		expect(readFileSync(join(roots.config, "settings.json"), "utf8")).toContain("claude-haiku-4-5");
+	});
+
+	test("$WORKSPACE, $TMP and $HOME name their own roots", () => {
+		const { roots } = seedRoot();
+		seedFiles(roots, {
+			"$WORKSPACE/workspace.txt": "w",
+			"$TMP/tmp.txt": "t",
+			"$HOME/home.txt": "h",
+		});
+		expect(existsSync(join(roots.workspace, "workspace.txt"))).toBe(true);
+		expect(existsSync(join(roots.tmp, "tmp.txt"))).toBe(true);
+		expect(existsSync(join(roots.home, "home.txt"))).toBe(true);
+	});
+
+	test("a root path that escapes the side root is refused", () => {
+		const { roots } = seedRoot();
+		expect(() => seedFiles(roots, { "$HOME/../../escape.json": "{}" })).toThrow(/escapes the case root/);
+	});
+
+	test("the real home is refused", () => {
+		const { roots } = seedRoot();
+		expect(() => seedFiles(roots, { "$REAL_HOME/escape.json": "{}" })).toThrow(/escapes the case root/);
+	});
+
+	test("a workspace path that escapes the workspace is refused", () => {
+		const { roots } = seedRoot();
+		expect(() => seedFiles(roots, { "../escape.json": "{}" })).toThrow(/escapes workspace/);
+	});
+
+	test("expands the config placeholder in argv as well", () => {
+		const { roots } = seedRoot();
+		expect(expandPlaceholders("$CONFIG/settings.json", roots)).toBe(join(roots.config, "settings.json"));
 	});
 });
