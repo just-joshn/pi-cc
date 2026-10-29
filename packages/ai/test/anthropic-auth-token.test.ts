@@ -70,7 +70,7 @@ const kimiCodingModel: Model<"anthropic-messages"> = {
 };
 
 describe("Anthropic auth token env", () => {
-	it("resolves ANTHROPIC_AUTH_TOKEN as a bearer Authorization header", async () => {
+	it("sends ANTHROPIC_AUTH_TOKEN as a bearer alongside the key, as Claude Code does", async () => {
 		const provider = anthropicProvider();
 		const auth = await provider.auth.apiKey?.resolve({
 			ctx: {
@@ -80,6 +80,22 @@ describe("Anthropic auth token env", () => {
 						ANTHROPIC_OAUTH_TOKEN: "oauth-token",
 						ANTHROPIC_API_KEY: "api-key",
 					})[name],
+				fileExists: async () => false,
+			},
+			signal: neverAbortedSignal,
+		});
+
+		expect(auth).toEqual({
+			auth: { apiKey: "oauth-token", headers: { Authorization: "Bearer auth-token" } },
+			source: ANTHROPIC_AUTH_TOKEN_ENV,
+		});
+	});
+
+	it("sends ANTHROPIC_AUTH_TOKEN alone as a bearer when no key variable is set", async () => {
+		const provider = anthropicProvider();
+		const auth = await provider.auth.apiKey?.resolve({
+			ctx: {
+				env: async (name) => ({ ANTHROPIC_AUTH_TOKEN: "auth-token" })[name],
 				fileExists: async () => false,
 			},
 			signal: neverAbortedSignal,

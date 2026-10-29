@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 import { resolveProviderAuth } from "../src/auth/resolve.ts";
-import type { AuthContext } from "../src/auth/types.ts";
+import type { ApiKeyCredential, AuthContext, AuthOperationOptions, CredentialStore } from "../src/auth/types.ts";
 import { createModels } from "../src/models.ts";
 import { anthropicProvider } from "../src/providers/anthropic.ts";
 import type { Model } from "../src/types.ts";
@@ -18,6 +18,17 @@ function envContext(env: Record<string, string | undefined>): AuthContext {
 async function storedKey(key: string): Promise<InMemoryCredentialStore> {
 	const store = new InMemoryCredentialStore();
 	await store.modify("anthropic", async () => ({ type: "api_key", key }));
+	return store;
+}
+
+async function storedSubscription(access: string): Promise<InMemoryCredentialStore> {
+	const store = new InMemoryCredentialStore();
+	await store.modify("anthropic", async () => ({
+		type: "oauth",
+		access,
+		refresh: "refresh-token",
+		expires: Date.now() + 3_600_000,
+	}));
 	return store;
 }
 
@@ -95,6 +106,134 @@ describe("provider environment at auth resolution", () => {
 		expect(result).toEqual({ auth: { headers: { "x-api-key": "header-key" } }, source: "environment" });
 	});
 
+	it("keeps the environment endpoint when custom headers are the only credential", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			new InMemoryCredentialStore(),
+			envContext({ ...GATEWAY_ENV, ANTHROPIC_CUSTOM_HEADERS: "x-api-key: header-key" }),
+			{ signal },
+		);
+
+		expect(result).toEqual({
+			auth: { baseUrl: "https://gateway.example", headers: { "x-api-key": "header-key" } },
+			source: "environment",
+		});
+	});
+
+	it("reads an env bearer before a stored subscription", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedSubscription("sk-ant-oat01-stored"),
+			envContext({ ANTHROPIC_AUTH_TOKEN: "env-bearer" }),
+			{ signal },
+		);
+
+		expect(result?.auth).toEqual({ headers: { Authorization: "Bearer env-bearer" } });
+		expect(result?.source).toBe("ANTHROPIC_AUTH_TOKEN");
+	});
+
+	it("reads an env key before a stored subscription", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedSubscription("sk-ant-oat01-stored"),
+			envContext({ ANTHROPIC_API_KEY: "env-key" }),
+			{ signal },
+		);
+
+		expect(result?.auth).toEqual({ apiKey: "env-key" });
+		expect(result?.source).toBe("ANTHROPIC_API_KEY");
+	});
+
+	it("reads an env bearer before a stored api key", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedKey("stored-key"),
+			envContext({ ANTHROPIC_AUTH_TOKEN: "env-bearer" }),
+			{ signal },
+		);
+
+		expect(result?.auth).toEqual({ headers: { Authorization: "Bearer env-bearer" } });
+		expect(result?.source).toBe("ANTHROPIC_AUTH_TOKEN");
+	});
+
+	it("sends the bearer and the key when both env credentials are set", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			new InMemoryCredentialStore(),
+			envContext({ ANTHROPIC_AUTH_TOKEN: "env-bearer", ANTHROPIC_API_KEY: "env-key" }),
+			{ signal },
+		);
+
+		expect(result?.auth).toEqual({ apiKey: "env-key", headers: { Authorization: "Bearer env-bearer" } });
+	});
+
+	it("keeps an explicit --api-key above the environment", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			new InMemoryCredentialStore(),
+			envContext({ ANTHROPIC_AUTH_TOKEN: "env-bearer", ANTHROPIC_API_KEY: "env-key" }),
+			{ apiKey: "override-key", signal },
+		);
+
+		expect(result?.auth).toEqual({ apiKey: "override-key" });
+	});
+
+	it("never reads a stored credential when the environment answers", async () => {
+		const inner = await storedSubscription("sk-ant-oat01-stored");
+		let reads = 0;
+		const counted = {
+			read: async (providerId: string, options?: AuthOperationOptions) => {
+				reads += 1;
+				return inner.read(providerId, options);
+			},
+			list: inner.list.bind(inner),
+			modify: inner.modify.bind(inner),
+			delete: inner.delete.bind(inner),
+		} satisfies CredentialStore;
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			counted,
+			envContext({ ANTHROPIC_AUTH_TOKEN: "env-bearer" }),
+			{ signal },
+		);
+
+		expect(result?.auth).toEqual({ headers: { Authorization: "Bearer env-bearer" } });
+		expect(reads).toBe(0);
+	});
+
+	it("leaves a stored subscription in charge when the environment names no credential", async () => {
+		const result = await resolveProviderAuth(
+			anthropicProvider(),
+			await storedSubscription("sk-ant-oat01-stored"),
+			envContext({}),
+			{ signal },
+		);
+
+		expect(result?.auth).toEqual({ apiKey: "sk-ant-oat01-stored" });
+		expect(result?.source).toBe("OAuth");
+	});
+
+	it("leaves another provider's stored credential in charge, which is the default order", async () => {
+		const other = {
+			id: "other",
+			auth: {
+				apiKey: {
+					name: "Other API key",
+					resolve: async ({ ctx, credential }: { ctx: AuthContext; credential?: ApiKeyCredential }) => {
+						if (credential?.key) return { auth: { apiKey: credential.key }, source: "stored credential" };
+						const key = await ctx.env("OTHER_API_KEY");
+						return key ? { auth: { apiKey: key }, source: "OTHER_API_KEY" } : undefined;
+					},
+				},
+			},
+		};
+		const store = new InMemoryCredentialStore();
+		await store.modify("other", async () => ({ type: "api_key", key: "stored-key" }));
+		const result = await resolveProviderAuth(other, store, envContext({ OTHER_API_KEY: "env-key" }), { signal });
+
+		expect(result?.auth).toEqual({ apiKey: "stored-key" });
+	});
+
 	it("stays unconfigured for custom headers that carry no request auth", async () => {
 		const result = await resolveProviderAuth(
 			anthropicProvider(),
@@ -152,6 +291,23 @@ describe("custom headers on the wire", () => {
 		await models.streamSimple(anthropicModel, transcript, { fetch: recorder.fetch }).result();
 
 		expect(recorder.requests).toHaveLength(1);
+		expect(recorder.requests[0].headers.get("x-api-key")).toBe("header-key");
+	});
+
+	it("sends a header credential to the environment endpoint", async () => {
+		const recorder = recordFetch(() => sseResponse());
+		const models = createModels({
+			authContext: envContext({
+				ANTHROPIC_BASE_URL: "https://gateway.example",
+				ANTHROPIC_CUSTOM_HEADERS: "x-api-key: header-key",
+			}),
+		});
+		models.setProvider(anthropicProvider());
+
+		await models.streamSimple(anthropicModel, transcript, { fetch: recorder.fetch }).result();
+
+		expect(recorder.requests).toHaveLength(1);
+		expect(recorder.requests[0].url.origin).toBe("https://gateway.example");
 		expect(recorder.requests[0].headers.get("x-api-key")).toBe("header-key");
 	});
 

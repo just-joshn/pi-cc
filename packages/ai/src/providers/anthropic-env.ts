@@ -5,6 +5,11 @@
  * and value are trimmed, a line with no colon or an empty name is skipped, and a later spelling of a
  * repeated name replaces an earlier one. It never throws: a name `fetch` rejects has to fail at request
  * time, as it does today, rather than turning a bad header into an auth failure.
+ *
+ * `anthropic-beta` is not environment's to set. Claude Code builds that value from the features it has
+ * enabled and its own per-request headers override whatever `ANTHROPIC_CUSTOM_HEADERS` supplied, so a
+ * custom list here would silently drop the `oauth-2025-04-20` a subscription token needs.
+ * `ANTHROPIC_BETAS` is the supported way to add a beta.
  */
 
 import type { AuthContext, AuthEnvironment } from "../auth/types.ts";
@@ -29,13 +34,22 @@ export function parseCustomHeaders(text: string | undefined): Record<string, str
 
 export async function readAnthropicEnvironment(context: AuthContext): Promise<AuthEnvironment | undefined> {
 	const baseUrl = (await context.env(BASE_URL_ENV))?.trim() || undefined;
-	const headers = parseCustomHeaders(await context.env(CUSTOM_HEADERS_ENV));
+	const headers = withoutClientOwnedHeaders(parseCustomHeaders(await context.env(CUSTOM_HEADERS_ENV)));
 	if (baseUrl === undefined && headers === undefined) return undefined;
 	return {
 		...(baseUrl === undefined ? {} : { baseUrl }),
 		...(headers === undefined ? {} : { headers }),
 		...(headers !== undefined && hasRequestAuth(headers) ? { authenticated: true } : {}),
 	};
+}
+
+/** Names the client computes per request, so a value here could only replace one of them with a wrong one. */
+const CLIENT_OWNED_HEADERS: readonly string[] = ["anthropic-beta"];
+
+function withoutClientOwnedHeaders(headers: Record<string, string> | undefined) {
+	if (headers === undefined) return undefined;
+	const kept = Object.entries(headers).filter(([name]) => !CLIENT_OWNED_HEADERS.includes(name.toLowerCase()));
+	return kept.length === 0 ? undefined : Object.fromEntries(kept);
 }
 
 /** A custom `authorization` or `x-api-key` is itself the request credential, so the provider is configured. */

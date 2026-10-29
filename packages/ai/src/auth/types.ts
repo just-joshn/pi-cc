@@ -268,4 +268,11 @@ export interface ProviderAuth {
 	oauth?: OAuthAuth;
 	/** Ambient endpoint/header values, merged into whatever the credential ladder resolved. */
 	environment?: (context: AuthContext) => Promise<AuthEnvironment | undefined>;
+	/**
+	 * Read the ambient credential before any persisted one, and never let a persisted endpoint or key win.
+	 * Claude Code works this way for the Anthropic provider: an `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`
+	 * disables a stored subscription, and `ANTHROPIC_BASE_URL` outranks a configured endpoint. An explicit
+	 * `--api-key` still wins, because it is the operator's answer for this run.
+	 */
+	environmentFirst?: boolean;
 }

@@ -32,20 +32,24 @@ function anthropicApiKeyAuth(): ApiKeyAuth {
 				return { auth: { apiKey: credential.key }, env: credential.env, source: "stored credential" };
 			}
 
+			// Claude Code sends the bearer and the key together when both variables are set, so the bearer
+			// rides along with whichever key source answers. `ANTHROPIC_AUTH_TOKEN` is the higher of the two,
+			// so it is the source reported.
 			const authToken = await ctx.env(ANTHROPIC_AUTH_TOKEN_ENV);
 			signal.throwIfAborted();
-			if (authToken) {
-				return {
-					auth: { headers: { Authorization: `Bearer ${authToken}` } },
-					source: ANTHROPIC_AUTH_TOKEN_ENV,
-				};
-			}
+			const bearer = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
 
 			for (const envVar of [ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV]) {
 				const apiKey = await ctx.env(envVar);
 				signal.throwIfAborted();
-				if (apiKey) return { auth: { apiKey }, source: envVar };
+				if (apiKey) {
+					return {
+						auth: { apiKey, ...(bearer ? { headers: bearer } : {}) },
+						source: bearer ? ANTHROPIC_AUTH_TOKEN_ENV : envVar,
+					};
+				}
 			}
+			if (bearer) return { auth: { headers: bearer }, source: ANTHROPIC_AUTH_TOKEN_ENV };
 
 			// Workload identity federation: the Anthropic SDK exchanges the identity
 			// token for a short-lived access token and refreshes it itself. Last in
@@ -85,6 +89,9 @@ export function anthropicProvider(): Provider<"anthropic-messages"> {
 				load: loadAnthropicOAuth,
 			}),
 			environment: readAnthropicEnvironment,
+			// Claude Code's provider env is a complete answer on its own: any env token or key disables the
+			// stored subscription, and the env endpoint outranks a configured one.
+			environmentFirst: true,
 		},
 		models: Object.values(ANTHROPIC_MODELS),
 		api: anthropicMessagesApi(),

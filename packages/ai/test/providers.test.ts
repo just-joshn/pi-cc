@@ -284,7 +284,7 @@ describe("builtin providers", () => {
 		}
 	});
 
-	it("resolves Anthropic bearer auth from env with auth token precedence", async () => {
+	it("sends the Anthropic bearer and the key together, as Claude Code does", async () => {
 		const models = createModels({
 			authContext: fakeAuthContext({
 				ANTHROPIC_AUTH_TOKEN: "auth-token",
@@ -295,7 +295,7 @@ describe("builtin providers", () => {
 		models.setProvider(anthropicProvider());
 
 		expect(await models.getAuth("anthropic")).toEqual({
-			auth: { headers: { Authorization: "Bearer auth-token" } },
+			auth: { apiKey: "oauth-token", headers: { Authorization: "Bearer auth-token" } },
 			source: "ANTHROPIC_AUTH_TOKEN",
 		});
 	});

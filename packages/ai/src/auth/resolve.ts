@@ -60,10 +60,16 @@ async function resolveProviderAuthWithSignal(
 	// Order matters. The ladder's own header wins here, so a custom `authorization` cannot displace the
 	// `ANTHROPIC_AUTH_TOKEN` bearer; a custom `x-api-key` still wins on the wire, because `auth.headers`
 	// merges after the key-derived header in the transport. A base URL the ladder resolved is per
-	// credential, so it outranks the ambient one.
+	// credential, so it outranks the ambient one; with nothing resolved, the ambient one is all there is.
 	const headers = providerHeadersToRecord(environment.headers, ladder?.auth.headers);
 	const baseUrl = ladder?.auth.baseUrl ?? environment.baseUrl;
-	if (!ladder) return environment.authenticated ? { auth: { headers }, source: "environment" } : undefined;
+	if (!ladder) {
+		if (!environment.authenticated) return undefined;
+		return {
+			auth: { ...(baseUrl ? { baseUrl } : {}), ...(headers ? { headers } : {}) },
+			source: "environment",
+		};
+	}
 	return { ...ladder, auth: { ...ladder.auth, ...(baseUrl ? { baseUrl } : {}), ...(headers ? { headers } : {}) } };
 }
 
@@ -88,6 +94,15 @@ async function resolveCredentialAuth(
 		);
 	}
 
+	// An env-first provider reads the ambient credential before the stored one, so an env token disables a
+	// stored subscription instead of being shadowed by it.
+	const apiKey = provider.auth.apiKey;
+	const ambient =
+		provider.auth.environmentFirst && apiKey
+			? await resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal)
+			: undefined;
+	if (ambient) return ambient;
+
 	const stored = await readCredential(credentials, provider.id, signal);
 	if (stored) {
 		if (stored.type === "oauth" && provider.auth.oauth) {
@@ -108,9 +123,8 @@ async function resolveCredentialAuth(
 	}
 
 	// Ambient (env vars, AWS profiles, ADC files).
-	return provider.auth.apiKey
-		? resolveApiKey(requestAuthContext, provider.auth.apiKey, provider.id, undefined, signal)
-		: undefined;
+	if (provider.auth.environmentFirst) return undefined;
+	return apiKey ? resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal) : undefined;
 }
 
 function overlayEnvAuthContext(base: AuthContext, env: ProviderEnv): AuthContext {

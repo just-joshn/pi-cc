@@ -37,6 +37,10 @@ describe("parseCustomHeaders", () => {
 		expect(parseCustomHeaders("X-Dup: first\nx-dup: second")).toEqual({ "x-dup": "second" });
 	});
 
+	it("keeps an anthropic-beta line in the parse, which is only how Claude Code reads the text", () => {
+		expect(parseCustomHeaders("anthropic-beta: custom")).toEqual({ "anthropic-beta": "custom" });
+	});
+
 	it("is undefined when nothing parses and when the text is absent", () => {
 		expect(parseCustomHeaders("no-colon")).toBeUndefined();
 		expect(parseCustomHeaders(undefined)).toBeUndefined();
@@ -77,5 +81,14 @@ describe("readAnthropicEnvironment", () => {
 		await expect(readAnthropicEnvironment(context({ ANTHROPIC_CUSTOM_HEADERS: "x-trace: 1" }))).resolves.toEqual({
 			headers: { "x-trace": "1" },
 		});
+	});
+
+	it("drops a custom anthropic-beta, which the request path computes from enabled features", async () => {
+		await expect(
+			readAnthropicEnvironment(context({ ANTHROPIC_CUSTOM_HEADERS: "anthropic-beta: custom\nx-case: one" })),
+		).resolves.toEqual({ headers: { "x-case": "one" } });
+		await expect(
+			readAnthropicEnvironment(context({ ANTHROPIC_CUSTOM_HEADERS: "Anthropic-Beta: custom" })),
+		).resolves.toBeUndefined();
 	});
 });
