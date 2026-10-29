@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBeGreaterThan(20);
+		expect(cases.length).toBe(28);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -51,30 +51,6 @@ describe("loadCases", () => {
 		expect(() => loadOne({ ...MINIMAL_CASE, compar: { exit: 0 } })).toThrow(/case has unknown key "compar"/);
 	});
 
-	test("rejects a case that runs a subcommand the harness must never reach", () => {
-		for (const subcommand of ["login", "logout", "update", "install", "setup-token"]) {
-			expect(() => loadOne({ ...MINIMAL_CASE, argv: [subcommand] })).toThrow(
-				new RegExp(`argv must not run "${subcommand}"`),
-			);
-		}
-	});
-
-	test("rejects --update", () => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--update"] })).toThrow(/argv must not contain "--update"/);
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hi", "--update=now"] })).toThrow(
-			/argv must not contain "--update=now"/,
-		);
-	});
-
-	test("rejects the remaining subcommands that mutate or authenticate", () => {
-		for (const token of ["plugins", "import", "gateway", "ultrareview", "rm", "--bg"]) {
-			expect(() => loadOne({ ...MINIMAL_CASE, argv: [token] })).toThrow(new RegExp(`argv must not run "${token}"`));
-			expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-p", "hello", token] })).toThrow(
-				new RegExp(`argv must not run "${token}"`),
-			);
-		}
-	});
-
 	test("rejects env the harness owns", () => {
 		for (const key of [
 			"PATH",
@@ -82,33 +58,18 @@ describe("loadCases", () => {
 			"DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 			"ANTHROPIC_BASE_URL",
+			"ANTHROPIC_API_KEY",
 		]) {
 			expect(() => loadOne({ ...MINIMAL_CASE, env: { [key]: "/tmp/elsewhere" } })).toThrow(
-				new RegExp(`env cannot replace "${key}"`),
+				new RegExp(`env cannot replace "${key}" because the harness sets it`),
 			);
 		}
 	});
 
-	test("rejects env the harness keeps unset", () => {
-		for (const key of [
-			"NODE_OPTIONS",
-			"NODE_EXTRA_CA_CERTS",
-			"DYLD_INSERT_LIBRARIES",
-			"ANTHROPIC_AUTH_TOKEN",
-			"ANTHROPIC_CUSTOM_HEADERS",
-			"CLAUDE_CODE_OAUTH_TOKEN",
-			"HTTPS_PROXY",
-		]) {
-			expect(() => loadOne({ ...MINIMAL_CASE, env: { [key]: "probe" } })).toThrow(
-				new RegExp(`env cannot set "${key}"`),
-			);
+	test("loads the env keys the ENV unit needs", () => {
+		for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_MODEL"]) {
+			expect(loadOne({ ...MINIMAL_CASE, env: { [key]: "probe" } }).env).toEqual({ [key]: "probe" });
 		}
-	});
-
-	test("keeps env a case owns", () => {
-		expect(loadOne({ ...MINIMAL_CASE, env: { PI_CONFORMANCE_PROBE: "1" } }).env).toEqual({
-			PI_CONFORMANCE_PROBE: "1",
-		});
 	});
 
 	test("rejects a timeout that is not a positive integer", () => {
@@ -182,76 +143,184 @@ describe("stdout allowExtra", () => {
 	});
 });
 
-const DENIED_ARGV: string[][] = [
-	["upgrade"],
-	["--verbose", "update"],
-	["--", "login"],
-	["--model", "x", "setup-token"],
-	["LOGIN"],
-	["auth", "logout"],
-	["purge"],
-	["respawn"],
-	["plugin", "install", "x"],
+interface VerifierRepro {
+	label: string;
+	argv?: string[];
+	probe?: string;
+	env?: Record<string, string>;
+	stdin?: { kind: "text"; data: string };
+}
+
+/** One row per bypass a verification round reported, so a hole that reopens names itself. */
+const VERIFIER_REPROS: VerifierRepro[] = [
+	{
+		label: "edit-permission-rules with permissions on stdin",
+		argv: ["edit-permission-rules", "--json"],
+		stdin: { kind: "text", data: '{"permissions":{"allow":[]}}' },
+	},
+	{ label: "edit-hook", argv: ["edit-hook"] },
+	{ label: "edit-memory-settings", argv: ["edit-memory-settings"] },
+	{ label: "edit-skill-overrides", argv: ["edit-skill-overrides"] },
+	{ label: "edit-sandbox-settings", argv: ["edit-sandbox-settings"] },
+	{ label: "edit-chrome-settings", argv: ["edit-chrome-settings"] },
+	{ label: "import-conversations", argv: ["import-conversations"] },
+	{ label: "drop-worktree-registrations", argv: ["drop-worktree-registrations"] },
+	{ label: "design-login", argv: ["design-login"] },
+	{ label: "apply-project-settings", argv: ["apply-project-settings"] },
+	{ label: "remote-control", argv: ["remote-control"] },
+	{ label: "rc", argv: ["rc"] },
+	{ label: "mcp xaa setup", argv: ["mcp", "xaa", "setup"] },
+	{ label: "mcp xaa clear", argv: ["mcp", "xaa", "clear"] },
+	{ label: "--background", argv: ["--background"] },
+	{ label: "--bg", argv: ["--bg"] },
+	{ label: "stop", argv: ["stop", "probe-id"] },
+	{ label: "kill", argv: ["kill", "probe-id"] },
+	{ label: "attach", argv: ["attach", "probe-id"] },
+	{ label: "auth", argv: ["auth"] },
+	{ label: "LOGIN in any case", argv: ["LOGIN"] },
+	{ label: "--login", argv: ["--login"] },
+	{ label: "mcp add", argv: ["mcp", "add", "probe", "probe-command"] },
+	{ label: "mcp list add", argv: ["mcp", "list", "add"] },
+	{ label: "auto-mode reset -y", argv: ["auto-mode", "reset", "-y"] },
+	{ label: "agents --cwd", argv: ["agents", "--cwd", "."] },
+	{ label: "edit-hook after a prompt", argv: ["-p", "hello", "edit-hook"] },
+	{ label: "--update", argv: ["--update"] },
+	{ label: "--update=now after -p", argv: ["-p", "hi", "--update=now"] },
+	{ label: "--worktree", argv: ["--worktree", "probe"] },
+	{ label: "-w", argv: ["-w", "probe"] },
+	{ label: "--plugin-dir", argv: ["--plugin-dir", "$WORKSPACE/p"] },
+	{ label: "--plugin-url", argv: ["--plugin-url", "https://example.test/p.zip"] },
+	{ label: "--file", argv: ["--file", "https://example.test/f"] },
+	{ label: "--teleport", argv: ["--teleport"] },
+	{ label: "--cloud", argv: ["--cloud"] },
+	{ label: "--desktop", argv: ["--desktop"] },
+	{ label: "--chrome", argv: ["--chrome"] },
+	{ label: "--ide", argv: ["--ide"] },
+	{ label: "--environment", argv: ["--environment", "probe"] },
+	{ label: "--from-pr", argv: ["--from-pr", "1"] },
+	{ label: "--tmux", argv: ["--tmux"] },
+	{ label: "--remote-control-session-name-prefix", argv: ["--remote-control-session-name-prefix", "x"] },
+	{ label: "nc -e", probe: "nc", argv: ["-e", "/bin/sh", "127.0.0.1", "1"] },
+	{ label: "BUN_OPTIONS preload", env: { BUN_OPTIONS: "--preload=/tmp/probe.ts" } },
+	{ label: "DYLD_LIBRARY_PATH", env: { DYLD_LIBRARY_PATH: "/tmp/probe" } },
+	{ label: "DYLD_FRAMEWORK_PATH", env: { DYLD_FRAMEWORK_PATH: "/tmp/probe" } },
+	{ label: "NODE_PATH", env: { NODE_PATH: "/tmp/probe" } },
+	{ label: "NODE_OPTIONS", env: { NODE_OPTIONS: "--require=/tmp/probe.js" } },
+	{ label: "CLAUDE_CODE_USE_BEDROCK", env: { CLAUDE_CODE_USE_BEDROCK: "1" } },
+	{ label: "CLAUDE_CODE_USE_VERTEX", env: { CLAUDE_CODE_USE_VERTEX: "1" } },
+	{ label: "CLAUDE_CODE_OAUTH_TOKEN", env: { CLAUDE_CODE_OAUTH_TOKEN: "probe" } },
+	{ label: "GITHUB_TOKEN", env: { GITHUB_TOKEN: "probe" } },
+	{ label: "CLAUDE_CODE_API_TOKEN_FILE_DESCRIPTOR", env: { CLAUDE_CODE_API_TOKEN_FILE_DESCRIPTOR: "3" } },
+	{ label: "HTTPS_PROXY", env: { HTTPS_PROXY: "http://127.0.0.1:1" } },
+	{ label: "ALL_PROXY", env: { ALL_PROXY: "http://127.0.0.1:1" } },
+	{ label: "NODE_TLS_REJECT_UNAUTHORIZED", env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" } },
+	{ label: "NODE_EXTRA_CA_CERTS", env: { NODE_EXTRA_CA_CERTS: "/tmp/probe.pem" } },
+	{ label: "CLAUDE_CODE_API_BASE_URL", env: { CLAUDE_CODE_API_BASE_URL: "https://example.test" } },
+	{ label: "PI_CONFORMANCE_PROBE", env: { PI_CONFORMANCE_PROBE: "1" } },
 ];
 
-describe("denied argv tokens", () => {
-	test.each(DENIED_ARGV.map((argv) => [argv]))("rejects %j", (argv) => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/argv must not run "/);
-	});
-
-	test("names the offending token and the rule", () => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--", "login"] })).toThrow(
-			/argv must not run "login": the harness never runs a claude subcommand that authenticates, installs, or mutates/,
-		);
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--login"] })).toThrow(/argv must not run "--login"/);
+describe("reported bypasses", () => {
+	test.each(VERIFIER_REPROS)("refuses $label", (repro: VerifierRepro) => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, probe: repro.probe, argv: repro.argv, env: repro.env, stdin: repro.stdin }),
+		).toThrow(/is not in the reviewed allowlist|env cannot replace/);
 	});
 });
 
-/** Each of these writes to the machine or drives a background session, so the harness must never run one. */
-const MUTATING_ARGV: string[][] = [
-	["stop", "probe-id"],
-	["kill", "probe-id"],
-	["attach", "probe-id"],
-	["--verbose", "attach", "probe-id"],
-	["agents"],
-	["agents", "--cwd", "."],
-	["auto-mode", "reset", "-y"],
-	["auto-mode"],
+/** Every word the old denylist named, so dropping the list cannot quietly reopen one. */
+const FORMERLY_DENIED: string[][] = [
+	["auth"],
+	["login"],
+	["logout"],
+	["install"],
+	["uninstall"],
+	["update"],
+	["upgrade"],
+	["setup-token"],
+	["purge"],
+	["respawn"],
+	["plugin"],
+	["plugins"],
+	["migrate-installer"],
+	["import"],
+	["gateway"],
+	["ultrareview"],
+	["rm"],
+	["bg"],
+	["stop"],
+	["kill"],
+	["attach"],
 	["mcp", "add", "probe", "probe-command"],
-	["--verbose", "mcp", "add", "probe", "probe-command"],
 	["mcp", "remove", "probe"],
 	["mcp", "add-json", "probe", "{}"],
 	["mcp", "add-from-claude-desktop"],
 	["mcp", "reset-project-choices"],
 ];
 
-/** Read-only argv that must keep loading, including `--agents`, the flag the `agents` command word would otherwise swallow. */
-const READ_ONLY_ARGV: string[][] = [
-	["mcp", "list"],
-	["mcp", "list", "add"],
-	["mcp", "get", "probe"],
-	["agents", "--json"],
-	["agents", "--json", "--all"],
-	["agents", "--help"],
-	["auto-mode", "config"],
-	["auto-mode", "defaults"],
-	["--agents", "{}"],
-	["-p", "hello"],
+describe("words the old denylist refused", () => {
+	test.each(FORMERLY_DENIED.map((argv) => [argv]))("still refuses %j", (argv) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/is not in the reviewed allowlist/);
+	});
+});
+
+describe("allowlist messages", () => {
+	test("names the word and the list it belongs in", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["edit-permission-rules", "--json"] })).toThrow(
+			/argv word "edit-permission-rules" is not in the reviewed allowlist, so add it to SIDE_ARGV\.words in conformance\/allowlist\.ts after review/,
+		);
+	});
+
+	test("names the flag and the list it belongs in", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["--background"] })).toThrow(
+			/argv flag "--background" is not in the reviewed allowlist, so add it to SIDE_ARGV\.flags/,
+		);
+	});
+
+	test("names a short flag", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["-w", "probe"] })).toThrow(
+			/argv flag "-w" is not in the reviewed allowlist/,
+		);
+	});
+
+	test("names the probe's own list", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, probe: "nc", argv: ["-e", "/bin/sh"] })).toThrow(
+			/argv flag "-e" is not in the reviewed allowlist, so add it to PROBE_ARGV\.nc\.flags/,
+		);
+	});
+
+	test("names the env key and the list it belongs in", () => {
+		expect(() => loadOne({ ...MINIMAL_CASE, env: { BUN_OPTIONS: "--preload=/tmp/probe.ts" } })).toThrow(
+			/env key "BUN_OPTIONS" is not in the reviewed allowlist, so add it to CASE_ENV_KEYS in conformance\/allowlist\.ts after review/,
+		);
+	});
+});
+
+const READ_ONLY_ARGV: [string[], string?][] = [
+	[["mcp", "list"]],
+	[["mcp", "get", "probe"]],
+	[["agents", "--json"]],
+	[["agents", "--json", "--all"]],
+	[["agents", "--help"]],
+	[["auto-mode", "config"]],
+	[["auto-mode", "defaults"]],
+	[["auto-mode", "critique"]],
+	[["logs"]],
+	[["doctor"]],
+	[["mcp"]],
+	[["agents"]],
+	[["auto-mode"]],
+	[["--agents", "{}"]],
+	[["-p", "hello"]],
+	[["-p", "hello", "--effort", "high"]],
+	[["--output-format", "json"]],
+	[["--", "help"]],
+	[["--output-format=json"]],
+	[["-A", "$HOME"], "ls"],
 ];
 
-describe("denied argv commands", () => {
-	test.each(MUTATING_ARGV.map((argv) => [argv]))("rejects %j", (argv) => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/argv must not run "/);
-	});
-
-	test.each(READ_ONLY_ARGV.map((argv) => [argv]))("allows %j", (argv) => {
-		expect(loadOne({ ...MINIMAL_CASE, argv }).argv).toEqual(argv);
-	});
-
-	test("names a multi-word command as written", () => {
-		expect(() => loadOne({ ...MINIMAL_CASE, argv: ["mcp", "add", "probe", "probe-command"] })).toThrow(
-			/argv must not run "mcp add"/,
-		);
+describe("keeps the read-only argv a case needs", () => {
+	test.each(READ_ONLY_ARGV)("loads %j", (argv, probe) => {
+		expect(loadOne({ ...MINIMAL_CASE, probe, argv }).argv).toEqual(argv);
 	});
 });
 
