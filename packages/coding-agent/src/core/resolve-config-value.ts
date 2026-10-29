@@ -150,6 +150,8 @@ export function resolveConfigValue(config: string, env?: Record<string, string>)
 	return resolveTemplate(reference.parts, env);
 }
 
+// `!command` values are credential helpers. Claude Code's `apiKeyHelper` sees the settings env, so
+// these children keep `process.env` rather than the startup snapshot pi's own launchers use.
 function executeWithConfiguredShell(command: string): { executed: boolean; value: string | undefined } {
 	try {
 		const { shell, args, commandTransport } = getShellConfig();

@@ -35,6 +35,7 @@ import { DefaultResourceLoader, formatPackageInstallWarning, isBuiltinExtension 
 import { SettingsManager } from "./core/settings-manager.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { spawnProcess, spawnProcessSync, waitForChildProcess } from "./utils/child-process.ts";
+import { startupEnv } from "./utils/internal-env.ts";
 import { canonicalizePath, getCwdRelativePath } from "./utils/paths.ts";
 import { getPiUserAgent } from "./utils/pi-user-agent.ts";
 import { stripBom } from "./utils/text.ts";
@@ -100,7 +101,9 @@ async function runManagedNpmCi(stageDir: string): Promise<void> {
 		"--loglevel=error",
 		"--progress=false",
 	];
-	const code = await waitForChildProcess(spawnProcess("npm", args, { cwd: stageDir, stdio: "inherit" }));
+	const code = await waitForChildProcess(
+		spawnProcess("npm", args, { cwd: stageDir, stdio: "inherit", env: startupEnv() }),
+	);
 	if (code !== 0) throw new Error(`npm ${args.join(" ")} exited with code ${code ?? "unknown"}`);
 }
 
@@ -114,6 +117,7 @@ function verifyManagedRelease(releaseDir: string, expectedVersion: string): void
 	const result = spawnProcessSync(binPath, ["--version"], {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
+		env: startupEnv(),
 	});
 	if (result.error || result.status !== 0) {
 		const reason = result.error?.message || result.stderr.trim() || `exit code ${result.status ?? "unknown"}`;

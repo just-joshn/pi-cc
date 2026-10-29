@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { TerminalColorMode } from "./colors.ts";
+import { internalSpawnEnv } from "./internal-spawn-env.ts";
 
 export type ImageProtocol = "kitty" | "iterm2" | null;
 
@@ -57,6 +58,7 @@ function probeTmuxHyperlinks(): boolean {
 			encoding: "utf8",
 			timeout: 250,
 			stdio: ["ignore", "pipe", "ignore"],
+			env: internalSpawnEnv(),
 		});
 		return termfeatures
 			.split(",")

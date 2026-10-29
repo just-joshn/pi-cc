@@ -8,7 +8,7 @@
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
-import { setCapabilityOverrides } from "@earendil-works/pi-tui";
+import { setCapabilityOverrides, setInternalSpawnEnv } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import {
 	type Args,
@@ -75,7 +75,14 @@ import {
 	formatSettingsFailures,
 	formatSkippedSettings,
 } from "./core/settings/cc/report.ts";
-import { type CcRunSettings, type CcSettleResult, openCcRunSettings } from "./core/settings/cc/run.ts";
+import {
+	admitCcDirectory,
+	type CcDirectoryAdmission,
+	type CcRunLocation,
+	type CcRunSettings,
+	type CcSettleResult,
+	openCcRunSettings,
+} from "./core/settings/cc/run.ts";
 import type { CcSettings } from "./core/settings/cc/types.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
@@ -88,7 +95,7 @@ import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
-import { captureStartupEnv } from "./utils/internal-env.ts";
+import { captureStartupEnv, startupEnv } from "./utils/internal-env.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
@@ -143,21 +150,22 @@ function toSettingSources(value: string | undefined): string[] | undefined {
  * Opens the Claude Code settings for this run: every trust-independent tier, the failures reported once
  * on stderr, the env block applied over the inherited environment, and the policy gates. A malformed
  * file never stops the run; an operator policy that forbids it does. The project and local tiers arrive
- * with pi's trust decision: `settleCcRepoTiers` admits them only once the project is trusted.
+ * with pi's trust decision: `bindCcDirectory` admits them only for that directory, once it is trusted.
  */
+function ccRunLocation(parsed: Args, cwd: string): CcRunLocation {
+	return {
+		cwd,
+		home: homedir(),
+		env: process.env,
+		platform: process.platform,
+		version: VERSION,
+		settingSources: toSettingSources(parsed.settingSources),
+		flagSettings: parsed.settings,
+	};
+}
+
 function openCcSettingsForRun(parsed: Args, cwd: string, trust: boolean | "pending"): CcRunSettings {
-	const run = openCcRunSettings(
-		{
-			cwd,
-			home: homedir(),
-			env: process.env,
-			platform: process.platform,
-			version: VERSION,
-			settingSources: toSettingSources(parsed.settingSources),
-			flagSettings: parsed.settings,
-		},
-		trust,
-	);
+	const run = openCcRunSettings(ccRunLocation(parsed, cwd), trust);
 	if (run.flagError !== undefined) {
 		console.error(chalk.red(`Error: ${run.flagError}`));
 		process.exit(1);
@@ -186,6 +194,16 @@ function reportCcSettings(report: CcSettleResult): void {
 	for (const line of blocks) {
 		console.error(chalk.dim(line));
 	}
+}
+
+function repoTierReport(run: CcRunSettings): CcSettleResult {
+	const isRepo = (source: string) => source === "project" || source === "local";
+	return {
+		settings: run.settings,
+		failures: run.failures.filter((failure) => isRepo(failure.source)),
+		skipped: run.skipped.filter((skip) => isRepo(skip.source)),
+		ignored: run.ignored,
+	};
 }
 
 function applyCcEnv(settings: CcSettings): void {
@@ -713,6 +731,7 @@ export async function main(args: string[], options?: MainOptions) {
 	// Pi's own subprocesses keep the environment pi started with; a settings `env` block reaches the
 	// agent's tools and the model client, but never `npm`, `git`, or a pi-internal launcher.
 	captureStartupEnv();
+	setInternalSpawnEnv(startupEnv());
 
 	if (await runAuthCommand(args)) {
 		return;
@@ -813,23 +832,44 @@ export async function main(args: string[], options?: MainOptions) {
 	// Claude Code settings load before pi's own settings manager, because their env block is applied
 	// over the inherited process environment and every later resolution reads it. The project and local
 	// tiers are repository-controlled, so they wait for pi's trust decision like any other project
-	// resource: `settleCcRepoTiers` admits them once that decision is in.
+	// resource: `bindCcDirectory` admits the runtime directory's tiers once that directory's decision is in.
 	const trustStore = new ProjectTrustStore(agentDir);
-	const ccRun = openCcSettingsForRun(
-		parsed,
-		cwd,
+	const readTrust = (directory: string): boolean | "pending" =>
 		readInitialProjectTrust({
-			cwd,
+			cwd: directory,
 			trustStore,
 			trustOverride: parsed.projectTrustOverride,
 			defaultProjectTrust: bootstrapSettingsManager.getDefaultProjectTrust(),
 			hasUI: trustPromptMode === "interactive",
-		}),
-	);
-	const settleCcRepoTiers = (trusted: boolean): void => {
-		const settled = ccRun.settleRepoTiers(trusted);
-		reportCcSettings(settled);
-		applyCcEnv(ccRunSettings(settled.settings, parsed));
+		});
+	// Pending withholds every repo tier until the runtime directory is known. Opening the startup
+	// directory as already decided would report or admit its files before --session can select another.
+	let ccAdmission: CcDirectoryAdmission = {
+		cwd,
+		run: openCcSettingsForRun(parsed, cwd, "pending"),
+	};
+	// A boolean admits only the directory it was decided for. A different directory opens its own tiers.
+	// Env already written into the process stays: application is monotone for the life of the process.
+	const bindCcDirectory = (directory: string, trust: boolean | "pending"): void => {
+		const result = admitCcDirectory(ccAdmission, ccRunLocation(parsed, directory), directory, trust);
+		ccAdmission = result.admission;
+		if (result.opened) {
+			if (result.admission.run.flagError !== undefined) {
+				console.error(chalk.red(`Error: ${result.admission.run.flagError}`));
+				process.exit(1);
+			}
+			reportCcSettings(repoTierReport(result.admission.run));
+			if (result.admission.run.refusal !== undefined) {
+				console.error(chalk.red(`Error: ${result.admission.run.refusal}`));
+				process.exit(1);
+			}
+			applyCcEnv(ccRunSettings(result.admission.run.settings, parsed));
+			return;
+		}
+		if (result.settled) {
+			reportCcSettings(result.settled);
+			applyCcEnv(ccRunSettings(result.settled.settings, parsed));
+		}
 	};
 	time("ccSettings");
 
@@ -886,6 +926,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("createSessionManager");
 
 	const sessionCwd = sessionManager.getCwd();
+	bindCcDirectory(sessionCwd, readTrust(sessionCwd));
 	const autoTrustOnReloadCwd =
 		parsed.projectTrustOverride === undefined && !hasTrustRequiringProjectResources(sessionCwd)
 			? sessionCwd
@@ -914,10 +955,12 @@ export async function main(args: string[], options?: MainOptions) {
 			: (cachedProjectTrust ??
 				parsed.projectTrustOverride ??
 				(!hasTrustRequiringResources || trustStore.get(cwd) === true));
-		// The repo tiers of the Claude Code settings follow the same decision, and their env block has to
-		// be in place before any provider or model resolution, so it settles before the services exist.
-		if (!shouldResolveProjectTrust) {
-			settleCcRepoTiers(projectTrusted);
+		// Repo tiers are this runtime directory's files, settled on this directory's decision.
+		// Their env block has to be in place before any provider or model resolution.
+		if (cwd !== ccAdmission.cwd) {
+			bindCcDirectory(cwd, shouldResolveProjectTrust ? "pending" : projectTrusted);
+		} else if (!shouldResolveProjectTrust) {
+			bindCcDirectory(cwd, projectTrusted);
 		}
 		const runtimeSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
 		const ccResources = ccResourceSuppression(parsed);
@@ -947,7 +990,7 @@ export async function main(args: string[], options?: MainOptions) {
 								onExtensionError: (message) => projectTrustDiagnostics.push({ type: "warning", message }),
 							});
 							projectTrustByCwd.set(cwd, trusted);
-							settleCcRepoTiers(trusted);
+							bindCcDirectory(cwd, trusted);
 							return trusted;
 						},
 					}
@@ -997,7 +1040,7 @@ export async function main(args: string[], options?: MainOptions) {
 			settingsManager,
 			// Every tier's env block is in process.env by now, so this one read covers the inherited
 			// environment and every tier. --model still wins over it in buildSessionOptions.
-			process.env.ANTHROPIC_MODEL ?? ccRun.settings.model,
+			process.env.ANTHROPIC_MODEL ?? ccAdmission.run.settings.model,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
 

@@ -16,7 +16,15 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
-import { baseEnv, createRoots, expandPlaceholders, findPresentPaths, hashTree, renderProfile, seedFiles } from "../conformance/isolate.ts";
+import {
+	baseEnv,
+	createRoots,
+	expandPlaceholders,
+	findPresentPaths,
+	hashTree,
+	renderProfile,
+	seedFiles,
+} from "../conformance/isolate.ts";
 
 const darwin = process.platform === "darwin";
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";

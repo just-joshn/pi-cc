@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve as nodeResolvePath, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnProcessSync } from "./child-process.ts";
+import { startupEnv } from "./internal-env.ts";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
@@ -132,9 +133,17 @@ export function markPathIgnoredByCloudSync(path: string): void {
 
 	for (const attr of attrs) {
 		if (process.platform === "darwin") {
-			spawnProcessSync("xattr", ["-w", attr, "1", path], { encoding: "utf-8", stdio: "ignore" });
+			spawnProcessSync("xattr", ["-w", attr, "1", path], {
+				encoding: "utf-8",
+				stdio: "ignore",
+				env: startupEnv(),
+			});
 		} else {
-			spawnProcessSync("setfattr", ["-n", attr, "-v", "1", path], { encoding: "utf-8", stdio: "ignore" });
+			spawnProcessSync("setfattr", ["-n", attr, "-v", "1", path], {
+				encoding: "utf-8",
+				stdio: "ignore",
+				env: startupEnv(),
+			});
 		}
 	}
 }

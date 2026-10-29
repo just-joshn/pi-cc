@@ -117,15 +117,15 @@ export function admitCcDirectory(
 	cwd: string,
 	trust: CcRepoTierTrust,
 ): CcDirectoryAdmitResult {
-	if (previous !== undefined && trust !== "pending") {
+	if (previous !== undefined && previous.cwd === cwd) {
+		if (trust === "pending") {
+			return { admission: previous, settled: undefined, opened: false };
+		}
 		return {
 			admission: previous,
 			settled: previous.run.settleRepoTiers(trust),
 			opened: false,
 		};
-	}
-	if (previous !== undefined && previous.cwd === cwd) {
-		return { admission: previous, settled: undefined, opened: false };
 	}
 	return {
 		admission: { cwd, run: openCcRunSettings({ ...location, cwd }, trust) },

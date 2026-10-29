@@ -3,6 +3,7 @@ import { readdirSync, statSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
 import { fuzzyFilter } from "./fuzzy.ts";
+import { internalSpawnEnv } from "./internal-spawn-env.ts";
 import { autocompleteBoundaryRegex, autocompleteSeparatorRegex } from "./utils.ts";
 
 const PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
@@ -190,6 +191,7 @@ async function walkDirectoryWithFd(
 
 		const child = spawn(fdPath, args, {
 			stdio: ["ignore", "pipe", "pipe"],
+			env: internalSpawnEnv(),
 		});
 		let stdout = "";
 		let resolved = false;

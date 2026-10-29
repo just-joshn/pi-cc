@@ -80,6 +80,7 @@ export {
 export type { EditorComponent } from "./editor-component.ts";
 // Fuzzy matching
 export { type FuzzyMatch, fuzzyFilter, fuzzyMatch } from "./fuzzy.ts";
+export { internalSpawnEnv, setInternalSpawnEnv } from "./internal-spawn-env.ts";
 // Keybindings
 export {
 	getKeybindings,
