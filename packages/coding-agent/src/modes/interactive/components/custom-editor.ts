@@ -88,9 +88,14 @@ export class CustomEditor extends Editor {
 	handleInput(data: string): void {
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
+			this.keybindings.cancelChord();
 			return;
 		}
 
+		this.keybindings.dispatchInput(data, "Chat", () => this.handleBoundInput(data));
+	}
+
+	private handleBoundInput(data: string): void {
 		// Selection page keys move an open autocomplete menu before app actions run.
 		// This lets users bind Ctrl+V even though it pastes images by default.
 		if (

@@ -12,6 +12,8 @@ import { Compile } from "typebox/compile";
 import { getAgentDir } from "../config.ts";
 import { stripBom } from "../utils/text.ts";
 import { KeybindingValueSchema } from "./key-id-schema.ts";
+import { type Binding, ChordResolver } from "./keybindings/chords.ts";
+import { importCcKeybindings, parseKeySequence, resolveBindings } from "./keybindings/import-cc.ts";
 
 export function useWindowsKeybindings(
 	platform: NodeJS.Platform = process.platform,
@@ -319,7 +321,7 @@ function loadRawConfig(path: string): Record<string, unknown> | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
 		const parsed = JSON.parse(stripBom(readFileSync(path, "utf-8"))) as unknown;
-		if (typeof parsed !== "object" || parsed === null) return undefined;
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
 		return parsed as Record<string, unknown>;
 	} catch {
 		return undefined;
@@ -328,6 +330,11 @@ function loadRawConfig(path: string): Record<string, unknown> | undefined {
 
 export class KeybindingsManager extends TuiKeybindingsManager {
 	private configPath: string | undefined;
+	private importedBindings: Binding[] = [];
+	private chordResolver = new ChordResolver();
+	private input: { data: string; actions: ReadonlySet<Keybinding> } | undefined;
+	private resolvedContexts = new Map<Binding["context"], readonly Binding[]>();
+	private diagnostics: string[] = [];
 
 	constructor(userBindings: KeybindingsConfig = {}, configPath?: string) {
 		super(KEYBINDINGS, userBindings);
@@ -336,23 +343,112 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 
 	static create(agentDir: string = getAgentDir()): KeybindingsManager {
 		const configPath = join(agentDir, "keybindings.json");
-		const userBindings = KeybindingsManager.loadFromFile(configPath);
-		return new KeybindingsManager(userBindings, configPath);
+		const manager = new KeybindingsManager({}, configPath);
+		manager.reload();
+		return manager;
 	}
 
 	reload(): void {
 		if (!this.configPath) return;
-		this.setUserBindings(KeybindingsManager.loadFromFile(this.configPath));
+		this.chordResolver.reset();
+		this.importedBindings = [];
+		this.diagnostics = [];
+		const raw = loadRawConfig(this.configPath);
+		if (!raw) {
+			this.setUserBindings({});
+			return;
+		}
+		if (Object.hasOwn(raw, "bindings")) {
+			const imported = importCcKeybindings(raw, new Set(Object.keys(KEYBINDINGS)));
+			this.importedBindings = imported.bindings;
+			this.diagnostics = imported.diagnostics;
+			this.setUserBindings({});
+			return;
+		}
+		const migrated = migrateKeybindingsConfig(raw).config;
+		const singles = toKeybindingsConfig(migrated);
+		for (const [action, value] of Object.entries(migrated)) {
+			if (!Object.hasOwn(KEYBINDINGS, action)) continue;
+			const values = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+			const sequences = values.flatMap((key) => {
+				const keys = typeof key === "string" ? parseKeySequence(key) : undefined;
+				return keys ? [keys] : [];
+			});
+			if (sequences.some((keys) => keys.length > 1)) {
+				singles[action] = sequences.flatMap((keys) => (keys.length === 1 ? [keys[0]!] : []));
+				this.importedBindings.push(
+					...sequences
+						.filter((keys) => keys.length > 1)
+						.map(
+							(keys): Binding => ({
+								context: "Global",
+								keys,
+								action: action as Keybinding,
+							}),
+						),
+				);
+			}
+		}
+		this.setUserBindings(singles);
 	}
 
 	getEffectiveConfig(): KeybindingsConfig {
 		return this.getResolvedBindings();
 	}
 
-	private static loadFromFile(path: string): KeybindingsConfig {
-		const rawConfig = loadRawConfig(path);
-		if (!rawConfig) return {};
-		return toKeybindingsConfig(migrateKeybindingsConfig(rawConfig).config);
+	getImportDiagnostics(): readonly string[] {
+		return this.diagnostics;
+	}
+
+	override setUserBindings(userBindings: KeybindingsConfig): void {
+		super.setUserBindings(userBindings);
+		this.resolvedContexts.clear();
+		this.cancelChord();
+	}
+
+	cancelChord(): void {
+		this.chordResolver.reset();
+	}
+
+	/** Runs all checks for one editor event against a single chord resolution. */
+	dispatchInput(data: string, context: Binding["context"], handle: () => void): void {
+		if (this.importedBindings.length === 0) {
+			handle();
+			return;
+		}
+		const result = this.chordResolver.resolve(data, this.getContextBindings(context));
+		if (result.kind === "pending") return;
+		const previous = this.input;
+		this.input = { data, actions: result.actions };
+		try {
+			handle();
+		} finally {
+			this.input = previous;
+		}
+	}
+
+	/** Returns prompt shortcuts, including imported chords, for display without narrowing them to single keys. */
+	getPromptKeys(action: Keybinding): string[] {
+		return this.getContextBindings("Chat")
+			.filter((binding) => binding.action === action)
+			.map((binding) => binding.keys.join(" "));
+	}
+
+	private getContextBindings(context: Binding["context"]): readonly Binding[] {
+		let bindings = this.resolvedContexts.get(context);
+		if (!bindings) {
+			const base = Object.entries(this.getResolvedBindings()).flatMap(([action, value]) => {
+				const keys = typeof value === "string" ? [value] : (value ?? []);
+				return keys.map((key): Binding => ({ context: "Global", keys: [key], action: action as Keybinding }));
+			});
+			bindings = resolveBindings(base, this.importedBindings, context);
+			this.resolvedContexts.set(context, bindings);
+		}
+		return bindings;
+	}
+
+	override matches(data: string, keybinding: Keybinding): boolean {
+		return this.input?.data === data ? this.input.actions.has(keybinding) : super.matches(data, keybinding);
 	}
 }
 

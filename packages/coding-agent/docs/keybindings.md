@@ -42,6 +42,42 @@ Examples: `ctrl+shift+x`, `alt+ctrl+x`, `ctrl+shift+alt+x`, `super+k`, `ctrl+sup
 
 `super` bindings require a terminal that reports the modifier separately, typically through the Kitty keyboard protocol. They may not work in terminals without that support.
 
+## Prompt chords and CC files
+
+The default prompt editor accepts space-separated sequences in the same file. For example, `"app.model.select": "ctrl+k ctrl+s"` opens the model selector after both strokes. A chord prefix takes precedence over a single-key action on that prefix. The prefix expires after one second without running the single-key action. A mismatching next stroke starts a new lookup, so ordinary text is not lost.
+
+The file also accepts CC's context-block format:
+
+```json
+{
+	"bindings": [
+		{
+			"context": "Chat",
+			"bindings": {
+				"ctrl+k ctrl+s": "chat:modelPicker",
+				"ctrl+l": null
+			}
+		}
+	]
+}
+```
+
+The default prompt editor applies `Global` and `Chat` blocks in file order. Later declarations replace earlier declarations for the same sequence. A `null` action disables that sequence in the prompt. Other contexts do not apply. Extension shortcut handlers keep their existing precedence.
+
+Supported CC action mappings are:
+
+| CC action | Pi action |
+|---|---|
+| `chat:submit` | `tui.input.submit` |
+| `chat:cancel` | `app.interrupt` |
+| `chat:modelPicker` | `app.model.select` |
+| `chat:externalEditor` | `app.editor.external` |
+| `app:exit` | `app.exit` |
+
+CC blocks also accept built-in pi action identifiers. Imported bindings use pi's defaults, not CC's default table. The importer accepts `meta`, `opt`, and `option` as aliases for `alt`. Unsupported actions, contexts, and malformed sequences appear in `KeybindingsManager.getImportDiagnostics()` and do not create bindings.
+
+Chords and context overrides apply only while the default prompt editor handles input. They do not change extension editors, selector dialogs, or fullscreen viewport shortcuts that handle input before the prompt. `getPromptKeys()` returns the prompt's effective sequences for key hints. The lower-level single-key configuration APIs retain their existing shape.
+
 ## Actions
 
 ### Terminal UI
