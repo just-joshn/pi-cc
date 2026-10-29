@@ -370,7 +370,15 @@ function bodyTextDiffs(where: string, spec: BodyTextSpec, text: string | undefin
 		}
 	}
 	for (const pattern of spec.notMatch ?? []) {
-		const hit = text === undefined ? null : toRegExp(pattern).exec(text);
+		if (text === undefined) {
+			diffs.push({
+				check: "requests.bodyAt",
+				expected: `${where} does not match /${pattern}/`,
+				actual: excerpt(text),
+			});
+			continue;
+		}
+		const hit = toRegExp(pattern).exec(text);
 		if (hit !== null) {
 			diffs.push({
 				check: "requests.bodyAt",
