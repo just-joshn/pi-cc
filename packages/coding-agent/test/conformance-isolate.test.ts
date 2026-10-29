@@ -221,6 +221,17 @@ describe("seedFiles", () => {
 		expect(() => readFileSync(join(outside, "parent.txt"))).toThrow();
 		expect(() => readFileSync(join(outside, "leaf.txt"))).toThrow();
 	});
+
+	test("creates no directory through a link it refuses", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-seed-")), "mkdir", "pi-cc");
+		tempDirs.push(roots.root);
+		const outside = mkdtempSync(join(tmpdir(), "pi-cc-seed-outside-"));
+		tempDirs.push(outside);
+		symlinkSync(outside, join(roots.workspace, "escape"));
+
+		expect(() => seedFiles(roots, { "escape/deep/file.txt": "no" })).toThrow(/escapes the side root/);
+		expect(existsSync(join(outside, "deep"))).toBe(false);
+	});
 });
 
 describe("the profile keeps the harness artifacts out of the side's reach", () => {
