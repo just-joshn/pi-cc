@@ -87,6 +87,8 @@ const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
 const REQUEST_KEYS = ["pathStartsWith", "count", "bodyEquals"];
 const MODEL_KEYS = ["turns"];
+/** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 const TURN_KEYS = ["text", "tool_use", "tool_uses", "sse"] as const;
 const TOOL_USE_KEYS = ["name", "input"];
 
@@ -120,6 +122,10 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	assertArgvAllowed(argv, source);
 	const env = asStringRecord(object.env, source, "env");
 	assertEnvAllowed(env, source);
+	const timeout_ms = asOptionalPositiveInteger(object.timeout_ms, source, "timeout_ms") ?? 60_000;
+	if (timeout_ms > MAX_TIMER_MS) {
+		fail(source, `timeout_ms must be at most ${MAX_TIMER_MS}: Node clamps a longer timer to 1 ms`);
+	}
 	return {
 		id,
 		area,
@@ -129,7 +135,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		stdin: asStdin(object.stdin, source),
 		files: asStringRecord(object.files, source, "files"),
 		model: model === null ? null : { turns: asTurns(model.turns, source) },
-		timeout_ms: asOptionalPositiveInteger(object.timeout_ms, source, "timeout_ms") ?? 60_000,
+		timeout_ms,
 		compare: asCompareSpec(object.compare, source),
 		skip,
 	};
