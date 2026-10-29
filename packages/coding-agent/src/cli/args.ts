@@ -4,13 +4,21 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import chalk from "chalk";
-import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
+import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR, VERSION } from "../config.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
 import { getToolListError, type TuiMode } from "../core/settings-manager.ts";
+import {
+	type CcDiagnostic,
+	type CcFlags,
+	consumeCcFlag,
+	formatCcHelpSection,
+	formatUnknownOptionMessage,
+	matchCcFlag,
+} from "./cc-flags.ts";
 
 export type Mode = "text" | "json" | "rpc";
 
-export interface Args {
+export interface Args extends CcFlags {
 	provider?: string;
 	model?: string;
 	apiKey?: string;
@@ -25,7 +33,6 @@ export interface Args {
 	name?: string;
 	noSession?: boolean;
 	session?: string;
-	sessionId?: string;
 	fork?: string;
 	sessionDir?: string;
 	models?: string[];
@@ -55,7 +62,7 @@ export interface Args {
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
 	unknownFlags: Map<string, boolean | string>;
-	diagnostics: Array<{ type: "warning" | "error"; message: string }>;
+	diagnostics: CcDiagnostic[];
 }
 
 const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -63,6 +70,17 @@ const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh
 export function isValidThinkingLevel(level: string): level is ThinkingLevel {
 	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);
 }
+
+/** The single line `--version` prints, in Claude Code's `<version> (<product>)` shape. */
+export function formatVersionLine(): string {
+	return `${VERSION} (${APP_NAME})`;
+}
+
+/** Claude Code refuses a print-mode run that has no prompt from argv or stdin. */
+export const PRINT_INPUT_REQUIRED_MESSAGE =
+	"Error: Input must be provided either through stdin or as a prompt argument when using --print";
+
+export const NOT_LOGGED_IN_MESSAGE = "Not logged in. Run /login to authenticate.";
 
 export function normalizeSessionName(value: string): string | undefined {
 	const name = value.trim();
@@ -112,6 +130,11 @@ export function parseArgs(args: string[]): Args {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
 			result.resume = true;
+			const resumeValue = args[i + 1];
+			if (resumeValue !== undefined && !resumeValue.startsWith("-")) {
+				result.session = resumeValue;
+				i++;
+			}
 		} else if (arg === "--provider" && i + 1 < args.length) {
 			result.provider = args[++i];
 		} else if (arg === "--model" && i + 1 < args.length) {
@@ -133,8 +156,6 @@ export function parseArgs(args: string[]): Args {
 			result.noSession = true;
 		} else if (arg === "--session" && i + 1 < args.length) {
 			result.session = args[++i];
-		} else if (arg === "--session-id" && i + 1 < args.length) {
-			result.sessionId = args[++i];
 		} else if (arg === "--fork" && i + 1 < args.length) {
 			result.fork = args[++i];
 		} else if (arg === "--session-dir" && i + 1 < args.length) {
@@ -246,24 +267,43 @@ export function parseArgs(args: string[]): Args {
 			result.offline = true;
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
-		} else if (arg.startsWith("--")) {
-			const eqIndex = arg.indexOf("=");
-			if (eqIndex !== -1) {
-				result.unknownFlags.set(arg.slice(2, eqIndex), arg.slice(eqIndex + 1));
-			} else {
-				const flagName = arg.slice(2);
-				const next = args[i + 1];
-				if (next !== undefined && !next.startsWith("-") && !next.startsWith("@")) {
-					result.unknownFlags.set(flagName, next);
-					i++;
+		} else if (arg.startsWith("-")) {
+			const ccMatch = matchCcFlag(arg);
+			if (ccMatch) {
+				i = consumeCcFlag(ccMatch, args, i, result, result.diagnostics);
+			} else if (arg.startsWith("--")) {
+				const eqIndex = arg.indexOf("=");
+				if (eqIndex !== -1) {
+					result.unknownFlags.set(arg.slice(2, eqIndex), arg.slice(eqIndex + 1));
 				} else {
-					result.unknownFlags.set(flagName, true);
+					const flagName = arg.slice(2);
+					const next = args[i + 1];
+					if (next !== undefined && !next.startsWith("-") && !next.startsWith("@")) {
+						result.unknownFlags.set(flagName, next);
+						i++;
+					} else {
+						result.unknownFlags.set(flagName, true);
+					}
 				}
+			} else {
+				result.diagnostics.push({
+					type: "error",
+					style: "cli",
+					message: formatUnknownOptionMessage(arg),
+				});
 			}
-		} else if (arg.startsWith("-") && !arg.startsWith("--")) {
-			result.diagnostics.push({ type: "error", message: `Unknown option: ${arg}` });
-		} else if (!arg.startsWith("-")) {
+		} else {
 			result.messages.push(arg);
+		}
+	}
+
+	// Claude Code's --output-format selects the pi mode and implies print. Both JSON formats stream
+	// records, so neither may print pi's text mode. An explicit --mode wins over the implied mode.
+	if (result.mode === undefined) {
+		if (result.outputFormat === "json" || result.outputFormat === "stream-json") {
+			result.mode = "json";
+		} else if (result.outputFormat !== undefined) {
+			result.print = true;
 		}
 	}
 
@@ -344,6 +384,9 @@ ${chalk.bold("Options:")}
   --                             End option parsing; treat remaining arguments as messages/files
   --help, -h                     Show this help
   --version, -v                  Show version number
+
+${chalk.bold("Claude Code compatibility options:")}
+${formatCcHelpSection()}
 
 Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
 

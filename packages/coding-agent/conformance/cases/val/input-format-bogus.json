@@ -1,0 +1,25 @@
+{
+	"id": "val/input-format-bogus",
+	"area": "val",
+	"argv": [
+		"-p",
+		"--input-format",
+		"nonsense"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "error: option '--input-format <format>' argument 'nonsense' is invalid. Allowed choices are text, stream-json."
+		}
+	},
+	"skip": []
+}

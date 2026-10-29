@@ -1,0 +1,26 @@
+{
+	"id": "val/max-budget-bogus",
+	"area": "val",
+	"argv": [
+		"-p",
+		"hello",
+		"--max-budget-usd",
+		"abc"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "error: option '--max-budget-usd <amount>' argument 'abc' is invalid. --max-budget-usd must be a positive number greater than 0"
+		}
+	},
+	"skip": []
+}

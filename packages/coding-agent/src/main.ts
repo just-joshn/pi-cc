@@ -9,7 +9,16 @@ import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
 import chalk from "chalk";
-import { type Args, type Mode, normalizeSessionName, parseArgs, printHelp } from "./cli/args.ts";
+import {
+	type Args,
+	formatVersionLine,
+	type Mode,
+	NOT_LOGGED_IN_MESSAGE,
+	normalizeSessionName,
+	PRINT_INPUT_REQUIRED_MESSAGE,
+	parseArgs,
+	printHelp,
+} from "./cli/args.ts";
 import {
 	type AuthCheckResult,
 	checkProviderAuth,
@@ -26,6 +35,7 @@ import {
 	printAuthCommandHelp,
 	validateAuthCommandArgs,
 } from "./cli/auth-command.ts";
+import { formatDiagnosticPrefix, validateSessionId } from "./cli/cc-flags.ts";
 import { resolveCredentialForPrint } from "./cli/credential-print.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
@@ -33,21 +43,21 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "./core/agent-session-services.ts";
-import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
+import { formatNoApiKeyFoundMessage, formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
-import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
+import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
 import {
@@ -56,7 +66,7 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
-import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
+import { SessionManager } from "./core/session-manager.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
@@ -99,8 +109,7 @@ async function readPipedStdin(): Promise<string | undefined> {
 function reportDiagnostics(diagnostics: readonly AgentSessionRuntimeDiagnostic[]): void {
 	for (const diagnostic of diagnostics) {
 		const color = diagnostic.type === "error" ? chalk.red : diagnostic.type === "warning" ? chalk.yellow : chalk.dim;
-		const prefix = diagnostic.type === "error" ? "Error: " : diagnostic.type === "warning" ? "Warning: " : "";
-		console.error(color(`${prefix}${diagnostic.message}`));
+		console.error(color(`${formatDiagnosticPrefix(diagnostic)}${diagnostic.message}`));
 	}
 }
 
@@ -326,11 +335,13 @@ function validateSessionIdFlags(parsed: Args): void {
 		process.exit(1);
 	}
 
-	try {
-		assertValidSessionId(parsed.sessionId);
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.error(chalk.red(`Error: ${message}`));
+	// Claude Code validates the id only when it creates a session, so `--help` and pi's metadata
+	// commands never reject it.
+	if (parsed.help || parsed.noSession || parsed.listModels !== undefined) return;
+
+	const rejected = validateSessionId(parsed.sessionId);
+	if (rejected !== undefined) {
+		console.error(chalk.red(`${formatDiagnosticPrefix(rejected)}${rejected.message}`));
 		process.exit(1);
 	}
 }
@@ -635,7 +646,7 @@ export async function main(args: string[], options?: MainOptions) {
 	if (parsed.diagnostics.length > 0) {
 		for (const d of parsed.diagnostics) {
 			const color = d.type === "error" ? chalk.red : chalk.yellow;
-			console.error(color(`${d.type === "error" ? "Error" : "Warning"}: ${d.message}`));
+			console.error(color(`${formatDiagnosticPrefix(d)}${d.message}`));
 		}
 		if (parsed.diagnostics.some((d) => d.type === "error")) {
 			process.exit(1);
@@ -644,7 +655,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("parseArgs");
 
 	if (parsed.version) {
-		console.log(VERSION);
+		console.log(formatVersionLine());
 		process.exit(0);
 	}
 
@@ -937,8 +948,23 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	time("createAgentSession");
 
-	if (appMode !== "interactive" && !session.model) {
+	if ((appMode === "print" || appMode === "json") && initialMessage === undefined && parsed.messages.length === 0) {
+		console.error(chalk.red(PRINT_INPUT_REQUIRED_MESSAGE));
+		process.exit(1);
+	}
+
+	const model = session.model;
+	if ((appMode === "print" || appMode === "json") && model === undefined) {
 		console.error(chalk.red(formatNoModelsAvailableMessage()));
+		process.exit(1);
+	}
+
+	// Claude Code prints its not-logged-in line on stdout in text mode, where stdout is human output.
+	// A JSON mode carries records only, so it keeps pi's own path and reports the failure there.
+	if (appMode === "print" && model !== undefined && !modelRuntime.hasConfiguredAuth(model.provider)) {
+		writeRawStdout(`${NOT_LOGGED_IN_MESSAGE}\n`);
+		await flushRawStdout();
+		console.error(chalk.red(formatNoApiKeyFoundMessage(model.provider)));
 		process.exit(1);
 	}
 

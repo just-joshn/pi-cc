@@ -1,0 +1,28 @@
+{
+	"id": "cli/help-word-is-not-a-help",
+	"area": "cli",
+	"argv": [
+		"help"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"(?i)(not logged in|login|log in|credential|api key)"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 0
+			}
+		]
+	},
+	"skip": []
+}

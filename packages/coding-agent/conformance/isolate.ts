@@ -1,0 +1,221 @@
+/**
+ * Per-case, per-side sandbox roots. Every path the sandbox profile names is realpath-resolved because
+ * Seatbelt matches resolved paths: a profile that says `/var/...` instead of `/private/var/...`
+ * silently denies writes to its own temp root.
+ */
+
+import { createHash } from "node:crypto";
+import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
+export const PROBES = { ls: "/bin/ls", nc: "/usr/bin/nc", open: "/usr/bin/open" } as const;
+
+export type SideName = "claude" | "pi-cc";
+
+export interface Side {
+	readonly name: SideName;
+	command(): string[];
+	executableRoots(): string[];
+	prepare(roots: Roots, port: number | null): void;
+}
+
+export interface Roots {
+	side: SideName;
+	root: string;
+	home: string;
+	config: string;
+	tmp: string;
+	workspace: string;
+	out: string;
+	xdgConfig: string;
+	xdgCache: string;
+	xdgData: string;
+	xdgState: string;
+	agent: string;
+}
+
+export const REAL_HOME = userInfo().homedir;
+const FIXTURES_DIR = fileURLToPath(new URL("../fixtures/", import.meta.url));
+
+const MODEL_API_KEY = "sk-ant-conformance-fixture-0000000000000000";
+
+export function createRoots(tmpRoot: string, caseId: string, side: SideName): Roots {
+	const root = realpathSync(mkdirp(join(tmpRoot, caseId, side)));
+	const roots: Roots = {
+		side,
+		root,
+		home: mkdirp(join(root, "home")),
+		config: mkdirp(join(root, "config")),
+		tmp: mkdirp(join(root, "tmp")),
+		workspace: mkdirp(join(root, "workspace")),
+		out: mkdirp(join(root, "out")),
+		xdgConfig: mkdirp(join(root, "xdg-config")),
+		xdgCache: mkdirp(join(root, "xdg-cache")),
+		xdgData: mkdirp(join(root, "xdg-data")),
+		xdgState: mkdirp(join(root, "xdg-state")),
+		agent: mkdirp(join(root, "agent")),
+	};
+	return roots;
+}
+
+/** Expands the case-file placeholders. `$HOME` is the side's temp home, never the real one. */
+export function expandPlaceholders(value: string, roots: Roots): string {
+	return value
+		.split("$WORKSPACE")
+		.join(roots.workspace)
+		.split("$TMP")
+		.join(roots.tmp)
+		.split("$HOME")
+		.join(roots.home)
+		.split("$REAL_HOME")
+		.join(REAL_HOME)
+		.split("$FIXTURES")
+		.join(FIXTURES_DIR);
+}
+
+/**
+ * The environment every side runs with. The harness owns these keys: a case may add its own, but a case
+ * that replaced PATH, HOME, or a disable flag would measure itself instead of the pinned binary. The
+ * key list is derived from this table so the loader and the runner cannot disagree about what is owned.
+ */
+const HARNESS_ENV: Readonly<Record<string, (roots: Roots, port: number | null) => string | undefined>> = {
+	PATH: () => "/usr/bin:/bin:/usr/sbin:/sbin",
+	HOME: (roots) => roots.home,
+	CLAUDE_CONFIG_DIR: (roots) => roots.config,
+	TMPDIR: (roots) => roots.tmp,
+	SHELL: () => "/bin/sh",
+	USER: () => "probe",
+	LOGNAME: () => "probe",
+	LANG: () => "C",
+	LC_ALL: () => "C",
+	TZ: () => "UTC",
+	TERM: () => "dumb",
+	NO_COLOR: () => "1",
+	XDG_CONFIG_HOME: (roots) => roots.xdgConfig,
+	XDG_CACHE_HOME: (roots) => roots.xdgCache,
+	XDG_DATA_HOME: (roots) => roots.xdgData,
+	XDG_STATE_HOME: (roots) => roots.xdgState,
+	PI_OFFLINE: () => "1",
+	PI_CODING_AGENT_DIR: (roots) => roots.agent,
+	CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: () => "1",
+	DISABLE_TELEMETRY: () => "1",
+	DISABLE_AUTOUPDATER: () => "1",
+	DISABLE_ERROR_REPORTING: () => "1",
+	DISABLE_GROWTHBOOK: () => "1",
+	ANTHROPIC_BASE_URL: (_roots, port) => (port === null ? undefined : `http://127.0.0.1:${port}`),
+	ANTHROPIC_API_KEY: (_roots, port) => (port === null ? undefined : MODEL_API_KEY),
+	NO_PROXY: (_roots, port) => (port === null ? undefined : "127.0.0.1,localhost"),
+};
+
+export const HARNESS_ENV_KEYS: readonly string[] = Object.keys(HARNESS_ENV);
+
+export function baseEnv(roots: Roots, port: number | null): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, resolve] of Object.entries(HARNESS_ENV)) {
+		const value = resolve(roots, port);
+		if (value !== undefined) env[key] = value;
+	}
+	return env;
+}
+
+export function seedFiles(roots: Roots, files: Record<string, string>): void {
+	for (const [path, content] of Object.entries(files)) {
+		const target = join(roots.workspace, path);
+		if (relative(roots.workspace, target).startsWith("..")) throw new Error(`seeded path escapes workspace: ${path}`);
+		mkdirp(dirname(target));
+		writeFileSync(target, content);
+	}
+}
+
+export function hashTree(dir: string): Map<string, string> {
+	const hashes = new Map<string, string>();
+	const walk = (current: string) => {
+		for (const entry of readdirSync(current, { withFileTypes: true })) {
+			const path = join(current, entry.name);
+			if (entry.isDirectory()) {
+				walk(path);
+			} else if (entry.isFile()) {
+				hashes.set(relative(dir, path), createHash("sha256").update(readFileSync(path)).digest("hex"));
+			} else if (entry.isSymbolicLink()) {
+				hashes.set(relative(dir, path), `symlink:${realpathSync(path)}`);
+			}
+		}
+	};
+	if (statSync(dir).isDirectory()) walk(dir);
+	return hashes;
+}
+
+/**
+ * The mach services a case may look up. The list is empty because nothing needs one: with every
+ * service denied the cases pass on both sides, and an empty list is what keeps the host's pasteboard
+ * (`com.apple.pboard`), Shortcuts, LaunchServices, and keychain services unreachable. Add a name only
+ * after a case fails on a logged denial. To log them, put `(debug deny)` in the profile and run
+ * `log stream --predicate 'sender == "Sandbox"'`; each missing service shows up as
+ * `deny(1) mach-lookup <name>`.
+ */
+const ALLOWED_MACH_SERVICES: readonly string[] = [];
+
+export interface ProfileOptions {
+	roots: Roots;
+	executableRoots: string[];
+	/** The mock model server's port, the only loopback port the profile opens. Null for no network. */
+	port: number | null;
+}
+
+export function renderProfile(options: ProfileOptions): string {
+	const { roots } = options;
+	const executableRoots = options.executableRoots.map((path) => realpathSync(path));
+	const rules = [
+		"(version 1)",
+		"(deny default)",
+		"(allow process-exec*)",
+		"(allow process-fork)",
+		"(allow signal (target self))",
+		"(allow signal (target children))",
+		"(allow sysctl-read)",
+		"(deny mach-lookup)",
+		...ALLOWED_MACH_SERVICES.map((service) => `(allow mach-lookup (global-name ${quote(service)}))`),
+		...["/usr/bin/security", "/usr/sbin/securityd", "/usr/bin/ssh-add", "/usr/bin/osascript", "/usr/bin/open"].map(
+			(path) => `(deny process-exec (literal ${quote(path)}))`,
+		),
+		"(allow file-read-metadata)",
+		"(allow file-read*)",
+		...[
+			REAL_HOME,
+			"/Library/Keychains",
+			"/private/var/db/dslocal",
+			"/Library/Application Support/ClaudeCode",
+			"/etc/claude-code",
+		].map((path) => `(deny file-read* (subpath ${quote(path)}))`),
+		...executableRoots.map((path) => `(allow file-read* (subpath ${quote(path)}))`),
+		`(allow file-read* (subpath ${quote(roots.root)}))`,
+		"(deny file-write*)",
+		`(allow file-write* (subpath ${quote(roots.root)}))`,
+		...["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/dtracehelper"].map(
+			(path) => `(allow file-write* (literal ${quote(path)}))`,
+		),
+		"(deny network*)",
+	];
+	if (options.port !== null) {
+		const loopback = `localhost:${options.port}`;
+		rules.push(
+			`(allow network-inbound (local ip ${quote(loopback)}))`,
+			`(allow network-outbound (remote ip ${quote(loopback)}))`,
+			`(allow network-bind (local ip ${quote(loopback)}))`,
+		);
+	}
+	rules.push("");
+	return rules.join("\n");
+}
+
+function quote(value: string): string {
+	return JSON.stringify(value);
+}
+
+function mkdirp(dir: string): string {
+	mkdirSync(dir, { recursive: true });
+	return dir;
+}

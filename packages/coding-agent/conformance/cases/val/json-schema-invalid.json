@@ -1,0 +1,30 @@
+{
+	"id": "val/json-schema-invalid",
+	"area": "val",
+	"argv": [
+		"-p",
+		"hello",
+		"--json-schema",
+		"{not json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"--json-schema is not valid JSON"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 0
+			}
+		]
+	},
+	"skip": []
+}

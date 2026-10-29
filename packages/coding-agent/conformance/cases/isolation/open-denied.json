@@ -1,0 +1,22 @@
+{
+	"id": "isolation/open-denied",
+	"area": "isolation",
+	"probe": "open",
+	"argv": [
+		"-h"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 15000,
+	"compare": {
+		"exit": 71,
+		"stderr": {
+			"contains": [
+				"Operation not permitted"
+			]
+		}
+	},
+	"skip": []
+}

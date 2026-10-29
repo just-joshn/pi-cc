@@ -1,0 +1,26 @@
+{
+	"id": "val/session-id-invalid",
+	"area": "val",
+	"argv": [
+		"-p",
+		"hello",
+		"--session-id",
+		"not-a-uuid"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "Error: Invalid session ID. Must be a valid UUID."
+		}
+	},
+	"skip": []
+}

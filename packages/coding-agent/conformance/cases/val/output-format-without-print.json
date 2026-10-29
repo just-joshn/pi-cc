@@ -1,0 +1,24 @@
+{
+	"id": "val/output-format-without-print",
+	"area": "val",
+	"argv": [
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "Error: Input must be provided either through stdin or as a prompt argument when using --print"
+		}
+	},
+	"skip": []
+}

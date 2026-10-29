@@ -1,0 +1,26 @@
+{
+	"id": "cli/invalid-flag",
+	"area": "cli",
+	"argv": [
+		"--no-such-flag-probe"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"contains": [
+				"unknown option",
+				"--no-such-flag-probe"
+			]
+		}
+	},
+	"skip": []
+}

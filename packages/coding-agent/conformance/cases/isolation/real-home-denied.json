@@ -1,0 +1,23 @@
+{
+	"id": "isolation/real-home-denied",
+	"area": "isolation",
+	"probe": "ls",
+	"argv": [
+		"-A",
+		"$REAL_HOME"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 15000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"Operation not permitted"
+			]
+		}
+	},
+	"skip": []
+}

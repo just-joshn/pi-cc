@@ -1,0 +1,26 @@
+{
+	"id": "val/permission-mode-bogus",
+	"area": "val",
+	"argv": [
+		"-p",
+		"hello",
+		"--permission-mode",
+		"nonsense"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "error: option '--permission-mode <mode>' argument 'nonsense' is invalid. Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan."
+		}
+	},
+	"skip": []
+}
