@@ -1,0 +1,37 @@
+{
+	"id": "provider-env/unknown-model-name-is-sent-verbatim",
+	"area": "provider-env",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {
+		"ANTHROPIC_MODEL": "pi-unknown-model-name"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"bodyEquals": {
+					"model": "pi-unknown-model-name"
+				}
+			}
+		]
+	},
+	"skip": []
+}
