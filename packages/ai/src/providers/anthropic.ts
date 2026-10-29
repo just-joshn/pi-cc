@@ -15,6 +15,7 @@ import {
 import { createProvider, type Provider } from "../models.ts";
 import type { ProviderEnv } from "../types.ts";
 import { ANTHROPIC_MODELS } from "./anthropic.models.ts";
+import { readAnthropicEnvironment } from "./anthropic-env.ts";
 
 function anthropicApiKeyAuth(): ApiKeyAuth {
 	return {
@@ -83,6 +84,7 @@ export function anthropicProvider(): Provider<"anthropic-messages"> {
 				isSubscription: true,
 				load: loadAnthropicOAuth,
 			}),
+			environment: readAnthropicEnvironment,
 		},
 		models: Object.values(ANTHROPIC_MODELS),
 		api: anthropicMessagesApi(),

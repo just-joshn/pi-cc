@@ -18,6 +18,7 @@ import {
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
 	type Provider,
+	type ProviderAuth,
 	type ProviderClassifier,
 	type ProviderHeaders,
 	type ProviderImages,
@@ -612,7 +613,13 @@ export function composeModelProvider(
 		name: extension?.name ?? config?.name ?? base?.name ?? extension?.oauth?.name ?? providerId,
 		baseUrl: extension?.baseUrl ?? config?.baseUrl ?? base?.baseUrl,
 		headers: base?.headers,
-		auth: { ...(apiKey ? { apiKey } : {}), ...(oauth ? { oauth } : {}) },
+		auth: {
+			...(apiKey ? { apiKey } : {}),
+			...(oauth ? { oauth } : {}),
+			...(base?.auth.environment
+				? { environment: composeProviderEnvironment(base.auth.environment, extension?.baseUrl ?? config?.baseUrl) }
+				: {}),
+		},
 		getModels: () => getAllModels().filter((model) => isModelType(model, "chat")),
 		getAllModels,
 		refreshModels:
@@ -685,6 +692,21 @@ export function composeModelProvider(
 	}
 
 	return provider;
+}
+
+/**
+ * A `baseUrl` in models.json or in an extension is a decision about which endpoint serves the provider, so
+ * the ambient one must not displace it. Everything else the environment contributes still applies.
+ */
+function composeProviderEnvironment(
+	environment: NonNullable<ProviderAuth["environment"]>,
+	configuredBaseUrl: string | undefined,
+): NonNullable<ProviderAuth["environment"]> {
+	if (configuredBaseUrl === undefined) return environment;
+	return async (context) => {
+		const values = await environment(context);
+		return values === undefined ? undefined : { ...values, baseUrl: undefined };
+	};
 }
 
 export function resolveConfiguredModelHeaders(

@@ -100,6 +100,16 @@ export interface AuthContext {
 	fileExists(path: string): Promise<boolean>;
 }
 
+/**
+ * Request values a provider takes from the ambient environment. The credential ladder owns credentials.
+ */
+export interface AuthEnvironment {
+	baseUrl?: string;
+	headers?: Record<string, string>;
+	/** True when `headers` alone satisfy the provider's request auth, such as a custom `x-api-key`. */
+	authenticated?: boolean;
+}
+
 /** Result of resolving auth for a model. */
 export interface AuthResult {
 	auth: ModelAuth;
@@ -256,4 +266,6 @@ export interface OAuthAuth {
 export interface ProviderAuth {
 	apiKey?: ApiKeyAuth;
 	oauth?: OAuthAuth;
+	/** Ambient endpoint/header values, merged into whatever the credential ladder resolved. */
+	environment?: (context: AuthContext) => Promise<AuthEnvironment | undefined>;
 }
