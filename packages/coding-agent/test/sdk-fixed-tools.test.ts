@@ -45,10 +45,16 @@ describe("fixedTools", () => {
 		await authStorage.modify(PROVIDER, async () => ({ type: "api_key", key: "test-api-key" }));
 		const modelRegistry = await createModelRegistry(authStorage, join(agentDir, "models.json"));
 		const sent: Model<"anthropic-messages">[] = [];
+		const declared: string[][] = [];
 		modelRegistry.registerProvider(PROVIDER, {
 			api: "anthropic-messages",
-			streamSimple: (requestModel) => {
+			streamSimple: (requestModel, context) => {
 				sent.push(requestModel as Model<"anthropic-messages">);
+				declared.push(
+					context.messages.flatMap((message) =>
+						message.role === "system" ? (message.toolsAdded ?? []).map((tool) => tool.name) : [],
+					),
+				);
 				const stream = createAssistantMessageEventStream();
 				stream.end({
 					role: "assistant",
@@ -92,6 +98,10 @@ describe("fixedTools", () => {
 		expect(sent.map((model) => [model.id, model.compat?.supportsMidConvoToolChanges])).toEqual([
 			["first", false],
 			["second", false],
+		]);
+		expect(declared).toEqual([
+			["Bash", "Edit", "Read", "Write"],
+			["Bash", "Edit", "Read", "Write"],
 		]);
 	});
 });
