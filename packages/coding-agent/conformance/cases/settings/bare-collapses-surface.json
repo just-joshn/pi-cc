@@ -1,0 +1,23 @@
+{
+	"id": "settings/bare-collapses-surface",
+	"area": "settings",
+	"argv": ["-p", "Reply with exactly PROBE_OK", "--bare"],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [{ "text": "PROBE_OK" }]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": { "tools": [{}, {}, {}] }
+			}
+		]
+	},
+	"skip": []
+}
