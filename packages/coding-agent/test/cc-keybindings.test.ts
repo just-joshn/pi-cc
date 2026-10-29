@@ -22,6 +22,7 @@ const roots: string[] = [];
 afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	setKeybindings(new KeybindingsManager());
+	vi.unstubAllEnvs();
 });
 
 function load(file: unknown) {
@@ -62,15 +63,59 @@ describe("CC keybinding file import", () => {
 		expect(submitted).toEqual(["draft"]);
 	});
 
-	it("rejects mixed native and CC root fields with diagnostics", () => {
-		const mixed = { ...cc({ "ctrl+y": "chat:submit" }), "app.model.select": "ctrl+b" };
-		expect(Compile(KeybindingsSchema).Check(mixed)).toBe(false);
+	it("ignores unknown CC root fields including help metadata", () => {
+		const mixed = {
+			...cc({ "ctrl+y": "chat:submit" }),
+			$docs: "https://example.test",
+			future: {},
+			"app.model.select": "ctrl+b",
+		};
+		expect(Compile(KeybindingsSchema).Check(mixed)).toBe(true);
 		const { manager } = load(mixed);
-		expect(manager.getImportDiagnostics()).toEqual([
-			"Unsupported CC keybinding root field: app.model.select. Native and CC file formats cannot be mixed",
-		]);
-		expect(manager.getPromptKeys("tui.input.submit")).not.toContain("ctrl+y");
+		expect(manager.getImportDiagnostics()).toEqual([]);
+		expect(manager.getPromptKeys("tui.input.submit")).toContain("ctrl+y");
 		expect(manager.getPromptKeys("app.model.select")).not.toContain("ctrl+b");
+	});
+
+	it.each([
+		["control+k", "ctrl+k"],
+		["cmd+k", "super+k"],
+		["command+k", "super+k"],
+		["win+k", "super+k"],
+		["super+k", "super+k"],
+		["del", "delete"],
+		["↑", "up"],
+		["↓", "down"],
+		["←", "left"],
+		["→", "right"],
+	])("normalizes CC alias %s", (key, expected) => {
+		expect(parseKeySequence(key)).toEqual([expected]);
+	});
+
+	it("loads CC config separately and lets pi native assignments win conflicts", () => {
+		const ccDir = mkdtempSync(join(tmpdir(), "cc-keybindings-"));
+		roots.push(ccDir);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", ccDir);
+		writeFileSync(
+			join(ccDir, "keybindings.json"),
+			JSON.stringify(cc({ "ctrl+y": "chat:submit", "ctrl+b": "chat:submit" })),
+		);
+		const { manager } = load({ "app.model.select": "ctrl+b" });
+		expect(manager.getPromptKeys("tui.input.submit")).toContain("ctrl+y");
+		expect(manager.getPromptKeys("tui.input.submit")).not.toContain("ctrl+b");
+		expect(manager.getPromptKeys("app.model.select")).toContain("ctrl+b");
+	});
+
+	it.each([
+		["chat:newline", "tui.input.newLine"],
+		["chat:undo", "tui.editor.undo"],
+		["chat:imagePaste", "app.clipboard.pasteImage"],
+		["history:previous", "tui.editor.historyPrevious"],
+		["history:next", "tui.editor.historyNext"],
+		["chat:thinkingToggle", "app.thinking.toggle"],
+		["app:interrupt", "app.interrupt"],
+	])("maps %s to its pi action", (action, expected) => {
+		expect(importCcKeybindings(cc({ "ctrl+y": action }), new Set()).bindings[0]?.action).toBe(expected);
 	});
 
 	it("normalizes aliases and validates each stroke", () => {
@@ -174,18 +219,28 @@ describe("prompt chord dispatch", () => {
 		expect(models).toBe(0);
 	});
 
-	it("reprocesses a mismatching stroke and a new chord prefix", () => {
+	it("swallows a mismatching stroke and does not restart on a repeated prefix", () => {
 		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
 		const submitted: string[] = [];
 		editor.onSubmit = (text) => submitted.push(text);
 		editor.setText("draft");
 		editor.handleInput("\x0b");
 		editor.handleInput("x");
-		expect(editor.getText()).toBe("draftx");
+		expect(editor.getText()).toBe("draft");
 		editor.handleInput("\x0b");
 		editor.handleInput("\x0b");
 		editor.handleInput("\x13");
-		expect(submitted).toEqual(["draftx"]);
+		expect(submitted).toEqual([]);
+	});
+
+	it("swallows Escape after a prefix even if Escape is a configured suffix", () => {
+		const { editor } = load(cc({ "ctrl+k escape": "chat:modelPicker" }));
+		let count = 0;
+		editor.onAction("app.model.select", () => count++);
+		editor.onEscape = () => count++;
+		editor.handleInput("\x0b");
+		editor.handleInput("\x1b");
+		expect(count).toBe(0);
 	});
 
 	it("clears a pending chord when an extension consumes input", () => {
@@ -251,7 +306,12 @@ describe("prompt chord dispatch", () => {
 		const resolver = new ChordResolver();
 		const bindings = importCcKeybindings(cc({ "ctrl+k ctrl+s": "chat:submit" }), new Set()).bindings;
 		expect(resolver.resolve("\x0b", bindings, 0)).toEqual({ kind: "pending" });
-		expect(resolver.resolve("\x13", bindings, 1000)).toEqual({ kind: "input", actions: new Set() });
+		expect(resolver.resolve("\x13", bindings, 2999)).toEqual({
+			kind: "input",
+			actions: new Set(["tui.input.submit"]),
+		});
+		resolver.resolve("\x0b", bindings, 4000);
+		expect(resolver.resolve("\x13", bindings, 7000)).toEqual({ kind: "input", actions: new Set() });
 	});
 
 	it("imports native named-action chords alongside ordinary bindings and resets on reload", () => {
