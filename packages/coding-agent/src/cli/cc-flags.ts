@@ -362,7 +362,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "level",
 		summary: "Reasoning effort for this session",
-		status: "wired",
+		status: "accepted",
 		validate: validateEffort,
 		apply: setString("effort"),
 	},
@@ -453,7 +453,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "format",
 		choices: { values: ["text", "stream-json"], hard: true },
 		summary: "Prompt input format (text, stream-json)",
-		status: "wired",
+		status: "accepted",
 		apply: setString("inputFormat"),
 	},
 	{
@@ -461,7 +461,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "schema",
 		summary: "JSON Schema for structured output",
-		status: "wired",
+		status: "accepted",
 		validate: validateJsonSchema,
 		apply: applyJsonSchema,
 	},
@@ -470,7 +470,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "amount",
 		summary: "Spend cap in dollars for this run",
-		status: "wired",
+		status: "accepted",
 		validate: validateMaxBudget,
 		apply: applyMaxBudget,
 	},
@@ -529,7 +529,7 @@ export const CC_FLAGS: CcFlag[] = [
 			hard: true,
 		},
 		summary: "Permission mode for the session",
-		status: "wired",
+		status: "accepted",
 		apply: setString("permissionMode"),
 	},
 	{
@@ -538,7 +538,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "target",
 		choices: { values: ["host", "none"], hard: true },
 		summary: "Who answers permission prompts (host, none)",
-		status: "wired",
+		status: "accepted",
 		apply: setString("permissionPrompts"),
 	},
 	{
@@ -630,7 +630,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "sources",
 		summary: "Setting sources to load (user, project, local)",
-		status: "wired",
+		status: "accepted",
 		validate: validateSettingSources,
 		apply: setString("settingSources"),
 	},
@@ -662,7 +662,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "on|off",
 		choices: { values: ["on", "off"], hard: true },
 		summary: "Record the system prompt once per conversation",
-		status: "wired",
+		status: "accepted",
 		apply: setString("systemPromptSnapshot"),
 	},
 	{
@@ -821,6 +821,13 @@ export function consumeCcFlag(
 		if (rejected) {
 			diagnostics.push(rejected);
 			return lastIndex;
+		}
+	}
+
+	if (flag.status === "accepted") {
+		const message = `--${flag.name} is accepted but not implemented yet`;
+		if (!diagnostics.some((entry) => entry.message === message)) {
+			diagnostics.push({ type: "warning", message });
 		}
 	}
 

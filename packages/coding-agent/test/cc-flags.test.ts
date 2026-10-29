@@ -85,7 +85,7 @@ describe("validation diagnostics", () => {
 
 	test("accepts a positive budget", () => {
 		const result = parseArgs(["-p", "hello", "--max-budget-usd", "1.5"]);
-		expect(result.diagnostics).toEqual([]);
+		expect(result.diagnostics.map(render)).toEqual(["Warning: --max-budget-usd is accepted but not implemented yet"]);
 		expect(result.maxBudgetUsd).toBe(1.5);
 	});
 
@@ -118,7 +118,7 @@ describe("validation diagnostics", () => {
 
 	test("stores a valid --json-schema", () => {
 		const result = parseArgs(["--json-schema", '{"type":"object"}']);
-		expect(result.diagnostics).toEqual([]);
+		expect(result.diagnostics.map(render)).toEqual(["Warning: --json-schema is accepted but not implemented yet"]);
 		expect(result.jsonSchema).toEqual({ type: "object" });
 	});
 
@@ -133,27 +133,33 @@ describe("validation diagnostics", () => {
 	test("accepts every documented --effort value", () => {
 		for (const level of ["low", "medium", "high", "xhigh", "max"]) {
 			const result = parseArgs(["--effort", level]);
-			expect(result.diagnostics).toEqual([]);
+			expect(result.diagnostics.map(render)).toEqual(["Warning: --effort is accepted but not implemented yet"]);
 			expect(result.effort).toBe(level);
 		}
 	});
 
 	test("validates --permission-prompts against host and none", () => {
-		expect(parseArgs(["--permission-prompts", "host"]).diagnostics).toEqual([]);
+		expect(parseArgs(["--permission-prompts", "host"]).diagnostics.map(render)).toEqual([
+			"Warning: --permission-prompts is accepted but not implemented yet",
+		]);
 		expect(parseArgs(["--permission-prompts", "nonsense"]).diagnostics.map(render)).toEqual([
 			"error: option '--permission-prompts <target>' argument 'nonsense' is invalid. Allowed choices are host, none.",
 		]);
 	});
 
 	test("validates --system-prompt-snapshot against on and off", () => {
-		expect(parseArgs(["--system-prompt-snapshot", "off"]).diagnostics).toEqual([]);
+		expect(parseArgs(["--system-prompt-snapshot", "off"]).diagnostics.map(render)).toEqual([
+			"Warning: --system-prompt-snapshot is accepted but not implemented yet",
+		]);
 		expect(parseArgs(["--system-prompt-snapshot", "bogus"]).diagnostics.map(render)).toEqual([
 			"error: option '--system-prompt-snapshot <on|off>' argument 'bogus' is invalid. Allowed choices are on, off.",
 		]);
 	});
 
 	test("validates --setting-sources", () => {
-		expect(parseArgs(["--setting-sources", "user,project,local"]).diagnostics).toEqual([]);
+		expect(parseArgs(["--setting-sources", "user,project,local"]).diagnostics.map(render)).toEqual([
+			"Warning: --setting-sources is accepted but not implemented yet",
+		]);
 		expect(parseArgs(["--setting-sources", "user,bogus"]).diagnostics.map(render)).toEqual([
 			"Error: Invalid setting source: bogus. Valid options are: user, project, local",
 		]);
@@ -191,7 +197,7 @@ describe("table arity", () => {
 
 	test("an optional-value flag stops at the next flag", () => {
 		const result = parseArgs(["--debug", "--verbose"]);
-		expect(result.diagnostics).toEqual([]);
+		expect(result.diagnostics.map(render)).toEqual(["Warning: --debug is accepted but not implemented yet"]);
 		expect(result.debug).toBe(true);
 		expect(result.verbose).toBe(true);
 	});
@@ -204,7 +210,7 @@ describe("table arity", () => {
 
 	test("a variadic flag collects tokens until the next flag", () => {
 		const result = parseArgs(["--add-dir", "one", "two", "--verbose"]);
-		expect(result.diagnostics).toEqual([]);
+		expect(result.diagnostics.map(render)).toEqual(["Warning: --add-dir is accepted but not implemented yet"]);
 		expect(result.addDir).toEqual(["one", "two"]);
 		expect(result.verbose).toBe(true);
 		expect(result.messages).toEqual([]);
@@ -222,7 +228,9 @@ describe("table arity", () => {
 
 	test("--flag=value works for table flags", () => {
 		const result = parseArgs(["--output-format=json", "--permission-mode=plan"]);
-		expect(result.diagnostics).toEqual([]);
+		expect(result.diagnostics.map(render)).toEqual([
+			"Warning: --permission-mode is accepted but not implemented yet",
+		]);
 		expect(result.outputFormat).toBe("json");
 		expect(result.permissionMode).toBe("plan");
 		expect(result.mode).toBe("json");
@@ -234,6 +242,24 @@ describe("table arity", () => {
 		const withValue = parseArgs(["--resume", "abc123"]);
 		expect(withValue.resume).toBe(true);
 		expect(withValue.session).toBe("abc123");
+	});
+});
+
+describe("accepted flags", () => {
+	test("warns once per flag that no code consumes", () => {
+		expect(parseArgs(["--bare", "--bare"]).diagnostics.map(render)).toEqual([
+			"Warning: --bare is accepted but not implemented yet",
+		]);
+	});
+
+	test("says nothing for a wired flag", () => {
+		expect(parseArgs(["--verbose"]).diagnostics).toEqual([]);
+	});
+
+	test("reports an invalid value instead of the unimplemented warning", () => {
+		expect(parseArgs(["--permission-mode", "nonsense"]).diagnostics.map(render)).toEqual([
+			"error: option '--permission-mode <mode>' argument 'nonsense' is invalid. Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.",
+		]);
 	});
 });
 
