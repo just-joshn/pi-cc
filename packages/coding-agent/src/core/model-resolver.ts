@@ -13,7 +13,7 @@ import {
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
-import { ccModelAlias, parseAnthropicModelEnv } from "./anthropic-model-env.ts";
+import { ccModelAlias, hasModelEnvironment, isModelAlias, parseAnthropicModelEnv } from "./anthropic-model-env.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
@@ -486,11 +486,14 @@ export function resolveCliModel(options: {
 		};
 	}
 
+	const aliasApplies = hasModelEnvironment(modelEnvironment) && (provider === undefined || provider === "anthropic");
+
 	const result = resolveModelReference(
 		{
-			// A bare `haiku` and friends are Claude Code aliases when this could be the Anthropic provider.
-			text: provider === undefined || provider === "anthropic" ? ccModelAlias(cliModel, modelEnvironment) : cliModel,
-			provider,
+			// A bare `haiku` and friends are Claude Code aliases once its model variables are in play, and an
+			// alias names a model on the Anthropic provider rather than a model to search every provider for.
+			text: aliasApplies ? ccModelAlias(cliModel, modelEnvironment) : cliModel,
+			provider: provider ?? (aliasApplies && isModelAlias(cliModel) ? "anthropic" : undefined),
 			thinkingSuffix: "strict",
 			fuzzy: true,
 		},
@@ -549,6 +552,26 @@ export interface InitialModelResult {
 }
 
 /**
+ * The model `ANTHROPIC_MODEL` selects, or undefined when the variable is unset or the Anthropic provider has
+ * no credentials to serve it. A family alias resolves to that family's model; any other name is a model id
+ * Claude Code sends as written, so an id the catalog does not carry becomes a custom model on the provider
+ * rather than falling through to another provider's model of the same name.
+ */
+export function anthropicEnvModel(
+	modelRuntime: ModelRuntime,
+	env: Record<string, string | undefined> = process.env,
+): Model<Api> | undefined {
+	const modelEnvironment = parseAnthropicModelEnv(env);
+	const requested = modelEnvironment.model;
+	if (requested === undefined || !modelRuntime.hasConfiguredAuth("anthropic")) return undefined;
+	const modelId = ccModelAlias(requested, modelEnvironment);
+	const known = modelRuntime.getModel("anthropic", modelId);
+	if (known) return known;
+	const [first, ...rest] = modelRuntime.getModels("anthropic");
+	return first === undefined ? undefined : buildFallbackModel([first, ...rest], modelId);
+}
+
+/**
  * Find the initial model to use based on priority:
  * 1. First model from scoped models (if not continuing/resuming)
  * 2. `ANTHROPIC_MODEL` for the Anthropic provider
@@ -577,8 +600,6 @@ export async function findInitialModel(options: {
 		env,
 	} = options;
 
-	const modelEnvironment = parseAnthropicModelEnv(env ?? process.env);
-
 	let model: Model<Api> | undefined;
 	let thinkingLevel: ThinkingLevel = DEFAULT_THINKING_LEVEL;
 
@@ -593,20 +614,15 @@ export async function findInitialModel(options: {
 		};
 	}
 
-	// 2. ANTHROPIC_MODEL names the Anthropic session model, ahead of the saved default. A name outside the
-	// catalog falls through rather than becoming a custom model: the variable is written by the operator or
-	// a wrapper script, so a typo should not silently reach the wire.
-	const requestedModel = modelEnvironment.model;
-	if (requestedModel !== undefined && modelRuntime.hasConfiguredAuth("anthropic")) {
-		const found = modelRuntime.getModel("anthropic", ccModelAlias(requestedModel, modelEnvironment));
-		if (found) {
-			const perModel = modelThinkingLevels?.[`anthropic/${found.id}`];
-			return {
-				model: found,
-				thinkingLevel: perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
-				fallbackMessage: undefined,
-			};
-		}
+	// 2. `ANTHROPIC_MODEL` names the session model, ahead of the saved default.
+	const requestedModel = anthropicEnvModel(modelRuntime, env ?? process.env);
+	if (requestedModel) {
+		const perModel = modelThinkingLevels?.[`${requestedModel.provider}/${requestedModel.id}`];
+		return {
+			model: requestedModel,
+			thinkingLevel: perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			fallbackMessage: undefined,
+		};
 	}
 
 	// 3. Try saved default from settings if auth is configured.

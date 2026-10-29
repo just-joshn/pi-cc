@@ -12,7 +12,7 @@ import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { createToolNameMatcher } from "./mcp-servers.ts";
 import { convertToLlm } from "./messages.ts";
-import { findInitialModel } from "./model-resolver.ts";
+import { anthropicEnvModel, findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
@@ -221,8 +221,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRuntime.getModel(provider, modelId),
 	);
 
-	// If session has data, try to restore model from it
-	if (!model && hasExistingSession && sessionModel) {
+	// If session has data, try to restore model from it. `ANTHROPIC_MODEL` owns the session model when the
+	// Anthropic provider can serve it, so a restored model would contradict what the operator set.
+	const envModel = anthropicEnvModel(modelRuntime);
+	if (!model && hasExistingSession && sessionModel && !envModel) {
 		const restoredModel = modelRuntime.getModel(sessionModel.provider, sessionModel.modelId);
 		if (restoredModel && modelRuntime.hasConfiguredAuth(restoredModel.provider)) {
 			model = restoredModel;
