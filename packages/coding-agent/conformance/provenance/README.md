@@ -18,7 +18,10 @@ paths:
 
 - default deny, then explicit allows, in that order, because Seatbelt applies the last matching rule;
 - allow `process-exec*`, then deny the executables that read credentials or hand work to another app (`security`, `securityd`, `ssh-add`, `osascript`, `open`);
-- allow `mach-lookup`, then deny the Security framework and trust services;
+- deny every mach service, then allow back only the names in `ALLOWED_MACH_SERVICES`, which is empty
+  because no case needs one. The dossier profiles allowed `mach-lookup` broadly and denied the Security
+  and trust services; the harness narrowed that to an allowlist, so the pasteboard, Shortcuts, and
+  LaunchServices services are unreachable too;
 - allow reads broadly, then deny the real home, `/Library/Keychains`, `/private/var/db/dslocal` and the
   managed-policy roots, then re-allow the side's executable and its own root;
 - deny writes broadly, then allow the side root and the `/dev` character devices;

@@ -137,6 +137,16 @@ export function hashTree(dir: string): Map<string, string> {
 	return hashes;
 }
 
+/**
+ * The mach services a case may look up. The list is empty because nothing needs one: with every
+ * service denied the cases pass on both sides, and an empty list is what keeps the host's pasteboard
+ * (`com.apple.pboard`), Shortcuts, LaunchServices, and keychain services unreachable. Add a name only
+ * after a case fails on a logged denial. To log them, put `(debug deny)` in the profile and run
+ * `log stream --predicate 'sender == "Sandbox"'`; each missing service shows up as
+ * `deny(1) mach-lookup <name>`.
+ */
+const ALLOWED_MACH_SERVICES: readonly string[] = [];
+
 export interface ProfileOptions {
 	roots: Roots;
 	executableRoots: string[];
@@ -155,10 +165,8 @@ export function renderProfile(options: ProfileOptions): string {
 		"(allow signal (target self))",
 		"(allow signal (target children))",
 		"(allow sysctl-read)",
-		"(allow mach-lookup)",
-		...["com.apple.securityd", "com.apple.trustd", "com.apple.trustd.agent", "com.apple.keystore"].map(
-			(service) => `(deny mach-lookup (global-name ${quote(service)}))`,
-		),
+		"(deny mach-lookup)",
+		...ALLOWED_MACH_SERVICES.map((service) => `(allow mach-lookup (global-name ${quote(service)}))`),
 		...["/usr/bin/security", "/usr/sbin/securityd", "/usr/bin/ssh-add", "/usr/bin/osascript", "/usr/bin/open"].map(
 			(path) => `(deny process-exec (literal ${quote(path)}))`,
 		),
