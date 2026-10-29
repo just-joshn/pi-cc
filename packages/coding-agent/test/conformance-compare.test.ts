@@ -211,6 +211,13 @@ describe("compare.requests body patterns", () => {
 		expect(checks(spec, { requests })).toEqual([]);
 	});
 
+	test("fails body patterns when the side sent no matching request", () => {
+		const spec: CompareSpec = {
+			requests: [{ pathStartsWith: "/v1/messages", bodyMatch: ["^"], bodyNotMatch: ["never-sent"] }],
+		};
+		expect(checks(spec, { requests: [] })).toEqual(["requests.bodyMatch", "requests.bodyNotMatch"]);
+	});
+
 	test("fails a pattern that must not match", () => {
 		const spec: CompareSpec = { requests: [{ bodyMatch: ["first"], bodyNotMatch: ["system-reminder"] }] };
 		expect(checks(spec, { requests })).toEqual(["requests.bodyMatch", "requests.bodyNotMatch"]);
