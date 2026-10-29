@@ -13,6 +13,7 @@ import {
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
+import { ccModelAlias, parseAnthropicModelEnv } from "./anthropic-model-env.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
@@ -461,6 +462,8 @@ export function resolveCliModel(options: {
 		return { model: undefined, warning: undefined, error: undefined };
 	}
 
+	const modelEnvironment = parseAnthropicModelEnv(process.env);
+
 	// Important: use *all* models here, not just models with pre-configured auth.
 	// This allows "--api-key" to be used for first-time setup.
 	const models = [...modelRuntime.getModels()];
@@ -484,7 +487,13 @@ export function resolveCliModel(options: {
 	}
 
 	const result = resolveModelReference(
-		{ text: cliModel, provider, thinkingSuffix: "strict", fuzzy: true },
+		{
+			// A bare `haiku` and friends are Claude Code aliases when this could be the Anthropic provider.
+			text: provider === undefined || provider === "anthropic" ? ccModelAlias(cliModel, modelEnvironment) : cliModel,
+			provider,
+			thinkingSuffix: "strict",
+			fuzzy: true,
+		},
 		models,
 		// An inline key goes to whichever provider is selected, so stored credentials must not choose it
 		inlineApiKey ? () => false : (providerId) => modelRuntime.hasConfiguredAuth(providerId),
@@ -542,8 +551,9 @@ export interface InitialModelResult {
 /**
  * Find the initial model to use based on priority:
  * 1. First model from scoped models (if not continuing/resuming)
- * 2. Saved default from settings
- * 3. First available model with valid API key
+ * 2. `ANTHROPIC_MODEL` for the Anthropic provider
+ * 3. Saved default from settings
+ * 4. First available model with valid API key
  */
 export async function findInitialModel(options: {
 	scopedModels: ScopedModel[];
@@ -553,6 +563,8 @@ export async function findInitialModel(options: {
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>;
 	modelRuntime: ModelRuntime;
+	/** Defaults to `process.env`. */
+	env?: Record<string, string | undefined>;
 }): Promise<InitialModelResult> {
 	const {
 		scopedModels,
@@ -562,7 +574,10 @@ export async function findInitialModel(options: {
 		defaultThinkingLevel,
 		modelThinkingLevels,
 		modelRuntime,
+		env,
 	} = options;
+
+	const modelEnvironment = parseAnthropicModelEnv(env ?? process.env);
 
 	let model: Model<Api> | undefined;
 	let thinkingLevel: ThinkingLevel = DEFAULT_THINKING_LEVEL;
@@ -578,7 +593,23 @@ export async function findInitialModel(options: {
 		};
 	}
 
-	// 2. Try saved default from settings if auth is configured.
+	// 2. ANTHROPIC_MODEL names the Anthropic session model, ahead of the saved default. A name outside the
+	// catalog falls through rather than becoming a custom model: the variable is written by the operator or
+	// a wrapper script, so a typo should not silently reach the wire.
+	const requestedModel = modelEnvironment.model;
+	if (requestedModel !== undefined && modelRuntime.hasConfiguredAuth("anthropic")) {
+		const found = modelRuntime.getModel("anthropic", ccModelAlias(requestedModel, modelEnvironment));
+		if (found) {
+			const perModel = modelThinkingLevels?.[`anthropic/${found.id}`];
+			return {
+				model: found,
+				thinkingLevel: perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+				fallbackMessage: undefined,
+			};
+		}
+	}
+
+	// 3. Try saved default from settings if auth is configured.
 	if (defaultProvider && defaultModelId) {
 		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
 		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
@@ -593,7 +624,7 @@ export async function findInitialModel(options: {
 		}
 	}
 
-	// 3. Try first available model with valid API key
+	// 4. Try first available model with valid API key
 	const availableModels = [...modelRuntime.getAvailableSnapshot()];
 
 	if (availableModels.length > 0) {
@@ -610,7 +641,7 @@ export async function findInitialModel(options: {
 		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
 	}
 
-	// 4. No model found
+	// 5. No model found
 	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
 }
 
