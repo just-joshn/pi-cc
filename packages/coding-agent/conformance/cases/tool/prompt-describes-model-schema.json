@@ -1,0 +1,24 @@
+{
+	"id": "tool/prompt-describes-model-schema",
+	"area": "tool",
+	"argv": ["-p", "hello", "--output-format", "stream-json", "--verbose"],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": { "turns": [{ "text": "PROBE_OK" }] },
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": { "kind": "text", "match": ["PROBE_OK"] },
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyMatch": ["\"name\":\"Edit\"", "old_string"],
+				"bodyNotMatch": ["edits\\[\\]", "oldText", "newText", "allowLarge", "in seconds"]
+			}
+		]
+	},
+	"skip": []
+}

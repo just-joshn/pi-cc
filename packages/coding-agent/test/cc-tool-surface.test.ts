@@ -8,6 +8,8 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-s
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildSystemPromptSections } from "../src/core/system-prompt.ts";
+import { createBashToolDefinition } from "../src/core/tools/bash.ts";
 import {
 	projectAssistantMessageForPi,
 	projectDeclarations,
@@ -16,10 +18,10 @@ import {
 	wrapStreamFn,
 } from "../src/core/tools/cc-surface.ts";
 import { CC_TOOL_TEXT } from "../src/core/tools/cc-text.ts";
-import { createEditTool } from "../src/core/tools/edit.ts";
-import { createReadTool } from "../src/core/tools/read.ts";
+import { createEditTool, createEditToolDefinition } from "../src/core/tools/edit.ts";
+import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
 import { createReadState } from "../src/core/tools/read-state.ts";
-import { createWriteTool } from "../src/core/tools/write.ts";
+import { createWriteTool, createWriteToolDefinition } from "../src/core/tools/write.ts";
 
 function assistantCall(name: string, args: Record<string, string | number | boolean>): AssistantMessage {
 	return {
@@ -567,6 +569,56 @@ describe("Claude Code read advice, edit suffix, and custom operations", () => {
 				rules: "<rules>\n- Use Read to examine files.\n- Use grep to search.\n- Be concise\n</rules>",
 			},
 		});
+	});
+});
+
+describe("model-facing prompt text", () => {
+	it("describes the Claude Code schema and names, not pi's, in declarations and the system prompt", () => {
+		const definitions = [
+			createReadToolDefinition("/w"),
+			createBashToolDefinition("/w"),
+			createEditToolDefinition("/w"),
+			createWriteToolDefinition("/w"),
+		];
+		const sections = buildSystemPromptSections({
+			cwd: "/w",
+			selectedTools: definitions.map((tool) => tool.name),
+			toolSnippets: Object.fromEntries(definitions.map((tool) => [tool.name, tool.promptSnippet ?? ""])),
+			toolGuidelines: Object.fromEntries(definitions.map((tool) => [tool.name, tool.promptGuidelines ?? []])),
+			skills: [
+				{
+					name: "s",
+					description: "d",
+					filePath: "/w/s/SKILL.md",
+					baseDir: "/w/s",
+					sourceInfo: { path: "/w/s/SKILL.md", source: "local", scope: "project", origin: "top-level" },
+					disableModelInvocation: false,
+				},
+			],
+		});
+		const [projected] = projectMessagesForModel([
+			{
+				role: "system",
+				content: "",
+				timestamp: 0,
+				sections,
+				toolsAdded: definitions.map(({ name, description, parameters }) => ({ name, description, parameters })),
+			},
+		]);
+		const text = JSON.stringify(projected);
+		for (const piTerm of [
+			/edits\[\]/,
+			/oldText/,
+			/newText/,
+			/allowLarge/,
+			/the read tool/,
+			/edit call/,
+			/in seconds/,
+		]) {
+			expect(text).not.toMatch(piTerm);
+		}
+		expect(text).toContain("old_string");
+		expect(text).toContain("Use the Read tool to load a skill's file");
 	});
 });
 
