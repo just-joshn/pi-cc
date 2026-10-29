@@ -16,7 +16,7 @@ import { baseEnv, createRoots, expandPlaceholders, hashTree, REAL_HOME, renderPr
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
-import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, claudeSide, hashClaude } from "./sides/claude.ts";
+import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, createClaudeSide, hashClaude } from "./sides/claude.ts";
 import { CLI_PATH, piCcSide } from "./sides/pi-cc.ts";
 
 type Verdict = "PASS" | "FAIL" | "SKIP" | "UNVERIFIED";
@@ -94,13 +94,14 @@ async function main(): Promise<number> {
 	const results = new Map<string, CaseRun>();
 	const allowDrift = values["allow-claude-version-drift"] === true;
 	const compareClaude = claude !== null && claude.sha256 === CLAUDE_SHA256 && (claude.frozen || allowDrift);
+	const sides: Side[] = compareClaude && claude !== null ? [createClaudeSide(claude.path), piCcSide] : [piCcSide];
 	const execute = async (testCase: ConformanceCase): Promise<CaseRun> => {
 		const cached = results.get(testCase.id);
 		if (cached !== undefined) return cached;
 		const skip = skipReason(testCase, claude === null);
 		const run: CaseRun =
 			skip === null
-				? await runCase(testCase, compareClaude, runRoot)
+				? await runCase(testCase, sides, runRoot)
 				: { id: testCase.id, area: testCase.area, verdict: "SKIP", runs: [], skip };
 		results.set(testCase.id, run);
 		return run;
@@ -147,7 +148,7 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 	if (hashed.sha256 !== CLAUDE_SHA256) return { ...hashed, banner: null, version: null, frozen: false };
 	const roots = createRoots(runRoot, ".claude-probe", "claude");
 	const profilePath = join(roots.out, "profile.sb");
-	writeFileSync(profilePath, renderProfile({ roots, executableRoots: claudeSide.executableRoots(), port: null }));
+	writeFileSync(profilePath, renderProfile({ roots, executableRoots: [hashed.path], port: null }));
 	const probe = await runSandboxed(profilePath, [hashed.path, "--version"], roots, baseEnv(roots, null), null, 30_000);
 	const banner = probe.exitCode === 0 ? probe.stdout.trim() : null;
 	return {
@@ -158,15 +159,11 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 	};
 }
 
-async function runCase(testCase: ConformanceCase, compareClaude: boolean, runRoot: string): Promise<CaseRun> {
+async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string): Promise<CaseRun> {
 	const runs: SideRun[] = [];
-	for (const side of [claudeSide, piCcSide]) {
-		if (side.name === "claude" && !compareClaude) {
-			runs.push({ side: side.name, ran: false, diffs: [], stderr: "" });
-			continue;
-		}
-		runs.push(await runSide(testCase, side, runRoot));
-	}
+	// The verdict is only PASS when every side ran, so a claude side that was not selected still reports here.
+	if (!sides.some((side) => side.name === "claude")) runs.push({ side: "claude", ran: false, diffs: [], stderr: "" });
+	for (const side of sides) runs.push(await runSide(testCase, side, runRoot));
 	const failed = runs.some((run) => run.diffs.length > 0);
 	const verdict: Verdict = failed ? "FAIL" : runs.some((run) => !run.ran) ? "UNVERIFIED" : "PASS";
 	return { id: testCase.id, area: testCase.area, verdict, runs, skip: null };

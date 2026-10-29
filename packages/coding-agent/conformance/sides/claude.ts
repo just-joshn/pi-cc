@@ -1,7 +1,7 @@
 /** The reference side: the installed Claude Code binary, pinned by version and digest. */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import type { Side } from "../isolate.ts";
 
 export const CLAUDE_BIN = process.env.CONFORMANCE_CLAUDE_BIN ?? "/Users/josh-desktop/.local/bin/claude";
@@ -10,6 +10,7 @@ export const CLAUDE_SHA256 = "6b5ec691195e551b02c41df9f7d723f4ea61eaa03c2df90ace
 export const CLAUDE_BANNER = `${CLAUDE_VERSION} (Claude Code)`;
 
 export interface ClaudeIdentity {
+	/** The resolved binary path. It is the only path the harness ever executes. */
 	path: string;
 	sha256: string;
 	banner: string | null;
@@ -18,20 +19,25 @@ export interface ClaudeIdentity {
 }
 
 /**
- * The installed binary and its digest. This never runs the binary, so a claude that fails the pin
- * is hashed and left alone rather than executed.
+ * The installed binary and its digest. The path is resolved once here, and it is the only path later
+ * steps execute, so retargeting the symlink cannot swap the program the digest describes. A path that
+ * does not resolve or read is reported absent, never thrown. This never runs the binary, so a claude
+ * that fails the pin is hashed and left alone rather than executed.
  */
-export function hashClaude(): { path: string; sha256: string } | null {
-	if (!existsSync(CLAUDE_BIN)) return null;
-	const digest = createHash("sha256")
-		.update(readFileSync(realpathSync(CLAUDE_BIN)))
-		.digest("hex");
-	return { path: CLAUDE_BIN, sha256: digest };
+export function hashClaude(binPath: string = CLAUDE_BIN): { path: string; sha256: string } | null {
+	try {
+		const path = realpathSync(binPath);
+		return { path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") };
+	} catch {
+		return null;
+	}
 }
 
-export const claudeSide: Side = {
-	name: "claude",
-	command: () => [CLAUDE_BIN],
-	executableRoots: () => (existsSync(CLAUDE_BIN) ? [realpathSync(CLAUDE_BIN)] : []),
-	prepare: () => {},
-};
+export function createClaudeSide(pinnedPath: string): Side {
+	return {
+		name: "claude",
+		command: () => [pinnedPath],
+		executableRoots: () => [pinnedPath],
+		prepare: () => {},
+	};
+}
