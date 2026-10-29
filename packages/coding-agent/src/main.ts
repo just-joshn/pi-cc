@@ -59,7 +59,12 @@ import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dis
 import { anthropicCcModel, resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
-import { type AppMode, readInitialProjectTrust, resolveProjectTrusted } from "./core/project-trust.ts";
+import {
+	type AppMode,
+	readInitialProjectTrust,
+	readProjectTrust,
+	resolveProjectTrusted,
+} from "./core/project-trust.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
 import {
 	formatMissingSessionCwdPrompt,
@@ -996,11 +1001,20 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
 				...ccResources,
-				memorySettings: () => ({
-					values: ccAdmission.run.settings.values,
-					pluginOptions: ccAdmission.run.settings.pluginOptions,
-					settingSources: toSettingSources(parsed.settingSources),
-				}),
+				memorySettings: () => {
+					const trust = readProjectTrust({
+						cwd,
+						trustStore,
+						trustOverride: parsed.projectTrustOverride,
+						defaultProjectTrust: startupSettingsManager.getDefaultProjectTrust(),
+					});
+					return {
+						values: ccAdmission.run.settings.values,
+						pluginOptions: ccAdmission.run.settings.pluginOptions,
+						settingSources: toSettingSources(parsed.settingSources),
+						trustDecision: trust.kind === "decided" ? trust.trusted : undefined,
+					};
+				},
 				disabledBuiltinExtensions: ccResources.noMcp ? ["mcp"] : undefined,
 				noThemes: parsed.noThemes,
 				systemPrompt: parsed.systemPrompt,

@@ -308,6 +308,11 @@ export interface MemorySettings {
 	readonly values: Readonly<Record<string, unknown>>;
 	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 	readonly settingSources: readonly string[] | undefined;
+	/**
+	 * pi's decided trust for the project: `--approve`/`--no-approve`, a stored decision, or
+	 * `defaultProjectTrust` set to always or never. Undefined when pi would ask, and the session's trust applies.
+	 */
+	readonly trustDecision?: boolean;
 }
 
 export interface DefaultResourceLoaderOptions {
@@ -716,7 +721,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				values: memorySettings.values,
 				pluginOptions: memorySettings.pluginOptions,
 				settingSources: memorySettings.settingSources,
-				projectTrusted: this.settingsManager.isProjectTrusted(),
+				projectTrusted: memorySettings.trustDecision ?? this.settingsManager.isProjectTrusted(),
 				disabled: this.noContextFiles || this.noMemory,
 			}),
 		);

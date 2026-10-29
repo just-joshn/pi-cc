@@ -521,6 +521,25 @@ Content`,
 			expect(loader.getMemory().files.map((file) => file.path)).toContain(join(cwd, "AGENTS.md"));
 		});
 
+		it("should gate project memory on a decided trust before the session's trust", async () => {
+			writeFileSync(join(cwd, "CLAUDE.md"), "project memory");
+			const projectMemory = async (trustDecision: boolean | undefined, projectTrusted: boolean) => {
+				const loader = new DefaultResourceLoader({
+					cwd,
+					agentDir,
+					settingsManager: SettingsManager.create(cwd, agentDir, { projectTrusted }),
+					memorySettings: () => ({ values: {}, pluginOptions: {}, settingSources: undefined, trustDecision }),
+				});
+				await loader.reload();
+				return loader.getMemory().files.some((file) => file.path === join(cwd, "CLAUDE.md"));
+			};
+
+			expect(await projectMemory(false, true)).toBe(false);
+			expect(await projectMemory(true, false)).toBe(true);
+			expect(await projectMemory(undefined, true)).toBe(true);
+			expect(await projectMemory(undefined, false)).toBe(false);
+		});
+
 		it("should take context files only from the agent directory, preferring AGENTS.override.md", async () => {
 			const nestedCwd = join(cwd, "service");
 			mkdirSync(nestedCwd);
