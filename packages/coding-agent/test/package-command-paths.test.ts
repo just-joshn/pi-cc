@@ -22,6 +22,7 @@ import { main } from "../src/main.ts";
 import { ConfigSelectorComponent } from "../src/modes/interactive/components/config-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { handlePackageCommand } from "../src/package-manager-cli.ts";
+import { captureStartupEnv } from "../src/utils/internal-env.ts";
 import { allowNetwork } from "./test-network-env.ts";
 
 describe("package commands", () => {
@@ -92,6 +93,7 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 		vi.stubEnv("PI_MANAGED_INSTALL_ROOT", managedRoot);
 		process.env.PI_PACKAGE_DIR = selfPackageDir;
 		process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+		captureStartupEnv();
 		return { managedRoot, npmRecordPath };
 	}
 
@@ -184,6 +186,7 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 		} else {
 			process.env.PATH = originalPath;
 		}
+		captureStartupEnv();
 		Object.defineProperty(process, "execPath", { value: originalExecPath, configurable: true });
 		rmSync(tempDir, { recursive: true, force: true });
 	});
@@ -965,6 +968,7 @@ else {
 		writeFileSync(fakePnpmPath, fakePnpmScript);
 		chmodSync(fakePnpmPath, 0o755);
 		process.env.PATH = `${fakeBinDir}${process.env.PATH ? `${delimiter}${process.env.PATH}` : ""}`;
+		captureStartupEnv();
 		process.env.PI_PACKAGE_DIR = selfPackageDir;
 		Object.defineProperty(process, "execPath", {
 			value: join(tempDir, "pnpm", "bin", "node"),
