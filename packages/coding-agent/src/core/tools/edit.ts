@@ -221,10 +221,8 @@ export function createEditToolDefinition(
 					if (normalizedContent.trim() !== "") {
 						throw new Error(toolUseError(CC_TOOL_TEXT.editFileExists));
 					}
-					if (ops.mkdir === undefined) {
-						throw new Error("Edit operations must provide mkdir to create a file in a new directory.");
-					}
-					await ops.mkdir(dirname(absolutePath));
+					// Without mkdir, the operations' own writeFile reports a missing parent directory.
+					await ops.mkdir?.(dirname(absolutePath));
 					await ops.writeFile(absolutePath, normalizedEdits[0].rawNew);
 					throwIfAborted();
 					options?.readState?.record(absolutePath, {

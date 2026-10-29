@@ -31,8 +31,12 @@ export interface WriteOperations {
 	writeFile: (absolutePath: string, content: string) => Promise<void>;
 	/** Create directory recursively */
 	mkdir: (dir: string) => Promise<void>;
-	/** Read existing content, for the prior-read check and Claude Code's created or updated wording. */
-	readFile: (absolutePath: string) => Promise<Buffer>;
+	/**
+	 * Read existing content, for the prior-read check and Claude Code's created or updated wording.
+	 * Without it the prior content is unknown: a write whose Read needs approval is refused, and any
+	 * other write reports neither created nor updated.
+	 */
+	readFile?: (absolutePath: string) => Promise<Buffer>;
 	stat?: (absolutePath: string) => Promise<{ isFile: () => boolean }>;
 }
 
@@ -96,12 +100,17 @@ export function createWriteToolDefinition(
 				}
 
 				const record = options?.readState?.get(absolutePath);
-				const previous = await readIfPresent(ops, absolutePath);
+				const gated = options?.isReadGated?.(absolutePath) === true;
+				if (ops.readFile === undefined && gated) {
+					throw new Error("Write operations must provide readFile to check a file whose Read needs approval.");
+				}
+				const previous =
+					ops.readFile === undefined ? undefined : await readIfPresent(ops.readFile, ops.stat, absolutePath);
 				throwIfAborted();
 
 				// Both refusals exist to avoid a prompt, so Claude Code raises them only for a path whose
 				// Read would need approval. In an auto-allowed workspace it overwrites the file.
-				const readGated = previous !== undefined && options?.isReadGated?.(absolutePath) === true;
+				const readGated = previous !== undefined && gated;
 				if (readGated && record === undefined) throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				if (readGated && record !== undefined && normalizeForComparison(previous) !== record.content) {
 					throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
@@ -118,9 +127,11 @@ export function createWriteToolDefinition(
 
 				// Claude Code calls it a create when the file did not exist or held nothing.
 				const text =
-					previous === undefined || previous === ""
-						? `File created successfully at: ${path} ${CC_FILE_STATE_SUFFIX}`
-						: `The file ${path} has been updated successfully. ${CC_FILE_STATE_SUFFIX}`;
+					ops.readFile === undefined
+						? `File written successfully at: ${path} ${CC_FILE_STATE_SUFFIX}`
+						: previous === undefined || previous === ""
+							? `File created successfully at: ${path} ${CC_FILE_STATE_SUFFIX}`
+							: `The file ${path} has been updated successfully. ${CC_FILE_STATE_SUFFIX}`;
 				return { content: [{ type: "text", text }], details: undefined };
 			});
 		},
@@ -133,17 +144,17 @@ export function createWriteTool(cwd: string, options?: WriteToolOptions): AgentT
 }
 
 /** The file's text, or undefined when the path holds no file. Only the given operations touch the file. */
-async function readIfPresent(ops: WriteOperations, absolutePath: string): Promise<string | undefined> {
-	// Operations come from extensions loaded without type checks, and a fallback would read the local disk.
-	if (typeof ops.readFile !== "function") {
-		throw new Error("Write operations must provide readFile to check the file it replaces.");
-	}
+async function readIfPresent(
+	readFile: NonNullable<WriteOperations["readFile"]>,
+	stat: WriteOperations["stat"],
+	absolutePath: string,
+): Promise<string | undefined> {
 	try {
-		if (ops.stat) {
-			const stats = await ops.stat(absolutePath);
+		if (stat) {
+			const stats = await stat(absolutePath);
 			if (!stats.isFile()) return undefined;
 		}
-		return (await ops.readFile(absolutePath)).toString("utf-8");
+		return (await readFile(absolutePath)).toString("utf-8");
 	} catch {
 		return undefined;
 	}

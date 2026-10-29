@@ -538,7 +538,7 @@ describe("Claude Code read advice, edit suffix, and custom operations", () => {
 				writes.push(content);
 			},
 			mkdir: async () => {},
-		} as never;
+		};
 		const write = createWriteTool(dir, { operations, readState: createReadState() });
 		const result = await write.execute("1", { path: "local.txt", content: "new\n" });
 		expect(result.content[0]).toEqual({
