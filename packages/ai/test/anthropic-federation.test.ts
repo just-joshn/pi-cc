@@ -224,7 +224,10 @@ describe("Anthropic workload identity federation", () => {
 				: sseResponse(),
 		);
 		// A fresh endpoint, so the previous test's cached token does not hide the exchange.
-		const endpoint: Model<"anthropic-messages"> = { ...anthropicModel, baseUrl: "https://federation-expires.example" };
+		const endpoint: Model<"anthropic-messages"> = {
+			...anthropicModel,
+			baseUrl: "https://federation-expires.example",
+		};
 
 		const message = await streamAnthropic(endpoint, context, { env: federationEnv, fetch }).result();
 
@@ -303,11 +306,10 @@ describe("Anthropic workload identity federation", () => {
 				{ status: 500, headers: { "request-id": "req_tok" } },
 			),
 		);
-		const message = await streamAnthropic(
-			{ ...anthropicModel, baseUrl: "https://federation-500.example" },
-			context,
-			{ env: federationEnv, fetch },
-		).result();
+		const message = await streamAnthropic({ ...anthropicModel, baseUrl: "https://federation-500.example" }, context, {
+			env: federationEnv,
+			fetch,
+		}).result();
 
 		expect(message.errorMessage).toBe(
 			'Token exchange failed with status 500 (request-id req_tok): {"error":"server_error","error_description":"boom"}',

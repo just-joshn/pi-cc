@@ -67,29 +67,32 @@ function tokenGrant(expiresIn: number, token: number): Response {
 	return Response.json({ access_token: `federated-token-${token}`, token_type: "Bearer", expires_in: expiresIn });
 }
 
-/** Records the bearer each message request carried and how many token exchanges it took. */
-function createExchangeFetch(respond: (exchange: number) => Response, tokenDelayMs = 0) {
+function createExchangeFetch(respond: (exchange: number) => Response, tokenHoldMs = 0) {
 	const log = { exchanges: 0, bearers: [] as (string | null)[] };
+	const responded: (() => void)[] = [];
 	const fetch: NonNullable<AnthropicOptions["fetch"]> = async (input, init) => {
 		const request = new Request(input, init);
 		if (new URL(request.url).pathname === "/v1/oauth/token") {
 			log.exchanges += 1;
-			if (tokenDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, tokenDelayMs));
-			return respond(log.exchanges);
+			// Held open so every request in a concurrent batch joins the exchange before it settles.
+			if (tokenHoldMs > 0) await new Promise((resolve) => setTimeout(resolve, tokenHoldMs));
+			const response = respond(log.exchanges);
+			for (const resolve of responded.splice(0)) resolve();
+			return response;
 		}
 		log.bearers.push(request.headers.get("authorization"));
 		return sseResponse();
 	};
-	return { fetch, log };
+	// Resolves once a token response is handed back and the exchange's remaining microtasks have run.
+	const nextTokenResponse = async (): Promise<void> => {
+		await new Promise<void>((resolve) => responded.push(resolve));
+		await new Promise<void>((resolve) => setImmediate(() => resolve()));
+	};
+	return { fetch, log, nextTokenResponse };
 }
 
 function modelAt(host: string): Model<"anthropic-messages"> {
 	return { ...anthropicModel, baseUrl: `https://${host}.example` };
-}
-
-/** Lets a background exchange settle, so the next request starts a fresh window instead of joining it. */
-function settleBackgroundRefresh(): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, 20));
 }
 
 let tempDir: string;
@@ -146,13 +149,14 @@ describe("Anthropic workload identity federation token exchange", () => {
 	});
 
 	it("serves the cached token and refreshes it in the background inside the advisory window", async () => {
-		const { fetch, log } = createExchangeFetch((exchange) => tokenGrant(60, exchange));
+		const { fetch, log, nextTokenResponse } = createExchangeFetch((exchange) => tokenGrant(60, exchange));
 		const model = modelAt("federation-advisory");
 
 		for (let i = 0; i < 3; i++) {
+			const exchangeSettled = nextTokenResponse();
 			const message = await streamAnthropic(model, context, { env: federationEnv, fetch }).result();
 			expect(message.stopReason).toBe("stop");
-			await settleBackgroundRefresh();
+			await exchangeSettled;
 		}
 
 		expect(log.exchanges).toBe(3);
@@ -161,12 +165,14 @@ describe("Anthropic workload identity federation token exchange", () => {
 	});
 
 	it("blocks and mints a new token when less than 30 seconds remain", async () => {
-		const { fetch, log } = createExchangeFetch((exchange) => tokenGrant(10, exchange));
+		const { fetch, log, nextTokenResponse } = createExchangeFetch((exchange) => tokenGrant(10, exchange));
 		const model = modelAt("federation-mandatory");
 
 		for (let i = 0; i < 2; i++) {
+			const exchangeSettled = nextTokenResponse();
 			const message = await streamAnthropic(model, context, { env: federationEnv, fetch }).result();
 			expect(message.stopReason).toBe("stop");
+			await exchangeSettled;
 		}
 
 		expect(log.exchanges).toBe(2);
@@ -174,31 +180,42 @@ describe("Anthropic workload identity federation token exchange", () => {
 	});
 
 	it("shares one exchange between concurrent requests", async () => {
-		const { fetch, log } = createExchangeFetch((exchange) => tokenGrant(60, exchange), 20);
+		const { fetch, log, nextTokenResponse } = createExchangeFetch((exchange) => tokenGrant(60, exchange), 20);
 		const model = modelAt("federation-concurrent");
 		const requests = () =>
-			Promise.all(Array.from({ length: 5 }, () => streamAnthropic(model, context, { env: federationEnv, fetch }).result()));
+			Promise.all(
+				Array.from({ length: 5 }, () => streamAnthropic(model, context, { env: federationEnv, fetch }).result()),
+			);
 
+		const firstExchange = nextTokenResponse();
 		for (const message of await requests()) expect(message.stopReason).toBe("stop");
+		await firstExchange;
 		expect(log.exchanges).toBe(1);
 
 		// A second batch inside the advisory window coalesces into one background refresh.
+		const backgroundRefresh = nextTokenResponse();
 		for (const message of await requests()) expect(message.stopReason).toBe("stop");
+		await backgroundRefresh;
 		expect(log.exchanges).toBe(2);
 	});
 
 	it("backs off a failing background refresh inside the advisory window", async () => {
-		const { fetch, log } = createExchangeFetch((exchange) =>
+		const { fetch, log, nextTokenResponse } = createExchangeFetch((exchange) =>
 			exchange === 1 ? tokenGrant(60, 1) : Response.json({ error: "server_error" }, { status: 500 }),
 		);
 		const model = modelAt("federation-advisory-failure");
 
-		for (let i = 0; i < 3; i++) {
-			const message = await streamAnthropic(model, context, { env: federationEnv, fetch }).result();
-			expect(message.stopReason).toBe("stop");
-			await settleBackgroundRefresh();
-		}
+		const firstExchange = nextTokenResponse();
+		expect((await streamAnthropic(model, context, { env: federationEnv, fetch }).result()).stopReason).toBe("stop");
+		await firstExchange;
 
+		const failedRefresh = nextTokenResponse();
+		expect((await streamAnthropic(model, context, { env: federationEnv, fetch }).result()).stopReason).toBe("stop");
+		await failedRefresh;
+
+		// The failure started the backoff, so this request serves the stale token without exchanging.
+		const message = await streamAnthropic(model, context, { env: federationEnv, fetch }).result();
+		expect(message.stopReason).toBe("stop");
 		expect(log.exchanges).toBe(2);
 		expect(log.bearers).toEqual(["Bearer federated-token-1", "Bearer federated-token-1", "Bearer federated-token-1"]);
 	});
