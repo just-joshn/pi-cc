@@ -194,6 +194,17 @@ describe("transcript system messages", () => {
 		expect(initial.tools?.map((tool) => tool.name)).toEqual(["base_tool", "__pi_deferred_placeholder__"]);
 	});
 
+	test("keeps a deferred initial tool as the placeholder instead of adding pi's", async () => {
+		const deferred = { name: "Deferred", description: "kept", parameters: baseTool.parameters, deferLoading: true };
+		const payload = await capturePayload<AnthropicPayload>(anthropicNativeModel, {
+			messages: [
+				{ role: "system", content: "base prompt", toolsAdded: [baseTool, deferred], timestamp: 0 },
+				{ role: "user", content: "before", timestamp: 1 },
+			],
+		});
+		expect(payload.tools?.map((tool) => tool.name)).toEqual(["base_tool", "Deferred"]);
+	});
+
 	test("redefines an Anthropic tool by value under the same name", async () => {
 		const redefinedTool = { ...baseTool, description: "changed" };
 		const payload = await capturePayload<AnthropicPayload>(anthropicNativeModel, {
