@@ -292,6 +292,43 @@ function formatValidationPath(error: TLocalizedValidationError): string {
 	return path || "root";
 }
 
+function getValueAtPath(root: unknown, instancePath: string): unknown {
+	let current = root;
+	for (const rawSegment of instancePath.split("/").slice(1)) {
+		if (current === null || typeof current !== "object") return undefined;
+		const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~");
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
+}
+
+function formatJsonType(value: unknown): string {
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "array";
+	return typeof value;
+}
+
+/** Claude Code's wording for the two issue kinds it reports, and pi's readable line for the rest. */
+function formatValidationIssue(error: TLocalizedValidationError, args: unknown): string {
+	if (error.keyword === "required") {
+		const required = error.params.requiredProperties;
+		if (required.length === 1) return `The required parameter \`${required[0]}\` is missing`;
+		if (required.length > 1) {
+			return `The required parameters \`${required.join("` and `")}\` are missing`;
+		}
+	}
+	const path = formatValidationPath(error);
+	if (error.keyword === "type") {
+		const expected = error.params.type;
+		const expectedType = Array.isArray(expected) ? expected.join(" | ") : expected;
+		if (expectedType) {
+			const actual = formatJsonType(getValueAtPath(args, error.instancePath));
+			return `The parameter \`${path}\` type is expected as \`${expectedType}\` but provided as \`${actual}\``;
+		}
+	}
+	return `  - ${path}: ${error.message}`;
+}
+
 /**
  * Finds a tool by name and validates the tool call arguments against its TypeBox schema
  * @param tools Array of tool definitions
@@ -320,10 +357,11 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 	}
 	const args = structuredClone(toolCall.arguments);
 	normalizeOptionalNulls(args, tool.parameters as JsonSchemaObject);
-	Value.Convert(tool.parameters, args);
+	const coerce = tool.coerceArguments !== false;
+	if (coerce) Value.Convert(tool.parameters, args);
 
 	const validator = getValidator(tool.parameters);
-	if (!Object.getOwnPropertySymbols(tool.parameters).includes(TYPEBOX_KIND)) {
+	if (coerce && !Object.getOwnPropertySymbols(tool.parameters).includes(TYPEBOX_KIND)) {
 		const coerced = coerceWithJsonSchema(args, tool.parameters as JsonSchemaObject);
 		if (coerced !== args) {
 			if (typeof args === "object" && args !== null && typeof coerced === "object" && coerced !== null) {
@@ -344,10 +382,10 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 	const errors =
 		validator
 			.Errors(args)
-			.map((error) => `  - ${formatValidationPath(error)}: ${error.message}`)
+			.map((error) => formatValidationIssue(error, args))
 			.join("\n") || "Unknown validation error";
 
-	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`;
-
-	throw new Error(errorMessage);
+	throw new Error(
+		`<tool_use_error>InputValidationError: ${tool.name} failed due to the following issue:\n${errors}</tool_use_error>`,
+	);
 }
