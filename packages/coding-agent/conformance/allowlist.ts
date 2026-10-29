@@ -63,6 +63,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--setting-sources",
 		"--bare",
 		"--safe-mode",
+		// PR #5's model case. PR #6 adds the same flag; keep one entry.
+		"--model",
 		// a token that exists to be rejected, so a case can pin the unknown-flag error
 		"--no-such-flag-probe",
 	],
@@ -78,6 +80,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"stream-json",
 		// a value of `--setting-sources` in PR #5's case
 		"project",
+		// the model id PR #5's `--model` case writes
+		"claude-haiku-4-5",
 	],
 };
 
