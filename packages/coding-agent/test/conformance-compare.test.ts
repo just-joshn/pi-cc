@@ -249,7 +249,7 @@ describe("compare.requests bodyAt", () => {
 		).toEqual([]);
 	});
 
-	test("tests a non-string value as JSON and fails a match on a path that leads nowhere", () => {
+	test("tests a non-string value as JSON and fails match and notMatch on a path that leads nowhere", () => {
 		expect(
 			checks(
 				{ requests: [{ bodyAt: { system: { match: ['"text":"prompt"'], notMatch: ["MEMO"] } } }] },
@@ -259,9 +259,12 @@ describe("compare.requests bodyAt", () => {
 		expect(checks({ requests: [{ bodyAt: { "messages.3.content": { match: ["x"] } } }] }, { requests })).toEqual([
 			"requests.bodyAt",
 		]);
-		expect(checks({ requests: [{ bodyAt: { "messages.3.content": { notMatch: ["x"] } } }] }, { requests })).toEqual(
-			[],
-		);
+		expect(checks({ requests: [{ bodyAt: { "messages.3.content": { notMatch: ["x"] } } }] }, { requests })).toEqual([
+			"requests.bodyAt",
+		]);
+		expect(checks({ requests: [{ index: 5, bodyAt: { system: { notMatch: ["MEMO"] } } }] }, { requests })).toEqual([
+			"requests.bodyAt",
+		]);
 	});
 
 	test("fails when no request matched", () => {
