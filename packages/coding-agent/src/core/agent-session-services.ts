@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
+import { formatUnknownOptionMessage } from "../cli/cc-flags.ts";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
@@ -25,6 +26,7 @@ import { SettingsManager } from "./settings-manager.ts";
 export interface AgentSessionRuntimeDiagnostic {
 	type: "info" | "warning" | "error";
 	message: string;
+	style?: "cli";
 }
 
 /**
@@ -118,10 +120,13 @@ function applyExtensionFlagValues(
 	}
 
 	if (unknownFlags.length > 0) {
-		diagnostics.push({
-			type: "error",
-			message: `Unknown option${unknownFlags.length === 1 ? "" : "s"}: ${unknownFlags.map((name) => `--${name}`).join(", ")}`,
-		});
+		for (const name of unknownFlags) {
+			diagnostics.push({
+				type: "error",
+				style: "cli",
+				message: formatUnknownOptionMessage(`--${name}`),
+			});
+		}
 	}
 
 	return diagnostics;

@@ -121,8 +121,8 @@ describe("parseArgs", () => {
 		});
 
 		test("parses --session-id", () => {
-			const result = parseArgs(["--session-id", "orchestrated-session"]);
-			expect(result.sessionId).toBe("orchestrated-session");
+			const result = parseArgs(["--session-id", "123e4567-e89b-12d3-a456-426614174000"]);
+			expect(result.sessionId).toBe("123e4567-e89b-12d3-a456-426614174000");
 		});
 
 		test("parses --fork", () => {
@@ -237,16 +237,17 @@ describe("parseArgs", () => {
 		});
 
 		test("preserves custom session IDs for non-persisting commands", () => {
-			expect(parseArgs(["--session-id", "ephemeral-id", "--help"])).toMatchObject({
-				sessionId: "ephemeral-id",
+			const sessionId = "123e4567-e89b-12d3-a456-426614174000";
+			expect(parseArgs(["--session-id", sessionId, "--help"])).toMatchObject({
+				sessionId,
 				help: true,
 			});
-			expect(parseArgs(["--session-id", "ephemeral-id", "--list-models"])).toMatchObject({
-				sessionId: "ephemeral-id",
+			expect(parseArgs(["--session-id", sessionId, "--list-models"])).toMatchObject({
+				sessionId,
 				listModels: true,
 			});
-			expect(parseArgs(["--session-id", "ephemeral-id", "--no-session"])).toMatchObject({
-				sessionId: "ephemeral-id",
+			expect(parseArgs(["--session-id", sessionId, "--no-session"])).toMatchObject({
+				sessionId,
 				noSession: true,
 			});
 		});
