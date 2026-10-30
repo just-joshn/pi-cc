@@ -1,0 +1,85 @@
+{
+	"id": "memory/agents-md-nested-on-read",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"AGENTS.md": "AG_ROOT\n",
+		"sub/AGENTS.md": "AG_SUB\n",
+		"sub/deeper/AGENTS.md": "AG_DEEP\n",
+		"sub/deeper/x.txt": "x\n",
+		"sub/deeper/y.txt": "y\n",
+		"other/AGENTS.md": "AG_OTHER\n",
+		"sub/mixed/AGENTS.md": "AG_MIXED\n",
+		"sub/mixed/CLAUDE.md": "CL_MIXED\n",
+		"sub/mixed/z.txt": "z\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_uses": [
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "sub/deeper/x.txt"
+						}
+					}
+				]
+			},
+			{
+				"tool_uses": [
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "sub/deeper/y.txt"
+						}
+					}
+				]
+			},
+			{
+				"tool_uses": [
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "sub/mixed/z.txt"
+						}
+					}
+				]
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"Contents of [^\\n]*/workspace/sub/AGENTS\\.md:\\\\n\\\\nAG_SUB\\\\n\\\\nContents of [^\\n]*/workspace/sub/deeper/AGENTS\\.md:\\\\n\\\\nAG_DEEP",
+							"Contents of [^\\n]*/workspace/sub/mixed/CLAUDE\\.md:\\\\n\\\\nCL_MIXED"
+						],
+						"notMatch": [
+							"AG_OTHER",
+							"AG_MIXED",
+							"(AG_SUB[\\s\\S]*){2}",
+							"(AG_DEEP[\\s\\S]*){2}",
+							"(AG_ROOT[\\s\\S]*){2}"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}
