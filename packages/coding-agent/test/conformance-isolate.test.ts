@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	closeSync,
@@ -15,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import {
 	baseEnv,
 	createRoots,
@@ -30,6 +31,12 @@ import {
 const darwin = process.platform === "darwin";
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 const tempDirs: string[] = [];
+
+const strayPids: number[] = [];
+
+afterEach(() => {
+	for (const pid of strayPids.splice(0)) spawnSync("/bin/kill", ["-9", `-${pid}`]);
+});
 
 afterAll(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -392,6 +399,48 @@ describe("scanning the workspace after the side exits", () => {
 
 		expect(scan.violations).toEqual([{ kind: "unreadable", path: null }]);
 	});
+
+	/** A detached process with a cleared environment and a working directory outside the root, so only an open file ties it to the workspace. */
+	function startFileHolder(roots: ReturnType<typeof sideRoots>, body: string): number {
+		const holder = spawn(
+			"/usr/bin/env",
+			["-i", "/bin/sh", "-c", `echo $$ > "$0/../pid"; cd /; exec 3>>"$0/held.log"; ${body}`, roots.workspace],
+			{ detached: true, stdio: "ignore" },
+		);
+		holder.unref();
+		strayPids.push(holder.pid ?? 0);
+		return holder.pid ?? 0;
+	}
+
+	const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+	test.skipIf(!darwin)("a process still holding a workspace file after the move is killed and reported", async () => {
+		const roots = sideRoots();
+		const pid = startFileHolder(roots, "exec /bin/sleep 60");
+		await delay(300);
+		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).toBe(0);
+
+		const scan = await scanWorkspace(roots, []);
+
+		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
+		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).not.toBe(0);
+	});
+
+	test.skipIf(!darwin)(
+		"the tree is hashed only after nothing holds it, so a writer cannot change the digest",
+		async () => {
+			const roots = sideRoots();
+			startFileHolder(roots, "while :; do echo x >&3; /bin/sleep 0.02; done");
+			await delay(300);
+
+			const scan = await scanWorkspace(roots, ["held.log"]);
+			const hashed = scan.entries.get("held.log");
+			await delay(300);
+
+			const snapshot = join(dirname(roots.root), "snapshot-claude", "held.log");
+			expect(createHash("sha256").update(readFileSync(snapshot)).digest("hex")).toBe(hashed);
+		},
+	);
 });
 
 // /etc/claude-code does not exist here, so the rule form is proven on /private/etc/hosts, which does.
