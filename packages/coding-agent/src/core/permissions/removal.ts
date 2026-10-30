@@ -5,6 +5,12 @@
  * Claude Code finds these in every nested command of a line (groups, substitutions, loop bodies,
  * `bash -c` scripts, `eval`) and holds them against every rule and, unless the operator waived the
  * check, against `bypassPermissions` too. The words below are Claude Code's own.
+ *
+ * Invariant: when this model is unsure whether Claude Code binds a variable or follows an assignment, it
+ * does not bind. A variable set anywhere but a plain top-level `NAME=value` (compound, opaque, piped or
+ * nested context, an unproven declaration keyword, a value with `$`, `~`, quotes, escapes or globs) stays
+ * uncertain, and a removal target that uses it is refused. A stricter ask is recorded debt (P04b); an
+ * allow where Claude Code asks is a safety bug.
  */
 
 import { homedir } from "node:os";
@@ -16,6 +22,8 @@ export interface Word {
 	readonly literalDollars?: readonly number[];
 	/** Offsets of `$` signs written inside double quotes. */
 	readonly quotedDollars?: readonly number[];
+	/** The word held a quote, escape, `$`, backtick or substitution, so its text is not what the source said. */
+	readonly decorated?: true;
 }
 
 /** What the line has set a variable to by the time a command runs: its text, or `null` when unknowable. */
@@ -67,6 +75,8 @@ const MAX_INLINE_DEPTH = 4;
 const BINDING_ENDS: ReadonlySet<string> = new Set(["|", "|&", "&"]);
 const SUBSTITUTION_BINDING_ENDS: ReadonlySet<string> = new Set(["|", "|&", "&", "||"]);
 
+/** Declaration keywords after which a corpus row shows Claude Code following the assignment at the top level. */
+const BOUND_KEYWORDS: ReadonlySet<string> = new Set(["", "declare", "readonly", "typeset", "export", "local"]);
 const DECLARATIONS = new Set(["export", "local", "readonly", "declare", "typeset"]);
 const LOOPS = new Set(["for", "select"]);
 const OPENERS = new Set(["if", "while", "until", ...LOOPS]);
@@ -110,6 +120,13 @@ const MAX_SUBSTITUTIONS = 64;
 class Tracker {
 	untrackable = false;
 	variables: Variables = new Map();
+	/**
+	 * Names assigned where it is neither known that Claude Code follows them nor known that it does not. A target
+	 * that uses one is refused, even once the line gives up on variables. A subshell's names end at its `)`.
+	 */
+	uncertain: ReadonlySet<string> = new Set();
+	/** Names this command bound in a proven context, which a function or case body may still read. */
+	provenNames: string[] = [];
 	assigned: ReadonlySet<string> = new Set();
 	/** The names the line had assigned when the current command began, which a pipeline stage or `||` list gives back. */
 	private readonly groups: { variables: Variables; commands: number }[] = [];
@@ -129,17 +146,21 @@ class Tracker {
 		inPipeline: boolean;
 		commands: number;
 		compound: number;
+		uncertain: ReadonlySet<string>;
 	}[] = [];
 
 	private readonly home: string;
+	private readonly nestedScan: boolean;
 	private readonly unbinding: ReadonlySet<string>;
 
 	constructor(
 		home: string,
 		inherited?: Pick<SimpleCommand, "variables" | "assigned">,
 		unbinding: ReadonlySet<string> = BINDING_ENDS,
+		nestedScan = false,
 	) {
 		this.home = home;
+		this.nestedScan = nestedScan;
 		this.unbinding = unbinding;
 		if (inherited) {
 			this.variables = inherited.variables;
@@ -215,12 +236,12 @@ class Tracker {
 		const rest = texts.slice(first);
 		if (rest.length === 0) return;
 		if (rest.every((text) => ASSIGNMENT.test(text))) {
-			for (const word of words.slice(first)) this.assign(word);
+			for (const word of words.slice(first)) this.assign(word, "");
 			return;
 		}
 		const head = basename(rest[0] as string);
 		if (DECLARATIONS.has(head)) {
-			for (const word of words.slice(first + 1)) if (ASSIGNMENT.test(word.text)) this.assign(word);
+			for (const word of words.slice(first + 1)) if (ASSIGNMENT.test(word.text)) this.assign(word, head);
 		} else if (head === "unset" || head === "read") {
 			for (const text of rest.slice(1)) if (!text.startsWith("-")) this.forget(text);
 		}
@@ -239,6 +260,7 @@ class Tracker {
 				inPipeline: this.inPipeline,
 				commands: this.commands,
 				compound: this.compound,
+				uncertain: this.uncertain,
 			});
 			if (this.frames.length > 1) this.untrackable = true;
 			else if (this.frames.length === 1) {
@@ -266,6 +288,7 @@ class Tracker {
 				this.variables = frame.variables;
 				this.commands = frame.commands;
 				this.compound = frame.compound;
+				this.uncertain = frame.uncertain;
 				this.orList = frame.orList;
 				this.inPipeline = frame.inPipeline;
 				this.pipelineStart = frame.pipelineStart;
@@ -300,7 +323,7 @@ class Tracker {
 		this.variables = next;
 	}
 
-	private assign(word: Word): void {
+	private assign(word: Word, keyword: string): void {
 		const equals = word.text.indexOf("=");
 		const name = word.text.slice(0, equals);
 		const source = word.text.slice(equals + 1);
@@ -311,16 +334,24 @@ class Tracker {
 			(word.literalDollars ?? []).map((index) => index - equals - 1),
 		);
 		this.stageAssigned.add(name);
+		const topLevel = !this.nestedScan && this.frames.length === 0 && this.groups.length === 0 && this.compound === 0;
+		const plain = !word.decorated && !/[~*?[{]/.test(source);
+		const bound =
+			topLevel && plain && this.commands === 0 && !this.inPipeline && !this.orList && BOUND_KEYWORDS.has(keyword);
+		/** A bare `NAME=value` that Claude Code is known not to follow: after a command, in a pipeline or `||` list. */
+		const unfollowed = topLevel && plain && keyword === "";
+		if ((!bound && !unfollowed) || (bound && value === null)) this.uncertain = new Set(this.uncertain).add(name);
 		if (this.inPipeline) return;
 		const known = this.variables.get(name);
-		const tracked = this.commands === 0 && this.compound === 0;
 		const next = new Map(this.variables);
-		if (!tracked) next.set(name, null);
+		if (!bound) next.set(name, null);
 		else if (known === undefined) next.set(name, value);
 		else next.set(name, known === value ? value : null);
 		this.variables = next;
-		if (value !== null && value !== "" && (word.literalDollars ?? []).length === 0)
+		if (bound && value !== null && value !== "") {
 			this.assigned = new Set(this.assigned).add(name);
+			this.provenNames.push(name);
+		}
 	}
 
 	/** A value with the variables it names put in, or `null` when one of them is not a known text. */
@@ -345,17 +376,20 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 	const depth = options.depth ?? 0;
 	const tally = options.tally ?? { substitutions: 0 };
 	/** Commands in the order they appear, a substitution's commands ahead of the command that holds it. */
-	const found: { command: SimpleCommand; own: boolean; top: boolean }[] = [];
+	const found: { command: SimpleCommand; own: boolean; top: boolean; uncertain: Variables }[] = [];
+	const uncertainNow = (): Variables => new Map([...tracker.uncertain].map((name) => [name, null]));
 	const tracker = new Tracker(
 		options.home ?? homedir(),
 		options.inherited,
 		options.kind === "dollar" ? SUBSTITUTION_BINDING_ENDS : BINDING_ENDS,
+		options.kind !== undefined,
 	);
 	let words: Word[] = [];
 	let text = "";
 	let literalDollars: number[] = [];
 	let quotedDollars: number[] = [];
 	let started = false;
+	let decorated = false;
 	let brace = -1;
 	let commandStart = 0;
 	let functionBraces = -1;
@@ -366,7 +400,9 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 	let previous: readonly string[] = [];
 	let everAssigned: ReadonlySet<string> = new Set();
 	const endWord = (): void => {
-		if (started) words.push({ text, literalDollars, quotedDollars });
+		if (started)
+			words.push({ text, literalDollars, quotedDollars, ...(decorated ? { decorated: true as const } : {}) });
+		decorated = false;
 		text = "";
 		literalDollars = [];
 		quotedDollars = [];
@@ -409,19 +445,15 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 				words,
 				...(pipedFrom === undefined ? {} : { pipedFrom }),
 				text: source,
-				variables: tracker.variables,
+				variables: new Map([...uncertainNow(), ...tracker.variables]),
 				assigned: functionBraces >= 0 || inCase ? everAssigned : tracker.assigned,
 				...(isOpaque ? { opaque: true as const } : {}),
 			};
-			found.push({ command, own: true, top: tracker.depth === 0 });
-			if (operator !== "&" && operator !== "|" && operator !== "|&") {
-				for (const word of words) {
-					const head = word.text;
-					if (ASSIGNMENT.test(head) && !head.endsWith("=") && (word.literalDollars ?? []).length === 0)
-						everAssigned = new Set(everAssigned).add(head.slice(0, head.indexOf("=")));
-				}
-			}
+			found.push({ command, own: true, top: tracker.depth === 0, uncertain: uncertainNow() });
+			tracker.provenNames = [];
 			tracker.command(words);
+			if (operator !== "&" && operator !== "|" && operator !== "|&" && !isOpaque)
+				for (const name of tracker.provenNames) everAssigned = new Set(everAssigned).add(name);
 		}
 		if ((operator === "|" || operator === "|&") && depth === 0 && tracker.depth === 0 && !tracker.inGroup) {
 			tally.pipeBars = [...(tally.pipeBars ?? []), index];
@@ -441,11 +473,12 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 				command: {
 					...command,
 					substitution: true,
-					variables: new Map(),
-					assigned: kind === "backtick" || kind === "heredoc" ? new Set() : command.assigned,
+					variables: new Map([...uncertainNow(), ...command.variables]),
+					assigned: new Set(),
 				},
 				own: false,
 				top: false,
+				uncertain: uncertainNow(),
 			});
 		if (counted) {
 			tally.substitutions++;
@@ -453,6 +486,7 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		}
 		text += SUBSTITUTION;
 		started = true;
+		decorated = true;
 	};
 	const dollar = (at: number, quoted: boolean): void => {
 		const after = line[at + 1];
@@ -485,6 +519,7 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 			if (next === "$") literalDollars.push(text.length);
 			text += next;
 			started = true;
+			decorated = true;
 			index += 2;
 		} else if (char === "'") {
 			const close = line.indexOf("'", index + 1);
@@ -493,9 +528,11 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 				if (line[at] === "$") literalDollars.push(text.length + at - index - 1);
 			text += line.slice(index + 1, end);
 			started = true;
+			decorated = true;
 			index = end + 1;
 		} else if (char === '"') {
 			started = true;
+			decorated = true;
 			index++;
 			while (index < line.length && line[index] !== '"') {
 				const inner = line[index] as string;
@@ -548,8 +585,10 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 			endCommand(index, operator);
 			index += operator.length;
 		} else {
-			if (char === "$") dollar(index, false);
-			else if (char === "{") brace = text.length;
+			if (char === "$") {
+				dollar(index, false);
+				decorated = true;
+			} else if (char === "{") brace = text.length;
 			else if (char === "}" && brace !== -1 && /,|\.\./.test(text.slice(brace))) tracker.untrackable = true;
 			text += char;
 			started = true;
@@ -557,9 +596,10 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		}
 	}
 	endCommand(line.length, "");
-	const none: Variables = new Map();
-	return found.map(({ command, own, top }) =>
-		own && (tracker.untrackable || (top && tracker.topLevelSubshell)) ? { ...command, variables: none } : command,
+	return found.map(({ command, own, top, uncertain }) =>
+		own && (tracker.untrackable || (top && tracker.topLevelSubshell))
+			? { ...command, variables: uncertain }
+			: command,
 	);
 }
 
@@ -817,6 +857,8 @@ function inspectOperand(
 		? undefined
 		: variableTarget(command, operand.text, line, scope);
 	if (variable) return variable;
+	const uncertain = operand.literalDollars?.includes(0) ? undefined : uncertainTarget(command, operand, line);
+	if (uncertain) return uncertain;
 	if (line.opaque) return undefined;
 	const written = operand.literalDollars?.includes(0) ? operand.text : expand(operand.text, scope);
 	const absolute = isAbsolute(written) ? written : resolve(scope.cwd, written);
@@ -942,7 +984,6 @@ function variableTarget(
 	line: SimpleCommand,
 	scope: RemovalScope,
 ): Removal | undefined {
-	const text = line.text;
 	const child = VARIABLE_ROOT_CHILD.exec(target);
 	const rooted = child === null && VARIABLE_ROOT.test(target);
 	if (child === null && !rooted) return undefined;
@@ -956,7 +997,28 @@ function variableTarget(
 		)
 	)
 		return undefined;
-	const rootChild = child === null ? undefined : (child[3] as string);
+	return emptyVariableRefusal(command, target, line, names, child === null ? undefined : (child[3] as string));
+}
+
+/** A target that uses a variable this line set where Claude Code may not have followed it, so its value is unknown. */
+function uncertainTarget(command: string, operand: Word, line: SimpleCommand): Removal | undefined {
+	const names: string[] = [];
+	for (const match of operand.text.matchAll(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}|([A-Za-z_][A-Za-z0-9_]*))/g)) {
+		if (operand.literalDollars?.includes(match.index)) continue;
+		const name = (match[1] ?? match[2]) as string;
+		if (line.variables.get(name) === null && !names.includes(name)) names.push(name);
+	}
+	return names.length === 0 ? undefined : emptyVariableRefusal(command, operand.text, line, names, undefined);
+}
+
+function emptyVariableRefusal(
+	command: string,
+	target: string,
+	line: SimpleCommand,
+	names: readonly string[],
+	rootChild: string | undefined,
+): Removal {
+	const text = line.text;
 	const joined = names.map((name) => `$${name}`).join(" or ");
 	const rewritten = target.replace(
 		/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}|([A-Za-z_][A-Za-z0-9_]*))/,

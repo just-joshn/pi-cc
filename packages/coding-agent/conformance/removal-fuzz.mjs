@@ -13,6 +13,8 @@ const CORPORA = {
 	blind2: { seed: 0x0badcafe, directory: "removal-fuzz-blind2", fixed: false },
 	review1: { seed: 1986070319, directory: "removal-fuzz-review1", fixed: false },
 	review2: { seed: 2991041723, directory: "removal-fuzz-review2", fixed: false },
+	round6a: { seed: 884213077, directory: "removal-fuzz-round6a", fixed: false },
+	round6b: { seed: 1620481903, directory: "removal-fuzz-round6b", fixed: false },
 };
 
 export function corpus(seed = SEED, fixed = true) {

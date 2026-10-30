@@ -7,7 +7,7 @@
 		"banner": "2.1.312 (Claude Code)",
 		"frozen": true
 	},
-	"run": "2026-10-30T19:49:48.145Z",
+	"run": "2026-10-30T21:18:46.701Z",
 	"entries": [
 		{
 			"command": "X=$HOME; rmdir $X",
@@ -1219,7 +1219,7 @@
 			"expected": {
 				"behavior": "allow"
 			},
-			"toolResult": "rmdir: $X: No such file or directory"
+			"toolResult": "(Bash completed with no output)"
 		},
 		{
 			"command": "true ${ typeset X=.. | rmdir *; }",
@@ -2310,7 +2310,7 @@
 			"expected": {
 				"behavior": "allow"
 			},
-			"toolResult": "rmdir: p04-fuzz-does-not-exist: No such file or directory"
+			"toolResult": "(Bash completed with no output)"
 		},
 		{
 			"command": "true <(X=~ || rmdir p04-fuzz-does-not-exist/..)",

@@ -1,0 +1,284 @@
+{
+	"differences": [
+		{
+			"command": "true >(typeset X=/usr\nrmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "true $(typeset X=..; rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do local X=p04-fuzz-does-not-exist; rmdir $X/usr; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "f() { local X=\"$HOME\" || rmdir $X; }; true",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do readonly X=~ & rmdir \"$X\"; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "{ readonly X=$HOME && rmdir $X/usr; }",
+			"direction": "stricter"
+		},
+		{
+			"command": "true $(local X=''\nrmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <(readonly X=\"*\"\nrmdir $X/usr)",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do declare X=\"$HOME\" | rmdir $X; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <(declare X=sub && rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "true `typeset X=sub; rmdir $X`",
+			"direction": "stricter"
+		},
+		{
+			"command": "(X=/usr || rmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "case one in one) typeset X=${HOME} & rmdir \"$X\";; esac",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(X='$HOME' | rmdir $X)\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(X='' || rmdir \"$X\")\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "true `export X=''\nrmdir \"$X\"`",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do local X=/usr || rmdir $X/usr; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "(readonly X=~; rmdir \"$X\")",
+			"direction": "message-only"
+		},
+		{
+			"command": "while true; do export X=. && rmdir \"$X\"; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "(X=p04-fuzz-does-not-exist & rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "true `typeset X=p04-fuzz-does-not-exist; rmdir \"$X\"`",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(X=\"*\" | rmdir \"$X\")\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "f() { readonly X=/; rmdir \"$X\"; }; true",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <(typeset X=sub || rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <(typeset X='*' || rmdir $X/usr)",
+			"direction": "stricter"
+		},
+		{
+			"command": "f() { local X='*'\nrmdir $X; }; true",
+			"direction": "stricter"
+		},
+		{
+			"command": "for Y in one; do declare X=\"$HOME\" || rmdir $X/usr; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "true >(X=p04-fuzz-does-not-exist & rmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "case one in one) typeset X=/ | rmdir $X;; esac",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do readonly X=. && rmdir $X; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(export X=sub\nrmdir \"$X\")\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(export X='$HOME' || rmdir \"$X\")\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "true $(declare X=''; rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "true $(readonly X='' | rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "if true; then X=sub\nrmdir $X; fi",
+			"direction": "stricter"
+		},
+		{
+			"command": "if true; then typeset X=.\nrmdir \"$X\"; fi",
+			"direction": "stricter"
+		},
+		{
+			"command": "(typeset X=$HOME & rmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "for Y in one; do local X='' | rmdir $X; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "{ export X='' && rmdir $X; }",
+			"direction": "stricter"
+		},
+		{
+			"command": "if true; then typeset X=/\nrmdir $X/usr; fi",
+			"direction": "stricter"
+		},
+		{
+			"command": "declare X=. || rmdir \"$X\"",
+			"direction": "stricter"
+		},
+		{
+			"command": "f() { readonly X=sub & rmdir \"$X\"; }; true",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do local X=~\nrmdir $X; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "while true; do X=p04-fuzz-does-not-exist & rmdir \"$X\"; break; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "if true; then declare X=p04-fuzz-does-not-exist && rmdir \"$X\"; fi",
+			"direction": "stricter"
+		},
+		{
+			"command": "if true; then typeset X=$HOME || rmdir \"$X\"; fi",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(typeset X=~ && rmdir $X)\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "case one in one) X=$HOME || rmdir $X;; esac",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(typeset X=${HOME} || rmdir $X)\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "(declare X='*' & rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "for Y in one; do declare X=\"*\" && rmdir \"$X\"; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "(export X=\"$HOME\"; rmdir $X/usr)",
+			"direction": "stricter"
+		},
+		{
+			"command": "for Y in one; do X='*' || rmdir $X; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "true >(local X=/usr; rmdir $X)",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(declare X=$HOME && rmdir \"$X\")\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "true $(typeset X=${HOME} && rmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "{ declare X=/\nrmdir $X; }",
+			"direction": "message-only"
+		},
+		{
+			"command": "{ typeset X=/usr && rmdir \"$X\"; }",
+			"direction": "message-only"
+		},
+		{
+			"command": "(declare X=\"$HOME\" || rmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "true `declare X=\"*\" && rmdir \"$X\"`",
+			"direction": "stricter"
+		},
+		{
+			"command": "case one in one) export X=sub; rmdir $X;; esac",
+			"direction": "stricter"
+		},
+		{
+			"command": "(typeset X=/; rmdir $X)",
+			"direction": "message-only"
+		},
+		{
+			"command": "if true; then export X=${HOME} || rmdir \"$X\"; fi",
+			"direction": "stricter"
+		},
+		{
+			"command": "for Y in one; do X=sub || rmdir $X/usr; done",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <(declare X=/usr || rmdir \"$X\")",
+			"direction": "stricter"
+		},
+		{
+			"command": "true `typeset X='$HOME' || rmdir \"$X\"`",
+			"direction": "stricter"
+		},
+		{
+			"command": "true <<EOF\n$(typeset X=sub; rmdir \"$X\")\nEOF",
+			"direction": "stricter"
+		},
+		{
+			"command": "true >(export X=/usr; rmdir $X/usr)",
+			"direction": "stricter"
+		},
+		{
+			"command": "(typeset X=$HOME\nrmdir $X/usr)",
+			"direction": "stricter"
+		},
+		{
+			"command": "for Y in one; do export X=\"*\" || rmdir \"$X\"; done",
+			"direction": "stricter"
+		}
+	]
+}

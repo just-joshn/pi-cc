@@ -7,7 +7,7 @@
 		"banner": "2.1.312 (Claude Code)",
 		"frozen": true
 	},
-	"run": "2026-10-30T19:49:48.145Z",
+	"run": "2026-10-30T21:18:46.701Z",
 	"entries": [
 		{
 			"command": "f() { readonly X=p04-fuzz-does-not-exist\nrmdir $X/usr; }; true",
