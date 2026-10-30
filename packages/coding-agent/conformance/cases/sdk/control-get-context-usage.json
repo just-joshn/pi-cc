@@ -35,7 +35,10 @@
 				{
 					"$ref": "cc-control-success",
 					"set": {
-						"response.request_id": "r2"
+						"response.request_id": "r2",
+						"response.response": {
+							"$ref": "cc-context-usage"
+						}
 					}
 				},
 				{

@@ -320,63 +320,72 @@ describe("SdkHost", () => {
 		{ maxTurns: undefined, resolves: true },
 		{ maxTurns: 1, resolves: false },
 		{ maxTurns: 1, resolves: true },
-	])("an interrupt during a tool wins over maxTurns=$maxTurns with resolves=$resolves", async ({ maxTurns, resolves }) => {
-		const input = new PassThrough();
-		const blockingTool: AgentTool = {
-			name: "block",
-			label: "block",
-			description: "waits for abort",
-			parameters: Type.Object({}),
-			execute: (_id, _params, signal) =>
-				new Promise((resolve, reject) => {
-					input.write(`${controlLine("stop", "interrupt")}\n`);
-					input.end();
-					signal?.addEventListener("abort", () => {
-						if (resolves) resolve({ content: [{ type: "text", text: "stopped" }], details: {} });
-						else reject(new Error("Command aborted"));
-					});
-				}),
-		};
-		const { frames, exitCode } = await run(
-			{ inputFormat: "stream-json", maxTurns },
-			[],
-			(h) =>
-				h.setResponses([
-					fauxAssistantMessage([fauxToolCall("block", {}, { id: "toolu_1" })], { stopReason: "toolUse" }),
-					fauxAssistantMessage("never"),
-				]),
-			(() => {
-				input.write(`${userLine("go")}\n`);
-				return input;
-			})(),
-			{ tools: [blockingTool] },
-		);
+	])(
+		"an interrupt preserves the tool notice with maxTurns=$maxTurns and resolves=$resolves",
+		async ({ maxTurns, resolves }) => {
+			const input = new PassThrough();
+			const blockingTool: AgentTool = {
+				name: "block",
+				label: "block",
+				description: "waits for abort",
+				parameters: Type.Object({}),
+				execute: (_id, _params, signal) =>
+					new Promise((resolve, reject) => {
+						input.write(`${controlLine("stop", "interrupt")}\n`);
+						input.end();
+						signal?.addEventListener("abort", () => {
+							if (resolves) resolve({ content: [{ type: "text", text: "stopped" }], details: {} });
+							else reject(new Error("Command aborted"));
+						});
+					}),
+			};
+			const { frames, exitCode } = await run(
+				{ inputFormat: "stream-json", maxTurns },
+				[],
+				(h) =>
+					h.setResponses([
+						fauxAssistantMessage([fauxToolCall("block", {}, { id: "toolu_1" })], { stopReason: "toolUse" }),
+						fauxAssistantMessage("never"),
+					]),
+				(() => {
+					input.write(`${userLine("go")}\n`);
+					return input;
+				})(),
+				{ tools: [blockingTool] },
+			);
 
-		expect(frames.map(label)).toEqual([
-			"system/init",
-			"assistant",
-			"control_response",
-			"user",
-			"user",
-			"result/error_during_execution",
-		]);
-		expect(frames[2].response).toEqual({ subtype: "success", request_id: "stop", response: { still_queued: [] } });
-		expect(frames[3]).toMatchObject({
-			tool_use_result: "User rejected tool use",
-			tool_result_meta: [{ id: "toolu_1", non_execution_kind: "user-rejected" }],
-		});
-		expect(frames[4].message.content).toEqual([{ type: "text", text: "[Request interrupted by user for tool use]" }]);
-		expect(frames[5]).toMatchObject({
-			is_error: true,
-			terminal_reason: "aborted_tools",
-			stop_reason: "tool_use",
-			num_turns: 3,
-			errors: ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"],
-		});
-		expect(frames[5]).not.toHaveProperty("result");
-		expect(frames[5]).not.toHaveProperty("ttft_ms");
-		expect(exitCode).toBe(1);
-	});
+			expect(frames.map(label)).toEqual([
+				"system/init",
+				"assistant",
+				"control_response",
+				"user",
+				"user",
+				maxTurns === undefined ? "result/error_during_execution" : "result/error_max_turns",
+			]);
+			expect(frames[2].response).toEqual({ subtype: "success", request_id: "stop", response: { still_queued: [] } });
+			expect(frames[3]).toMatchObject({
+				tool_use_result: "User rejected tool use",
+				tool_result_meta: [{ id: "toolu_1", non_execution_kind: "user-rejected" }],
+			});
+			expect(frames[4].message.content).toEqual([
+				{ type: "text", text: "[Request interrupted by user for tool use]" },
+			]);
+			expect(frames[5]).toMatchObject({
+				is_error: true,
+				terminal_reason: "aborted_tools",
+				stop_reason: "tool_use",
+				num_turns: maxTurns === undefined ? 3 : 2,
+				errors: [
+					maxTurns === undefined
+						? "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"
+						: "Reached maximum number of turns (1)",
+				],
+			});
+			expect(frames[5]).not.toHaveProperty("result");
+			expect(frames[5]).not.toHaveProperty("ttft_ms");
+			expect(exitCode).toBe(1);
+		},
+	);
 
 	it("turns a failed request into the synthetic API error row and a result without timings", async () => {
 		const { frames, exitCode } = await run({}, ["go"], (h) =>

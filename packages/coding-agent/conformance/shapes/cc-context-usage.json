@@ -1,0 +1,65 @@
+{
+	"categories": {
+		"$each": {
+			"id": "$string",
+			"name": "$string",
+			"tokens": "$number",
+			"color": "$string",
+			"kind": "$string",
+			"?isDeferred": "$boolean"
+		}
+	},
+	"totalTokens": "$number",
+	"maxTokens": "$number",
+	"rawMaxTokens": "$number",
+	"autocompactSource": "$string",
+	"percentage": "$number",
+	"gridRows": {
+		"$each": {
+			"$each": {
+				"color": "$string",
+				"isFilled": "$boolean",
+				"categoryName": "$string",
+				"tokens": "$number",
+				"percentage": "$number",
+				"squareFullness": "$number"
+			}
+		}
+	},
+	"model": "$string",
+	"memoryFiles": "$array",
+	"mcpTools": "$array",
+	"mcpInstructions": "$array",
+	"agents": "$array",
+	"slashCommands": {
+		"totalCommands": "$number",
+		"includedCommands": "$number",
+		"tokens": "$number"
+	},
+	"skills": {
+		"totalSkills": "$number",
+		"includedSkills": "$number",
+		"tokens": "$number",
+		"skillFrontmatter": {
+			"$each": {
+				"name": "$string",
+				"source": "$string",
+				"tokens": "$number"
+			}
+		}
+	},
+	"autoCompactThreshold": "$number",
+	"isAutoCompactEnabled": "$boolean",
+	"messageBreakdown": {
+		"toolCallTokens": "$number",
+		"toolResultTokens": "$number",
+		"attachmentTokens": "$number",
+		"assistantMessageTokens": "$number",
+		"userMessageTokens": "$number",
+		"redirectedContextTokens": "$number",
+		"unattributedTokens": "$number",
+		"toolCallsByType": "$array",
+		"attachmentsByType": "$array"
+	},
+	"apiUsage": null
+}

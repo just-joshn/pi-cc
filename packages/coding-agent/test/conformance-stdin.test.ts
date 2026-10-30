@@ -16,6 +16,22 @@ describe("paced stdin", () => {
 		await assertion;
 		expect(written).toEqual([]);
 	});
+	test.each(["#sleep 2147483647", "#waitfor never"])("cancels pending %s when the side exits", async (directive) => {
+		const stream = new PassThrough();
+		const abort = new AbortController();
+		const written: string[] = [];
+		stream.on("data", (chunk) => written.push(chunk.toString()));
+		const result = writeStdin(
+			stream,
+			{ kind: "stream-json", lines: [directive, "must not run"] },
+			() => "",
+			abort.signal,
+		);
+		abort.abort();
+		await expect(result).rejects.toThrow(/abort/i);
+		expect(written).toEqual([]);
+	});
+
 	test("waits for output before sending the next line", async () => {
 		vi.useFakeTimers();
 		const stream = new PassThrough();
