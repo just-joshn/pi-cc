@@ -1,0 +1,38 @@
+{
+	"area": "model-alias",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {
+		"ANTHROPIC_MODEL": "claude-opus-4-0",
+		"CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP": "false"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"bodyEquals": {
+					"model": "claude-opus-5-5"
+				}
+			}
+		]
+	},
+	"skip": [],
+	"id": "model-alias/disable-legacy-remap-false-still-remaps"
+}

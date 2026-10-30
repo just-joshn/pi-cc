@@ -9,6 +9,7 @@ import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils
 
 const haiku = getModel("anthropic", "claude-haiku-4-5")!;
 const sonnet = getModel("anthropic", "claude-sonnet-4-5")!;
+const gpt = getModel("openai", "gpt-4.1")!;
 
 function anthropicRuntime(authenticated = true) {
 	return {
@@ -172,6 +173,97 @@ describe("context markers and the Anthropic gateway", () => {
 		const result = resolveCliModel({ cliModel: "glm-4.6", modelRuntime: gatewayRuntime() });
 
 		expect(result.model?.provider).toBe("vercel-ai-gateway");
+	});
+});
+
+describe("pi's model syntax under the Anthropic gateway", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	/** The operator's environment: the Anthropic gateway and OpenAI are both configured. */
+	function mixedRuntime() {
+		const models = [haiku, sonnet, gpt];
+		return {
+			getModel: (provider: string, modelId: string) =>
+				models.find((model) => model.provider === provider && model.id === modelId),
+			getModels: (provider?: string) => (provider ? models.filter((model) => model.provider === provider) : models),
+			hasConfiguredAuth: (provider: string) => provider === "anthropic" || provider === "openai",
+			getAvailableSnapshot: () => models,
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
+	}
+
+	test("a provider/model reference pi knows skips the gateway route", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+
+		const result = resolveCliModel({ cliModel: "openai/gpt-4.1", modelRuntime: mixedRuntime() });
+
+		expect(result.model?.provider).toBe("openai");
+		expect(result.model?.id).toBe("gpt-4.1");
+	});
+
+	test("an anthropic/ reference applies the alias table on the Anthropic provider", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+
+		const result = resolveCliModel({ cliModel: "anthropic/opusplan", modelRuntime: mixedRuntime() });
+
+		expect(result.model?.provider).toBe("anthropic");
+		expect(result.model?.id).toBe("claude-sonnet-5-5");
+	});
+
+	test("a name whose prefix is not a provider still goes to the gateway verbatim", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+
+		const result = resolveCliModel({ cliModel: "zai-org/GLM-5.1-FP8", modelRuntime: anthropicRuntime() });
+
+		expect(result.model?.provider).toBe("anthropic");
+		expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8");
+	});
+
+	test("a trailing :thinking applies as the session level, not as wire text", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+
+		const unknown = resolveCliModel({ cliModel: "claude-sonnet-4-5:high", modelRuntime: anthropicRuntime() });
+		const alias = resolveCliModel({ cliModel: "opusplan:high", modelRuntime: anthropicRuntime() });
+		const slashed = resolveCliModel({ cliModel: "zai-org/GLM-5.1-FP8:high", modelRuntime: anthropicRuntime() });
+
+		expect(unknown.model?.id).toBe("claude-sonnet-4-5");
+		expect(unknown.thinkingLevel).toBe("high");
+		expect(alias.model?.id).toBe("claude-sonnet-5-5");
+		expect(alias.thinkingLevel).toBe("high");
+		expect(slashed.model?.id).toBe("zai-org/GLM-5.1-FP8");
+		expect(slashed.thinkingLevel).toBe("high");
+	});
+
+	test("a provider reference still resolves when Claude Code variables are set", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+		vi.stubEnv("ANTHROPIC_MODEL", "haiku");
+
+		const result = resolveCliModel({ cliModel: "openai/gpt-4.1:high", modelRuntime: mixedRuntime() });
+
+		expect(result.model?.provider).toBe("openai");
+		expect(result.thinkingLevel).toBe("high");
+	});
+
+	test("--provider anthropic applies the alias table with no Claude Code variable set", () => {
+		const result = resolveCliModel({
+			cliProvider: "anthropic",
+			cliModel: "opusplan",
+			modelRuntime: anthropicRuntime(),
+		});
+
+		expect(result.model?.provider).toBe("anthropic");
+		expect(result.model?.id).toBe("claude-sonnet-5-5");
+	});
+
+	test("--provider anthropic never sends a [1m] marker", () => {
+		const result = resolveCliModel({
+			cliProvider: "anthropic",
+			cliModel: "sonnet[1m]",
+			modelRuntime: anthropicRuntime(),
+		});
+
+		expect(result.model?.id).toBe("claude-sonnet-5-5");
 	});
 });
 
