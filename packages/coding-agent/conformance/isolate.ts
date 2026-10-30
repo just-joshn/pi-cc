@@ -266,8 +266,9 @@ export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan
 	try {
 		renameSync(roots.workspace, snapshot);
 	} catch {
-		// The rename can also fail with ENOENT for a missing destination parent, so the source decides.
-		if (lstatOrNull(roots.workspace) === null) return hashTree(roots.workspace, wanted);
+		// A failed rename does not say which end was missing or denied, so only a source the lookup
+		// itself reports absent counts as removed.
+		if (lstatErrorCode(roots.workspace) === "ENOENT") return hashTree(roots.workspace, wanted);
 		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
 	}
 	return hashTree(snapshot, wanted);
@@ -372,6 +373,15 @@ function lstatOrNull(path: string): Stats | null {
 		return lstatSync(path);
 	} catch {
 		return null;
+	}
+}
+
+function lstatErrorCode(path: string): string | null {
+	try {
+		lstatSync(path);
+		return null;
+	} catch (error) {
+		return errorCode(error);
 	}
 }
 

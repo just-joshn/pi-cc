@@ -1,5 +1,3 @@
-/** Kills what a side left running, so nothing it started can change what the harness reads after it. */
-
 import { spawnSync } from "node:child_process";
 
 export interface ReapResult {
@@ -11,7 +9,6 @@ export interface ReapResult {
 
 type Sweep = { kind: "clean" } | { kind: "killed"; groups: number[] } | { kind: "unavailable" };
 
-/** A scan that must come back empty this many times in a row before the tree counts as gone. */
 const CLEAN_SWEEPS = 3;
 const REAP_DEADLINE_MS = 10_000;
 const LSOF = "/usr/sbin/lsof";
@@ -67,18 +64,12 @@ function groupExists(pgid: number): boolean {
 	}
 }
 
-/**
- * One scan. `lsof` lists every process's group and working directory, and the groups with a member
- * inside the root are killed. The harness's own group and the system groups are never signalled.
- * Nothing narrows the scan by start time: the root is unique to this case and side, so a process working
- * inside it is this run's.
- */
 function sweepGroups(root: string, lsof: string): Sweep {
 	const cwd = spawnSync(lsof, ["-a", "-d", "cwd", "-w", "-n", "-P", "-Fpgn"], {
 		encoding: "utf8",
 		timeout: 15_000,
 	});
-	if (cwd.stdout === null || cwd.error !== undefined || cwd.stdout.length === 0) {
+	if (cwd.error !== undefined || cwd.status !== 0 || cwd.stdout === null || cwd.stdout.length === 0) {
 		warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories");
 		return { kind: "unavailable" };
 	}
@@ -114,7 +105,6 @@ function ownGroup(): number | null {
 
 export const WARNINGS: string[] = [];
 
-/** One line on the console and in the report, so a sweep that cannot run is not mistaken for a clean one. */
 function warnOnce(message: string): void {
 	if (WARNINGS.includes(message)) return;
 	WARNINGS.push(message);

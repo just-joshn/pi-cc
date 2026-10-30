@@ -10,7 +10,6 @@ const roots: string[] = [];
 
 afterEach(() => {
 	for (const root of roots.splice(0)) {
-		// The stop file ends the chain even when an assertion failed before the reaper did.
 		writeFileSync(join(root, "stop"), "");
 		spawnSync("/usr/bin/pkill", ["-9", "-f", join(root, "hop.sh")]);
 		rmSync(root, { recursive: true, force: true });
@@ -19,8 +18,6 @@ afterEach(() => {
 
 const HOP = "[ -e ./stop ] && exit 0\necho x >> gen.log\n/bin/sh ./hop.sh &\nexit 0\n";
 
-// What Claude Code does with a SessionStart hook: the hook shell is spawned detached, so it leaves the
-// side's process group, and the hook's own command then starts the chain.
 const SIDE_SIMULATOR = `
 const { spawn } = require("node:child_process");
 spawn("/bin/sh", ["-c", process.argv[1]], { detached: true, stdio: "ignore", cwd: process.cwd() }).unref();
@@ -51,8 +48,6 @@ function generations(root: string): number {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Regression: a hook that re-forks itself (`/bin/sh ./hop.sh & exit 0`) moves faster than a ps and lsof
-// sweep, so the sweep killed pids that had already exited and the next generation kept running.
 describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 	test.each([
 		["a bare re-forking script", "/bin/sh ./hop.sh & exit 0"],
@@ -76,7 +71,6 @@ describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 	);
 });
 
-// A scan that cannot run says nothing about the tree, so the reap must not call it clean.
 describe.skipIf(!darwin)("a reap whose scan cannot run", () => {
 	function fakeLsof(script: string): string {
 		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-fake-lsof-")));

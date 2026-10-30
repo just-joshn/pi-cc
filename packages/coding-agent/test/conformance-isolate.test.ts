@@ -341,8 +341,6 @@ describe("seeding a case's files", () => {
 	});
 });
 
-// Regression: a workspace the harness could not move out of the side's reach was scanned at a path that
-// cannot exist, so the failure looked like an unreadable workspace and named no cause.
 describe("scanning the workspace after the side exits", () => {
 	function sideRoots() {
 		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-take-")), "take", "claude");
@@ -396,9 +394,7 @@ describe("scanning the workspace after the side exits", () => {
 	});
 });
 
-// Regression: `/etc` is a link to `/private/etc` and Seatbelt matches resolved paths, so the managed
-// policy rule for `/etc/claude-code` never matched anything. /etc/claude-code does not exist here and
-// the test makes no system change: it proves the rule form on `/private/etc/hosts`, which does.
+// /etc/claude-code does not exist here, so the rule form is proven on /private/etc/hosts, which does.
 describe.skipIf(!darwin)("the managed policy denial", () => {
 	function profileWith(rule: string, replacement: string): { roots: ReturnType<typeof createRoots>; profile: string } {
 		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-policy-")), "policy", "claude");
@@ -441,7 +437,7 @@ describe.skipIf(!darwin)("the managed policy denial", () => {
 	});
 
 	test("a rule spelled through the /etc link denies nothing", () => {
-		const run = cat("/etc/hosts", '"/etc/claude-code"', '"/etc/hosts"');
+		const run = cat("/etc/hosts", '"/private/etc/claude-code"', '"/etc/hosts"');
 
 		expect(run.status).toBe(0);
 		expect(run.stdout.length).toBeGreaterThan(0);

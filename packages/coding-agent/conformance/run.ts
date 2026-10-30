@@ -55,7 +55,6 @@ interface ProcessResult {
 	stdout: string;
 	stderr: string;
 	timedOut: boolean;
-	/** What the side left running, which the harness killed before it hashed the workspace. */
 	reaped: ReapResult;
 }
 
