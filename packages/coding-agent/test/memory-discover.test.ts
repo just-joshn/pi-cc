@@ -143,6 +143,20 @@ describe("startup order", () => {
 		]);
 	});
 
+	test("a comment paragraph between blank lines takes the blank lines after it, LF or CRLF", () => {
+		const parts = side();
+		write(join(parts.workspace, "CLAUDE.md"), "ZZ_A\n\n<!-- c -->\n\nZZ_B\n");
+		write(join(parts.workspace, "CLAUDE.local.md"), "Q1\r\n\r\n<!-- c -->\r\n\r\nQ2\r\n");
+		write(
+			join(parts.workspace, ".claude", "CLAUDE.md"),
+			"M1\n\n<!-- a -->\n\n<!-- b -->\n\nM2\n\n\n<!-- c -->\n\n\n\nM3\n",
+		);
+
+		const files = discoverMemory(location(parts)).files;
+
+		expect(files.map((file) => file.content)).toEqual(["ZZ_A\n\nZZ_B\n", "M1\n\nM2\n\n\nM3\n", "Q1\n\nQ2\n"]);
+	});
+
 	test("AGENTS.md is not memory", () => {
 		const parts = side();
 		write(join(parts.workspace, "AGENTS.md"), "agents");
