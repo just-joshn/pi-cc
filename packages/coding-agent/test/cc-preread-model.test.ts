@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@earendil-works/pi-ai/compat";
@@ -354,12 +354,13 @@ describe("a Read cut at the token cap is an unfinished view", () => {
 	it("an Edit result has no file state suffix when the bytes changed under an unchanged modification time", async () => {
 		const small = join(dir, "t.txt");
 		writeFileSync(small, "one\ntwo\nthree\n");
+		const stamp = 1_700_000_000.5;
+		utimesSync(small, stamp, stamp);
 		const { session, tool, readTool } = await sessionWithTool(dir, "claude-opus-5-5", "edit");
 		try {
 			await readTool.execute("read", { path: "t.txt" });
-			const { mtime } = statSync(small);
 			writeFileSync(small, "Zone\ntwo\nthree\n");
-			utimesSync(small, mtime, mtime);
+			utimesSync(small, stamp, stamp);
 			const result = await tool.execute("edit", { path: "t.txt", edits: [{ oldText: "two", newText: "TWO" }] });
 			expect(result.content[0]).toMatchObject({ text: "The file t.txt has been updated successfully." });
 		} finally {
