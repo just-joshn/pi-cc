@@ -9,7 +9,7 @@
 		"--output-format",
 		"json"
 	],
-	"env": {},
+	"env": { "CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP": "1" },
 	"stdin": null,
 	"files": {},
 	"model": {
