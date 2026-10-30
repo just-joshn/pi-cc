@@ -231,7 +231,7 @@ describe("table arity", () => {
 		]);
 		expect(result.outputFormat).toBe("json");
 		expect(result.permissionMode).toBe("plan");
-		expect(result.mode).toBe("json");
+		expect(result.print).toBe(true);
 	});
 
 	test("--resume takes an optional session reference and leaves the picker alone", () => {
@@ -267,10 +267,28 @@ describe("accepted flags", () => {
 });
 
 describe("Claude Code output format", () => {
-	test("maps --output-format onto the pi mode and print mode", () => {
-		expect(parseArgs(["--output-format", "json"]).mode).toBe("json");
-		expect(parseArgs(["--output-format", "stream-json"]).mode).toBe("json");
-		expect(parseArgs(["--output-format", "text"]).print).toBe(true);
+	test("implies print and leaves the pi mode to the SDK host", () => {
+		for (const format of ["json", "stream-json", "text"]) {
+			const result = parseArgs(["--output-format", format]);
+			expect(result.print).toBe(true);
+			expect(result.mode).toBeUndefined();
+		}
+	});
+
+	test("wires the stream-json flags without the unimplemented warning", () => {
+		const result = parseArgs([
+			"-p",
+			"--input-format",
+			"stream-json",
+			"--output-format",
+			"stream-json",
+			"--include-partial-messages",
+			"--replay-user-messages",
+		]);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.inputFormat).toBe("stream-json");
+		expect(result.includePartialMessages).toBe(true);
+		expect(result.replayUserMessages).toBe(true);
 	});
 
 	test("keeps an explicit pi mode over the mode the output format implies", () => {

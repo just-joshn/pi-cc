@@ -444,7 +444,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "include-partial-messages",
 		arity: "boolean",
 		summary: "Include partial message chunks in the stream",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("includePartialMessages"),
 	},
 	{
@@ -453,7 +453,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "format",
 		choices: { values: ["text", "stream-json"], hard: true },
 		summary: "Prompt input format (text, stream-json)",
-		status: "accepted",
+		status: "wired",
 		apply: setString("inputFormat"),
 	},
 	{
@@ -592,7 +592,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "replay-user-messages",
 		arity: "boolean",
 		summary: "Echo stdin user messages on stdout",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("replayUserMessages"),
 	},
 	{

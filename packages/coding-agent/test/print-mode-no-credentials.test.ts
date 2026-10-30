@@ -115,7 +115,7 @@ describe("print mode without credentials", () => {
 	for (const argv of [
 		["--mode", "json", "hello"],
 		["-p", "hello", "--output-format", "json"],
-		["-p", "hello", "--output-format", "stream-json"],
+		["-p", "hello", "--output-format", "stream-json", "--verbose"],
 	]) {
 		it(`keeps stdout to JSON records for ${argv.join(" ")}`, { timeout: 120_000 }, async () => {
 			const run = await runCli(argv);

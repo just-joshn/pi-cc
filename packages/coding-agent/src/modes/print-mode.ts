@@ -4,6 +4,7 @@
  * Used for:
  * - `pi -p "prompt"` - text output
  * - `pi --mode json "prompt"` - JSON event stream
+ * - `pi --output-format json|stream-json` - Claude Code's SDK frames (see ./sdk)
  */
 
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
@@ -11,13 +12,12 @@ import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { toJsonEvent } from "./json-event.ts";
+import { SdkHost, type SdkHostOptions, type SdkPrompt } from "./sdk/host.ts";
 
 /**
  * Options for print mode.
  */
-export interface PrintModeOptions {
-	/** Output mode: "text" for final response only, "json" for all events */
-	mode: "text" | "json";
+interface PrintModeBase {
 	/** Array of additional prompts to send after initialMessage */
 	messages?: string[];
 	/** First message to send (may contain @file content) */
@@ -26,12 +26,31 @@ export interface PrintModeOptions {
 	initialImages?: ImageContent[];
 }
 
+export type PrintModeOptions =
+	| (PrintModeBase & {
+			/** Output mode: "text" for final response only, "json" for all events */
+			mode: "text" | "json";
+	  })
+	| (PrintModeBase & {
+			/** Claude Code SDK frames: one result, or stream-json frames with the control protocol. */
+			mode: "sdk";
+			sdk: Omit<SdkHostOptions, "write" | "fail">;
+	  });
+
 /**
  * Run in print (single-shot) mode.
  * Sends prompts to the agent and outputs the result.
  */
 export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: PrintModeOptions): Promise<number> {
 	const { mode, messages = [], initialMessage, initialImages } = options;
+	const sdkHost =
+		options.mode === "sdk"
+			? new SdkHost(() => runtimeHost.session, {
+					...options.sdk,
+					write: writeRawStdout,
+					fail: (message) => console.error(message),
+				})
+			: undefined;
 	let exitCode = 0;
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
@@ -74,7 +93,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 	const rebindSession = async (): Promise<void> => {
 		session = runtimeHost.session;
 		await session.bindExtensions({
-			mode: mode === "json" ? "json" : "print",
+			mode: mode === "text" ? "print" : "json",
 			commandContextActions: {
 				waitForIdle: () => session.waitForIdle(),
 				newSession: async (newSessionOptions) => runtimeHost.newSession(newSessionOptions),
@@ -106,12 +125,14 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
-			if (mode === "json") {
+			if (sdkHost !== undefined) {
+				sdkHost.onEvent(event);
+			} else if (mode === "json") {
 				writeRawStdout(`${JSON.stringify(toJsonEvent(event))}\n`);
 			}
 		});
 		unsubscribeBackpressure =
-			mode === "json"
+			mode !== "text"
 				? session.agent.subscribe(async () => {
 						await waitForRawStdoutBackpressure();
 					})
@@ -127,6 +148,15 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		}
 
 		await rebindSession();
+
+		if (sdkHost !== undefined) {
+			const prompts: SdkPrompt[] = [];
+			if (initialMessage) {
+				prompts.push({ content: initialMessage, text: initialMessage, images: initialImages ?? [] });
+			}
+			for (const message of messages) prompts.push({ content: message, text: message, images: [] });
+			return await sdkHost.run(prompts);
+		}
 
 		if (initialMessage) {
 			await session.prompt(initialMessage, { images: initialImages });
