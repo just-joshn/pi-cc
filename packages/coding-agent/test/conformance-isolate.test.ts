@@ -374,6 +374,18 @@ describe("scanning the workspace after the side exits", () => {
 		expect(existsSync(join(roots.workspace, "result.txt"))).toBe(true);
 	});
 
+	test("a workspace behind an inaccessible parent is a failed move, not an unreadable tree", () => {
+		const roots = sideRoots();
+		chmodSync(roots.root, 0o000);
+		try {
+			const scan = scanWorkspace(roots, []);
+
+			expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
+		} finally {
+			chmodSync(roots.root, 0o700);
+		}
+	});
+
 	test("a workspace the side removed is still unreadable", () => {
 		const roots = sideRoots();
 		rmSync(roots.workspace, { recursive: true });
@@ -392,6 +404,7 @@ describe.skipIf(!darwin)("the managed policy denial", () => {
 		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-policy-")), "policy", "claude");
 		tempDirs.push(roots.root);
 		const rendered = renderProfile({ roots, executableRoots: ["/bin/cat"], port: null });
+		expect(rendered).toContain(rule);
 		return { roots, profile: rendered.split(rule).join(replacement) };
 	}
 

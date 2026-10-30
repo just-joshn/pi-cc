@@ -86,6 +86,16 @@ describe.skipIf(!darwin)("a reap whose scan cannot run", () => {
 		return path;
 	}
 
+	test("an lsof that prints a record and then fails reports no convergence", async () => {
+		const lsof = fakeLsof("#!/bin/sh\nprintf 'p1\\ng1\\nfcwd\\nn/elsewhere\\n'\nexit 2\n");
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+		roots.push(root);
+
+		const reaped = await reap(2 ** 22, root, lsof);
+
+		expect(reaped).toEqual({ survived: false, converged: false });
+	});
+
 	test.each([
 		["missing", "/nonexistent/lsof"],
 		["silent", "#!/bin/sh\nexit 1\n"],
