@@ -75,7 +75,7 @@ const ALWAYS_SET = new Set([
 	"IFS",
 ]);
 const UNSAFE_WORD = /[ \t\n*?[]/;
-export const MAX_SUBSTITUTIONS = 64;
+const MAX_SUBSTITUTIONS = 64;
 
 /**
  * The variables Claude Code follows through a line, to read what `rm -rf $X` removes.
@@ -117,11 +117,12 @@ class Tracker {
 		}
 	}
 
-	/** Whether a command ran inside the line's own top-level subshell, so what came before it does not reach it. */
+	/** How many subshells deep the scan is. */
 	get depth(): number {
 		return this.frames.length;
 	}
 
+	/** Whether a subshell stood at the top of the line. */
 	get topLevelSubshell(): boolean {
 		return this.subshelled;
 	}
@@ -266,15 +267,9 @@ class Tracker {
 export function simpleCommands(line: string, options: ScanOptions = {}): SimpleCommand[] {
 	const depth = options.depth ?? 0;
 	const tally = options.tally ?? { substitutions: 0 };
-	const commands: {
-		words: Word[];
-		text: string;
-		variables: Variables;
-		assigned: ReadonlySet<string>;
-		top: boolean;
-	}[] = [];
-	const nestedCommands: SimpleCommand[] = [];
-	if (depth > MAX_DEPTH) return nestedCommands;
+	/** Commands in the order they appear, a substitution's commands ahead of the command that holds it. */
+	const found: { command: SimpleCommand; own: boolean; top: boolean }[] = [];
+	if (depth > MAX_DEPTH) return [];
 	const tracker = new Tracker(options.inherited);
 	let words: Word[] = [];
 	let text = "";
@@ -291,13 +286,8 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		endWord();
 		const source = line.slice(commandStart, index).trim();
 		if (words.length > 0) {
-			commands.push({
-				words,
-				text: source,
-				variables: tracker.variables,
-				assigned: tracker.assigned,
-				top: tracker.depth === 0,
-			});
+			const command = { words, text: source, variables: tracker.variables, assigned: tracker.assigned };
+			found.push({ command, own: true, top: tracker.depth === 0 });
 			tracker.command(words);
 		}
 		tracker.separator(operator);
@@ -305,7 +295,8 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		commandStart = index + operator.length;
 	};
 	const nested = (inner: string, counted = true): void => {
-		nestedCommands.push(...simpleCommands(inner, { depth: depth + 1, tally }));
+		for (const command of simpleCommands(inner, { depth: depth + 1, tally }))
+			found.push({ command, own: false, top: false });
 		if (counted) {
 			tally.substitutions++;
 			tracker.untrackable = true;
@@ -399,13 +390,9 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 	}
 	endCommand(line.length, "");
 	const none: Variables = new Map();
-	return [
-		...commands.map(({ top, ...command }) => ({
-			...command,
-			variables: tracker.untrackable || (top && tracker.topLevelSubshell) ? none : command.variables,
-		})),
-		...nestedCommands,
-	];
+	return found.map(({ command, own, top }) =>
+		own && (tracker.untrackable || (top && tracker.topLevelSubshell)) ? { ...command, variables: none } : command,
+	);
 }
 
 /** The index of the `)` that closes the `(` at `open`. */
