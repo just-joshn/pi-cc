@@ -6,7 +6,13 @@ import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { CC_FILE_STATE_SUFFIX, CC_TOOL_TEXT, toolUseError } from "./cc-text.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { isStaleSinceRead, normalizeForComparison, type ReadState, readMtimeMs } from "./read-state.ts";
+import {
+	isStaleSinceRead,
+	mutationNeedsRead,
+	normalizeForComparison,
+	type ReadState,
+	readMtimeMs,
+} from "./read-state.ts";
 import { writeRenderers } from "./renderers/write.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -57,6 +63,8 @@ export interface WriteToolOptions {
 	readState?: ReadState;
 	/** Whether the model or path requires a prior read. Default: never gated. */
 	isReadGated?: (absolutePath: string) => boolean;
+	/** Asks permission once the input has passed every check and before anything is written. Throws the refusal the model reads. */
+	authorize?: (path: string) => Promise<void>;
 	/** True when this session runs as a subagent, which may not write report files. */
 	agentContext?: boolean;
 }
@@ -112,9 +120,7 @@ export function createWriteToolDefinition(
 				throwIfAborted();
 
 				// Older models require a prior read even for an auto-allowed workspace path.
-				const readGated = previous !== undefined && gated;
-				// A read cut at the token cap is an unfinished view: Write refuses it on every model.
-				if (previous !== undefined && (record?.unfinished === true || (readGated && record === undefined)))
+				if (previous !== undefined && mutationNeedsRead("write", record, gated))
 					throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				// Claude Code refuses a write over a file that changed since the model read it for every
 				// model, with no permission check (`chunk-r5cyd28m.js:44886-44893`): unlike Edit there is
@@ -126,6 +132,8 @@ export function createWriteToolDefinition(
 				) {
 					throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
 				}
+
+				await options?.authorize?.(path);
 
 				// Create parent directories if needed.
 				await ops.mkdir(dir);

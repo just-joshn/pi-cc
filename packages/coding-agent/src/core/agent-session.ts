@@ -128,6 +128,10 @@ import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./m
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { NestedToolCallRunner } from "./nested-tool-calls.ts";
+import { permissionCallFor } from "./permissions/call.ts";
+import type { PermissionState } from "./permissions/context.ts";
+import { PermissionGate } from "./permissions/gate.ts";
+import { createUiPrompter } from "./permissions/ui-prompter.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
@@ -299,6 +303,11 @@ export interface AgentSessionConfig {
 	 * exposes no tools.
 	 */
 	allowedToolNames?: string[];
+	/**
+	 * Claude Code's permission engine for this session. Absent, every tool runs without a
+	 * permission check, as pi's own tools always did.
+	 */
+	permissions?: { state: PermissionState; prompts?: "host" | "none" };
 	/** Optional denylist of tool names or patterns. When provided, matching tools are not exposed. */
 	excludedToolNames?: string[];
 	/**
@@ -470,6 +479,7 @@ export class AgentSession {
 	 */
 	private _allowlistFiltersMcp = false;
 	private _excludedTools?: (name: string) => boolean;
+	private _permissionGate?: PermissionGate;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	/** Prior-read records for the Claude Code Edit and Write tools, one per session. */
 	private readonly _readState: ReadState = createReadState();
@@ -522,6 +532,14 @@ export class AgentSession {
 				config.allowedToolNames.length === 0 || config.allowedToolNames.some((entry) => entry.startsWith("mcp__"));
 		}
 		this._excludedTools = config.excludedToolNames ? createToolNameMatcher(config.excludedToolNames) : undefined;
+		if (config.permissions) {
+			this._permissionGate = new PermissionGate({
+				state: config.permissions.state,
+				prompts: config.permissions.prompts,
+				prompter: () =>
+					this._extensionRunner.hasUI() ? createUiPrompter(this._extensionRunner.getUIContext()) : undefined,
+			});
+		}
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 
@@ -672,30 +690,70 @@ export class AgentSession {
 		this.agent.afterToolCall = (context) => this._afterToolCall(context);
 	}
 
-	/** `tool_call` handlers. `parentToolCallId` is set for calls another tool made. */
+	/**
+	 * `tool_call` handlers, then the permission gate. `parentToolCallId` is set for calls another
+	 * tool made. The gate sees the call after extensions had their say, so it judges the input the
+	 * tool would run with.
+	 */
 	private async _beforeToolCall(
 		{ toolCall, args }: BeforeToolCallContext,
 		parentToolCallId?: string,
 	): Promise<BeforeToolCallResult | undefined> {
 		const runner = this._extensionRunner;
-		if (!runner.hasHandlers("tool_call")) {
-			return undefined;
-		}
-
-		try {
-			return await runner.emitToolCall({
-				type: "tool_call",
-				toolName: toolCall.name,
-				toolCallId: toolCall.id,
-				...(parentToolCallId ? { parentToolCallId } : {}),
-				input: args as Record<string, unknown>,
-			});
-		} catch (err) {
-			if (err instanceof Error) {
-				throw err;
+		let extensionResult: BeforeToolCallResult | undefined;
+		if (runner.hasHandlers("tool_call")) {
+			try {
+				extensionResult = await runner.emitToolCall({
+					type: "tool_call",
+					toolName: toolCall.name,
+					toolCallId: toolCall.id,
+					...(parentToolCallId ? { parentToolCallId } : {}),
+					input: args as Record<string, unknown>,
+				});
+			} catch (err) {
+				if (err instanceof Error) {
+					throw err;
+				}
+				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 			}
-			throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 		}
+		if (extensionResult?.block || !this._permissionGate) {
+			return extensionResult;
+		}
+		return (
+			(await this._checkPermission(toolCall.name, toolCall.id, args as Record<string, unknown>)) ?? extensionResult
+		);
+	}
+
+	/** The permission check of a tool call other than Edit and Write, which ask from inside the tool after their own validation. */
+	private async _checkPermission(
+		piName: string,
+		toolCallId: string,
+		args: Record<string, unknown>,
+	): Promise<BeforeToolCallResult | undefined> {
+		if (!this._permissionGate || piName === "edit" || piName === "write") return undefined;
+		const outcome = await this._permissionGate.decide(permissionCallFor(piName, args), toolCallId);
+		if (outcome.action === "run") return undefined;
+		return { block: true, reason: outcome.message, ...(outcome.interrupt ? { terminate: true } : {}) };
+	}
+
+	/** Claude Code validates an Edit or Write before it asks, so the tool asks once its checks have passed. */
+	private async _authorizeMutation(piName: "edit" | "write", path: string): Promise<void> {
+		if (!this._permissionGate) return;
+		const outcome = await this._permissionGate.decide(permissionCallFor(piName, { path }), `${piName}:${path}`);
+		if (outcome.action === "refuse") throw new Error(outcome.message);
+	}
+
+	/** Claude Code's gate on a file the model never read: a legacy model always has it, any model has it when Read would ask. */
+	private _isReadGated(absolutePath: string): boolean {
+		return isCcLegacyMutationModel(this.model?.id ?? "") || !this._readAutoAllowed(absolutePath);
+	}
+
+	/** Claude Code's `TSe`: a Read tool is active and reading the path would run without asking. */
+	private _readAutoAllowed(absolutePath: string): boolean {
+		const gate = this._permissionGate;
+		if (!gate) return true;
+		return this.getActiveToolNames().includes("read") && gate.readAutoAllowed(absolutePath);
 	}
 
 	/** `tool_result` handlers and image normalization. `parentToolCallId` is set for calls another tool made. */
@@ -3739,7 +3797,8 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
-		const isReadGated = () => isCcLegacyMutationModel(this.model?.id ?? "");
+		const isReadGated = (absolutePath: string) => this._isReadGated(absolutePath);
+		const staleRecoveryAllowed = (absolutePath: string) => this._readAutoAllowed(absolutePath);
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -3754,8 +3813,17 @@ export class AgentSession {
 						readState: this._readState,
 						contextRoomTokens: () => this._readContextRoomTokens(),
 					},
-					edit: { readState: this._readState, isReadGated },
-					write: { readState: this._readState, isReadGated },
+					edit: {
+						readState: this._readState,
+						isReadGated,
+						staleRecoveryAllowed,
+						authorize: (path) => this._authorizeMutation("edit", path),
+					},
+					write: {
+						readState: this._readState,
+						isReadGated,
+						authorize: (path) => this._authorizeMutation("write", path),
+					},
 				});
 
 		this._baseToolDefinitions = new Map(

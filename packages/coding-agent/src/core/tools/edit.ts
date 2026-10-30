@@ -22,7 +22,13 @@ import {
 } from "./edit-diff.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { isStaleSinceRead, normalizeForComparison, type ReadState, readMtimeMs } from "./read-state.ts";
+import {
+	isStaleSinceRead,
+	mutationNeedsRead,
+	normalizeForComparison,
+	type ReadState,
+	readMtimeMs,
+} from "./read-state.ts";
 import { type EditRenderState, editRenderers } from "./renderers/edit.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -118,6 +124,13 @@ export interface EditToolOptions {
 	readState?: ReadState;
 	/** Whether the model or path requires a prior read. Default: never gated. */
 	isReadGated?: (absolutePath: string) => boolean;
+	/** Whether a read that went stale may be recovered from: Claude Code's `TSe`. Default: always. */
+	staleRecoveryAllowed?: (absolutePath: string) => boolean;
+	/**
+	 * Asks permission once the input has passed every check and before anything is written, as
+	 * Claude Code validates a call before it asks. Throws the refusal the model reads.
+	 */
+	authorize?: (path: string) => Promise<void>;
 }
 
 function prepareEditArguments(input: unknown): EditToolInput {
@@ -197,11 +210,7 @@ export function createEditToolDefinition(
 				throwIfAborted();
 				// Older models require a prior read even for an auto-allowed workspace path, and a read
 				// cut at the token cap is an unfinished view that does not count as a read.
-				if (
-					raw !== undefined &&
-					options?.isReadGated?.(absolutePath) === true &&
-					(record === undefined || record.unfinished === true)
-				) {
+				if (raw !== undefined && mutationNeedsRead("edit", record, options?.isReadGated?.(absolutePath) === true)) {
 					throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				}
 
@@ -222,8 +231,8 @@ export function createEditToolDefinition(
 				const creating = normalizedEdits.some((edit) => edit.oldText === "");
 				// Claude Code's stale-read handling is independent of the model gate: a read whose file
 				// changed on disk recovers when the edit still applies to the on-disk content (its `Qe`
-				// recovery, gated by the permission auto-allow `TSe`, which pi-cc treats as passing until
-				// P04 wires it); otherwise it reports the stale file instead of the failed match.
+				// recovery, gated by the permission auto-allow `TSe`, which `staleRecoveryAllowed` answers);
+				// otherwise it reports the stale file instead of the failed match.
 				const stale =
 					record !== undefined &&
 					raw !== undefined &&
@@ -241,6 +250,9 @@ export function createEditToolDefinition(
 						normalizeForComparison(raw) === record.content);
 				const suffix = inContext ? ` ${CC_FILE_STATE_SUFFIX}` : "";
 				if (stale && !creating) {
+					if (options?.staleRecoveryAllowed?.(absolutePath) === false) {
+						throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
+					}
 					for (const edit of normalizedEdits) {
 						const count = indexesOf(normalizedContent, edit.oldText).length;
 						if (count === 0 || (count > 1 && !replaceAll)) {
@@ -255,6 +267,7 @@ export function createEditToolDefinition(
 					if (normalizedContent.trim() !== "") {
 						throw new Error(toolUseError(CC_TOOL_TEXT.editFileExists));
 					}
+					await options?.authorize?.(path);
 					// Without mkdir, the operations' own writeFile reports a missing parent directory.
 					await ops.mkdir?.(dirname(absolutePath));
 					await ops.writeFile(absolutePath, normalizedEdits[0].rawNew);
@@ -276,6 +289,7 @@ export function createEditToolDefinition(
 				const applied = applyExactEdits(normalizedContent, normalizedEdits, replaceAll);
 				throwIfAborted();
 				const finalContent = bom + restoreLineEndings(applied.next, originalEnding);
+				await options?.authorize?.(path);
 				await ops.writeFile(absolutePath, finalContent);
 				throwIfAborted();
 				options?.readState?.record(absolutePath, {

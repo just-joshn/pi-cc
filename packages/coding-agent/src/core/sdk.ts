@@ -14,6 +14,7 @@ import { createToolNameMatcher } from "./mcp-servers.ts";
 import { convertToLlm } from "./messages.ts";
 import { anthropicEnvModel, findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
+import type { PermissionState } from "./permissions/context.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
@@ -94,6 +95,11 @@ export interface CreateAgentSessionOptions {
 	 * provided, MCP tools included.
 	 */
 	excludeTools?: string[];
+	/**
+	 * Claude Code's permission engine. Absent, tools run without a permission check, as pi's own
+	 * tools always did. The command line supplies it.
+	 */
+	permissions?: { state: PermissionState; prompts?: "host" | "none" };
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
 
@@ -507,6 +513,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		defaultToolModifiers: toolModifiers,
 		allowedToolNames,
 		excludedToolNames,
+		permissions: options.permissions,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});
