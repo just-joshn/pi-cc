@@ -22,6 +22,7 @@ import {
 	sliceByColumn,
 	visibleWidth,
 } from "../utils.ts";
+import type { Buffer } from "../vim/edits.ts";
 import { INSERT_STATE, type VimInput, type VimState, vimKey } from "../vim/engine.ts";
 import { BACKSPACE } from "../vim/motions.ts";
 import { type PendingRemap, stepRemap, type VimConfig } from "../vim/remaps.ts";
@@ -2162,8 +2163,8 @@ export class Editor implements Component, Focusable {
 	}
 
 	/** Runs one key through the engine and applies what it asks for. Returns whether the key was consumed. */
-	private applyVimInput(vim: VimRuntime, input: VimInput, buffer?: { text: string; offset: number }): boolean {
-		const current = buffer ?? { text: this.getText(), offset: this.getCursorOffset() };
+	private applyVimInput(vim: VimRuntime, input: VimInput, buffer?: Buffer): boolean {
+		const current = buffer ?? { text: this.getText(), offset: this.getCursorOffset(), columns: this.lastWidth };
 		const depth = this.undoStack.length;
 		const before = vim.state.mode;
 		const step = vimKey(vim.state, input, current);

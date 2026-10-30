@@ -327,3 +327,27 @@ describe("Editor vim render", () => {
 		assert.strictEqual(editor.getVimMode(), "normal");
 	});
 });
+
+describe("gj and gk follow the rendered wrap", () => {
+	it("gj moves to the next display row at the width the editor last rendered", () => {
+		const editor = createEditor();
+		editor.setText("aaaa bbbb cccc dddd");
+		editor.render(11);
+		press(editor, "<Esc>0l");
+		assert.strictEqual(marked(editor), "a|aaa bbbb cccc dddd");
+		press(editor, "gj");
+		assert.strictEqual(marked(editor), "aaaa bbbb c|ccc dddd");
+		press(editor, "gk");
+		assert.strictEqual(marked(editor), "a|aaa bbbb cccc dddd");
+	});
+
+	it("gj is j before any wrap exists", () => {
+		const editor = createEditor();
+		editor.setText("abc\ndef");
+		editor.render(40);
+		press(editor, "<Esc>ggj0");
+		press(editor, "gk");
+		press(editor, "gj");
+		assert.strictEqual(marked(editor), "abc\n|def");
+	});
+});

@@ -1,5 +1,6 @@
 // Claude Code's vim mode as a pure state machine over the prompt text and cursor. The editor feeds it one key
 // at a time with the current buffer, and applies the buffer it returns as one undo step.
+import { displayMove } from "./display.ts";
 import {
 	applyEmpty,
 	applyLines,
@@ -121,11 +122,6 @@ interface Command {
 
 const cap = (digits: string | undefined) => (digits === undefined ? undefined : Math.min(Number(digits), MAX_COUNT));
 
-// gj and gk are j and k: the engine has no wrap width.
-function normalizeMotion(target: string): string {
-	return target === "gj" ? "j" : target === "gk" ? "k" : target;
-}
-
 function parse(keys: string): Command | "partial" | undefined {
 	if (COUNT_ENDING.test(keys)) return "partial";
 	const match = COMMAND.exec(keys);
@@ -135,11 +131,11 @@ function parse(keys: string): Command | "partial" | undefined {
 	if (op !== undefined) {
 		const target = opTarget ?? "";
 		if (target.length === 1 && "dcy".includes(target) && target !== op) return undefined;
-		parsed = { count: cap(count), op: op as Operator, opCount: cap(opCount), target: normalizeMotion(target) };
+		parsed = { count: cap(count), op: op as Operator, opCount: cap(opCount), target: target };
 	} else if (indent !== undefined) {
 		parsed = { count: cap(count), target: indent };
 	} else {
-		const target = normalizeMotion(motion ?? command ?? "");
+		const target = motion ?? command ?? "";
 		const lineOp = LINE_ALIASES[target];
 		const tillEnd = TILL_END_ALIASES[target];
 		if (lineOp !== undefined) parsed = { count: cap(count), op: lineOp, target: lineOp };
@@ -271,6 +267,40 @@ function verticalOperator(
 	return linesToward(state, op, buffer, target, keys, motion === "k" ? target : Math.min(offset, target));
 }
 
+/** An operator over display rows. When the rows run out only the cursor moves, and nothing is recorded. */
+function displayOperator(
+	state: VimState,
+	op: Operator,
+	down: boolean,
+	count: number,
+	buffer: Buffer,
+	keys: string,
+): VimStep {
+	const { text, offset, columns } = buffer;
+	if (columns === undefined) return cancel(state);
+	const move = displayMove(text, offset, down, count, columns, state.wanted);
+	if (move.runOut) return placeCursor(state, move.offset, move.column, buffer);
+	if (move.stepped === offset) return cancel(state);
+	const edit = applyRange(op, text, Math.min(offset, move.stepped), Math.max(offset, move.stepped));
+	return settle(state, edit, keys, op !== "y");
+}
+
+/** Moves the cursor to a gj or gk target and remembers its display column, if it keeps one. */
+function placeCursor(state: VimState, target: number, column: number | undefined, buffer: Buffer): VimStep {
+	const { text, offset } = buffer;
+	const to = clampNormal(text, target);
+	if (to === offset) return cancel(state);
+	const wanted = column === undefined ? undefined : { column, offset: to, text };
+	return step({ ...state, pending: "", wanted }, { text, offset: to });
+}
+
+function displayMotion(state: VimState, down: boolean, count: number, buffer: Buffer): VimStep {
+	const { text, offset, columns } = buffer;
+	if (columns === undefined) return cancel(state);
+	const move = displayMove(text, offset, down, count, columns, state.wanted);
+	return placeCursor(state, move.offset, move.column, buffer);
+}
+
 function motionOperator(
 	state: VimState,
 	op: Operator,
@@ -281,6 +311,7 @@ function motionOperator(
 ): VimStep {
 	const { text, offset } = buffer;
 	if (motion === "j" || motion === "k") return verticalOperator(state, op, motion, count, buffer, keys);
+	if (motion === "gj" || motion === "gk") return displayOperator(state, op, motion === "gj", count, buffer, keys);
 	const target = motionTarget(text, offset, motion, count);
 	if (motion === "%" && target === offset) return cancel(state);
 	if (target === offset && !"eE$%".includes(motion)) {
@@ -410,6 +441,9 @@ function plainMotion(state: VimState, cmd: Command, buffer: Buffer): VimStep | u
 		case "j":
 		case "k":
 			return verticalMotion(state, target === "j", count, buffer);
+		case "gj":
+		case "gk":
+			return displayMotion(state, target === "gj", count, buffer);
 		case "$": {
 			const to = lastChar(text, buffer.offset);
 			return step(
@@ -486,9 +520,16 @@ function runCommand(state: VimState, cmd: Command, buffer: Buffer, keys: string)
 	}
 }
 
+// Without a wrap width every logical line is one display row, so gj and gk are j and k.
+function withoutWrap(cmd: Command, buffer: Buffer): Command {
+	if (buffer.columns !== undefined || (cmd.target !== "gj" && cmd.target !== "gk")) return cmd;
+	return { ...cmd, target: cmd.target === "gj" ? "j" : "k" };
+}
+
 function execute(state: VimState, cmd: Command, buffer: Buffer, keys: string): VimStep {
-	if (cmd.op !== undefined) return runOperator(state, cmd, cmd.op, buffer, keys);
-	return runCommand(state, cmd, buffer, keys);
+	const command = withoutWrap(cmd, buffer);
+	if (command.op !== undefined) return runOperator(state, command, command.op, buffer, keys);
+	return runCommand(state, command, buffer, keys);
 }
 
 // `.` with a count replaces the count of commands where a count means "how many", not "how far".
@@ -579,7 +620,7 @@ export function vimKey(state: VimState, input: VimInput, buffer: Buffer): VimSte
 	if (state.mode === "insert") return insertKey(state, input, buffer);
 	if (input.kind === "escape") return { state: { ...state, pending: "" }, passThrough: state.pending === "" };
 	if (input.kind === "other") return { state: { ...state, pending: "" }, passThrough: true };
-	const here = { text: buffer.text, offset: clampNormal(buffer.text, buffer.offset) };
+	const here = { ...buffer, offset: clampNormal(buffer.text, buffer.offset) };
 	const history = historyStep(state, input.key, here.text, here.offset);
 	if (history !== undefined) return history;
 	const keys = state.pending + input.key;
