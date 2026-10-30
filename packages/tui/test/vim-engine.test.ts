@@ -13,7 +13,7 @@ const tokens = (keys: string): string[] => keys.match(/<Esc>|<BS>|[\s\S]/gu) ?? 
 
 // A stand-in for the editor: it feeds keys to the engine and types printable pass-through keys itself.
 // "|" in `marked` is the cursor.
-function run(marked: string, keys: string, start: VimState = NORMAL_STATE): Run {
+function run(marked: string, keys: string, start: VimState = NORMAL_STATE, columns?: number): Run {
 	let text = marked.replace("|", "");
 	let offset = Math.max(0, marked.indexOf("|"));
 	let state = start;
@@ -22,7 +22,7 @@ function run(marked: string, keys: string, start: VimState = NORMAL_STATE): Run 
 	for (const token of tokens(keys)) {
 		const input: VimInput =
 			token === "<Esc>" ? { kind: "escape" } : { kind: "key", key: token === "<BS>" ? "\b" : token };
-		const buffer: Buffer = { text, offset };
+		const buffer: Buffer = { text, offset, columns };
 		const result = vimKey(state, input, buffer);
 		state = result.state;
 		if (result.undo) undos += 1;
@@ -37,6 +37,7 @@ function run(marked: string, keys: string, start: VimState = NORMAL_STATE): Run 
 }
 
 const normal = (from: string, keys: string) => run(from, keys);
+const wrapped = (from: string, keys: string) => run(from, keys, NORMAL_STATE, 10);
 
 function table(name: string, rows: ReadonlyArray<readonly [string, string, string]>, mode = "normal") {
 	describe(name, () => {
@@ -372,5 +373,60 @@ describe("vim unicode", () => {
 
 	it("x deletes a whole grapheme", () => {
 		assert.strictEqual(run("|e\u0301b", "x").text, "|b");
+	});
+});
+
+function wrappedTable(name: string, rows: ReadonlyArray<readonly [string, string, string]>) {
+	describe(name, () => {
+		for (const [from, keys, to] of rows) {
+			it(`${JSON.stringify(from)} ${keys} -> ${JSON.stringify(to)}`, () => {
+				const result = wrapped(from, keys);
+				assert.strictEqual(result.text, to);
+				assert.strictEqual(result.mode, "normal");
+			});
+		}
+	});
+}
+
+// Rows at 10 columns: "aaaa bbbb " | "cccc dddd " | "eeee ffff". Claude Code: gj and gk are display-row moves.
+wrappedTable("vim gj and gk over wrapped rows", [
+	["aa|aa bbbb cccc dddd", "gj", "aaaa bbbb cc|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "gk", "aa|aa bbbb cccc dddd"],
+	["a|aaa bbbb cccc dddd eeee ffff", "2gj", "aaaa bbbb cccc dddd e|eee ffff"],
+	["aaaa bbbb cccc dddd e|eee ffff", "2gk", "a|aaa bbbb cccc dddd eeee ffff"],
+	["aaaa bbbb cccc dddd e|eee ffff", "gk", "aaaa bbbb c|ccc dddd eeee ffff"],
+	["a|aaa bbbb cccc dddd eeee ffff", "gjgj", "aaaa bbbb cccc dddd e|eee ffff"],
+	// Past the last row the cursor still goes as far as it can.
+	["aa|aa bbbb cccc dddd", "3gj", "aaaa bbbb cc|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "gj", "aaaa bbbb cc|cc dddd"],
+	["aa|aa bbbb cccc dddd", "gk", "aa|aa bbbb cccc dddd"],
+	// A row shorter than the column clamps it, and the column is not remembered across wrapped rows.
+	["aaaa bbb|b cc", "gj", "aaaa bbbb c|c"],
+	["aaaa bbbb c|c", "gk", "a|aaa bbbb cc"],
+	// Between unwrapped lines the display column is remembered, like j and k.
+	["abcdef|gh\nab\nabcdefgh", "gjgj", "abcdefgh\nab\nabcdef|gh"],
+	["abcdefgh\nab\nabcdef|gh", "gkgk", "abcdef|gh\nab\nabcdefgh"],
+	// Not j: a wrapped line's second row is one gj away.
+	["aa|aa bbbb cccc dddd\nxyz", "gj", "aaaa bbbb cc|cc dddd\nxyz"],
+]);
+
+wrappedTable("vim gj and gk with an operator", [
+	["aa|aa bbbb cccc dddd", "dgj", "aa|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "dgk", "aa|cc dddd"],
+	["aa|aa bbbb cccc dddd", "cgjX<Esc>", "aa|Xcc dddd"],
+	["aa|aa bbbb cccc dddd", "ygj", "aa|aa bbbb cccc dddd"],
+	["a|aaa bbbb cccc dddd eeee ffff", "d2gj", "a|eee ffff"],
+	// When the rows run out only the cursor moves: no edit.
+	["aaaa bbbb cc|cc dddd", "dgj", "aaaa bbbb cc|cc dddd"],
+	["aa|aa bbbb cccc dddd", "dgk", "aa|aa bbbb cccc dddd"],
+	["aa|aa bbbb cccc dddd", "d3gj", "aaaa bbbb cc|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "d3gk", "aa|aa bbbb cccc dddd"],
+]);
+
+describe("vim gj and gk without a wrap width", () => {
+	it("move like j and k", () => {
+		assert.strictEqual(normal("ab|c\ndef", "gj").text, "abc\nde|f");
+		assert.strictEqual(normal("abc\nde|f", "gk").text, "ab|c\ndef");
+		assert.strictEqual(normal("ab|c\ndef\nghi", "dgj").text, "|ghi");
 	});
 });

@@ -14,6 +14,8 @@ import {
 export interface Buffer {
 	readonly text: string;
 	readonly offset: number;
+	/** The width the prompt wraps at; gj and gk need it, and without it they move like j and k. */
+	readonly columns?: number;
 }
 
 export interface Register {
