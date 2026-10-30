@@ -189,21 +189,28 @@ export function resolveImportPath(path: string, baseDir: string, home: string): 
 
 /**
  * Remove the HTML comments of every block that is an HTML comment, keeping any text after them; a
- * block left with only whitespace goes entirely. The lexer turns CRLF into LF, so only a file with
- * a comment loses its CRLF line endings.
+ * block left with only whitespace goes entirely, and so does the blank-line run after it. The lexer
+ * turns CRLF into LF, so only a file with a comment loses its CRLF line endings.
  */
 export function stripCommentBlocks(text: string): string {
 	if (!text.includes("<!--")) {
 		return text;
 	}
+	let dropped = false;
 	return new Marked({ gfm: false })
 		.lexer(text)
 		.map((token) => {
+			const afterDropped = dropped;
+			dropped = false;
+			if (afterDropped && token.type === "space") {
+				return "";
+			}
 			if (!isCommentBlock(token)) {
 				return token.raw;
 			}
 			const rest = token.raw.replace(HTML_COMMENT, "");
-			return rest.trim().length > 0 ? rest : "";
+			dropped = rest.trim().length === 0;
+			return dropped ? "" : rest;
 		})
 		.join("");
 }
