@@ -71,7 +71,7 @@ describe("AgentSession Claude Code prompt record", () => {
 		let failuresLeft = options.failures ?? 0;
 		const agent = new Agent({
 			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: "", tools: [] },
+			initialState: { model, systemPrompt: "", tools: [], thinkingLevel: "medium" },
 			streamFn: (requestModel, context) => {
 				requests.push({
 					model: requestModel,
@@ -128,8 +128,8 @@ describe("AgentSession Claude Code prompt record", () => {
 		await session.prompt("two");
 
 		const [first, second] = requests;
-		expect(first.head?.sections?.identity).toContain("FIRST APPEND");
-		expect(Object.keys(first.head?.sections ?? {}).sort()).toEqual(["identity", "working"]);
+		expect(first.head?.sections?.working).toContain("FIRST APPEND");
+		expect(Object.keys(first.head?.sections ?? {}).sort()).toEqual(["dynamic", "identity", "working"]);
 		expect(first.head?.context).toContain("# Environment");
 		expect(second.head?.sections).toEqual(first.head?.sections);
 		expect(second.head?.context).toBe(first.head?.context);
@@ -151,7 +151,7 @@ describe("AgentSession Claude Code prompt record", () => {
 		expect(recorded?.sections?.working).toContain("FIRST APPEND");
 	});
 
-	it("moves the machine context into the first user message under exclude-dynamic", async () => {
+	it("moves the session-specific part into the first user message under exclude-dynamic", async () => {
 		const { requests } = await createSession({
 			append: { current: [] },
 			flags: { excludeDynamicSystemPromptSections: true },
@@ -160,13 +160,14 @@ describe("AgentSession Claude Code prompt record", () => {
 		await session.prompt("one");
 
 		const sent = requests[0];
-		expect(sent.head?.context).toBeUndefined();
+		expect(sent.head?.sections?.dynamic).toBeUndefined();
+		expect(sent.head?.context).toContain("# Environment");
 		const user = sent.messages.find((message) => (message as { role: string }).role === "user") as {
 			content: Array<{ text: string }>;
 		};
-		expect(user.content[0].text).toMatch(/^<system-reminder>\n# Environment/);
+		expect(user.content[0].text).toMatch(/^<system-reminder>\n# This session/);
 		expect(user.content.at(-1)?.text).toBe("one");
-		expect(getCurrentSystemMessage(session.messages)?.context).toContain("# Environment");
+		expect(getCurrentSystemMessage(session.messages)?.sections?.dynamic).toContain("# This session");
 	});
 
 	it("walks the fallback chain on each failed attempt and returns to the primary on the next turn", async () => {
@@ -199,7 +200,7 @@ describe("AgentSession Claude Code prompt record", () => {
 		)._compactionPromptRecord();
 
 		expect(record?.sections?.working).toContain("AFTER COMPACTION");
-		expect(record?.sections?.identity).toContain("AFTER COMPACTION");
+		expect(record?.sections?.dynamic).toBeDefined();
 	});
 
 	it("replays the record a compaction entry carries instead of the earlier prompt", () => {
@@ -219,5 +220,16 @@ describe("AgentSession Claude Code prompt record", () => {
 
 		expect(head?.sections).toEqual({ identity: "after", working: "after" });
 		expect(head?.context).toBe("after");
+	});
+
+	it("treats the thinking level as the operator's only once it changes", async () => {
+		await createSession({ append: { current: [] } });
+		expect(session.thinkingLevelChosen).toBe(false);
+
+		session.setThinkingLevel(session.thinkingLevel);
+		expect(session.thinkingLevelChosen).toBe(false);
+
+		session.setThinkingLevel("low");
+		expect(session.thinkingLevelChosen).toBe(true);
 	});
 });

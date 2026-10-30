@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import type { Api, CcWireProfile, Model } from "@earendil-works/pi-ai";
-import type { CcFlags } from "../cli/cc-flags.ts";
+import { type CcFlags, parseAutocompact } from "../cli/cc-flags.ts";
 
 export type CcEffort = NonNullable<CcWireProfile["effort"]>;
 
@@ -19,10 +19,9 @@ const MAX_TOKENS: Readonly<Record<string, number>> = {
 	"claude-opus-5-5": 128_000,
 	"claude-fable-5-1": 64_000,
 	"claude-haiku-4-5": 32_000,
+	"claude-sonnet-4-5": 32_000,
+	"claude-opus-4-8": 64_000,
 };
-
-export const CC_AUTOCOMPACT_MIN_TOKENS = 100_000;
-export const CC_AUTOCOMPACT_MAX_TOKENS = 1_000_000;
 
 const EFFORT_LEVELS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -97,7 +96,7 @@ export function buildCcPolicy(input: CcPolicyInput): CcPolicy {
 		effort: parseEffort(flags.effort),
 		extraBetas: flags.betas ?? [],
 		fallbackModels: parseFallbackModels(flags.fallbackModel),
-		autocompactWindow: parseAutocompact(flags.autocompact),
+		autocompactWindow: autocompactWindow(flags.autocompact),
 		excludeDynamic: flags.excludeDynamicSystemPromptSections === true && !input.customPrompt,
 		snapshot: snapshotFlag === undefined ? !bare : snapshotFlag === "on",
 		bare,
@@ -117,11 +116,9 @@ export function parseFallbackModels(value: string | undefined): string[] {
 		.filter((name) => name.length > 0);
 }
 
-/** The window `--autocompact` names: a token count in range, or undefined for `auto` and any other value. */
-export function parseAutocompact(value: string | undefined): number | undefined {
-	if (value === undefined || !/^\d+$/.test(value)) return undefined;
-	const tokens = Number(value);
-	return tokens >= CC_AUTOCOMPACT_MIN_TOKENS && tokens <= CC_AUTOCOMPACT_MAX_TOKENS ? tokens : undefined;
+function autocompactWindow(value: string | undefined): number | undefined {
+	const window = value === undefined ? undefined : parseAutocompact(value);
+	return typeof window === "number" ? window : undefined;
 }
 
 /** The id with a trailing date and any provider prefix removed, the key of the effort table. */
@@ -138,17 +135,12 @@ export function supportsEffort(model: Model<"anthropic-messages">): boolean {
 }
 
 /**
- * The effort a request sends: `--effort`, else the catalog default of the model, else "high". A model
- * without effort control sends none, and neither does an id outside the catalog on a model that has
- * none, because an id outside the catalog is treated as one that has it.
+ * The effort of a model when the operator names none: the catalog default, "high" for an id outside
+ * the catalog. A catalog model without effort control has none.
  */
-export function resolveEffort(
-	flag: CcEffort | undefined,
-	model: Model<"anthropic-messages">,
-	known: boolean,
-): CcEffort | undefined {
+export function defaultEffort(model: Model<"anthropic-messages">, known: boolean): CcEffort | undefined {
 	if (known && !supportsEffort(model)) return undefined;
-	return flag ?? DEFAULT_EFFORT[catalogKey(model.id)] ?? FALLBACK_EFFORT;
+	return DEFAULT_EFFORT[catalogKey(model.id)] ?? FALLBACK_EFFORT;
 }
 
 /** The first `system` block: the build and entrypoint, with a short fingerprint of both. */
@@ -167,12 +159,17 @@ export function ccWireProfile(
 	known: boolean,
 	/** `CLAUDE_CODE_MAX_OUTPUT_TOKENS` already set the model's cap, which then stands. */
 	capOverridden: boolean,
+	/** The operator chose the reasoning level, so it sets the effort or the thinking budget. */
+	levelChosen: boolean,
 ): CcWireProfile | undefined {
 	if (model.api !== "anthropic-messages") return undefined;
+	const effortModel = known && !supportsEffort(model as Model<"anthropic-messages">) ? undefined : model;
 	return {
-		maxTokens: capOverridden ? undefined : ccMaxTokens(model, known),
 		billingHeader: billingHeader(policy.entrypoint),
-		effort: resolveEffort(policy.effort, model as Model<"anthropic-messages">, known),
+		maxTokens: capOverridden ? undefined : ccMaxTokens(model, known),
+		effort: effortModel && policy.effort,
+		defaultEffort: defaultEffort(model as Model<"anthropic-messages">, known),
+		levelChosen,
 		extraBetas: [...CC_AUTO_BETAS, ...policy.extraBetas],
 	};
 }

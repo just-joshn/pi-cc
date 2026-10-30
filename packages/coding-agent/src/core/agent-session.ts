@@ -284,6 +284,8 @@ export interface AgentSessionConfig {
 	modelRuntime: ModelRuntime;
 	/** Claude Code run policy. Absent, the session keeps pi's own prompt, effort and compaction behavior. */
 	ccPolicy?: CcPolicy;
+	/** The operator chose the initial thinking level, so under the Claude Code profile it sets the effort. */
+	thinkingLevelChosen?: boolean;
 	/** Keeps the prompt cache entry of the last session request warm. */
 	cacheWarmer?: Pick<CacheWarmer, "cancel" | "status" | "onAgentSettled" | "onModeChanged" | "onWarmed">;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
@@ -406,6 +408,7 @@ export class AgentSession {
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	private readonly _ccPolicy: CcPolicy | undefined;
 	private _ccFallbackStep = 0;
+	private _thinkingLevelChosen: boolean;
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
@@ -514,6 +517,7 @@ export class AgentSession {
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._ccPolicy = config.ccPolicy;
+		this._thinkingLevelChosen = config.thinkingLevelChosen ?? false;
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
@@ -1522,6 +1526,11 @@ export class AgentSession {
 	}
 
 	/** Current thinking level */
+	/** Whether the operator picked the thinking level, as opposed to the default of the session. */
+	get thinkingLevelChosen(): boolean {
+		return this._thinkingLevelChosen;
+	}
+
 	get thinkingLevel(): ThinkingLevel {
 		return this.agent.state.thinkingLevel;
 	}
@@ -1896,19 +1905,28 @@ export class AgentSession {
 		if (decision !== "record") return undefined;
 		const stale = Object.fromEntries(Object.keys(head?.sections ?? {}).map((name) => [name, null]));
 		const { sections, context } = this._ccPromptFields(options, policy);
-		return { role: "system", content: "", sections: { ...stale, ...sections }, context, timestamp: Date.now() };
+		return {
+			role: "system",
+			content: "",
+			sections: { ...stale, ...sections },
+			...(context === undefined ? {} : { context }),
+			timestamp: Date.now(),
+		};
 	}
 
 	private _ccPromptFields(
 		options: NormalizedBuildSystemPromptOptions,
 		policy: CcPolicy,
-	): { sections: { identity: string; working: string }; context: string } {
-		const { identity, working, context } = assembleCcPrompt(
+	): { sections: Record<string, string>; context?: string } {
+		const { identity, working, dynamic, context } = assembleCcPrompt(
 			options,
 			{ bare: policy.bare },
 			readCcEnvironment(this._cwd),
 		);
-		return { sections: { identity, working }, context };
+		return {
+			sections: { identity, working, ...(dynamic === undefined ? {} : { dynamic }) },
+			...(context === undefined ? {} : { context }),
+		};
 	}
 
 	/** The prompt record a compaction entry carries: freshly assembled under the snapshot rule, so compaction is the one point that rebuilds it. */
@@ -1981,7 +1999,8 @@ export class AgentSession {
 
 	/**
 	 * Request-time view of the Claude Code prompt record: a fresh render when snapshots are off, and
-	 * the per-machine context moved into the first user message under `--exclude-dynamic-system-prompt-sections`.
+	 * the session-specific part of the working prompt moved into the first user message under
+	 * `--exclude-dynamic-system-prompt-sections`.
 	 * The transcript keeps the record untouched.
 	 */
 	private _projectCcPrompt(messages: AgentMessage[]): AgentMessage[] {
@@ -1993,9 +2012,9 @@ export class AgentSession {
 			const options = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
 			head = { ...head, ...this._ccPromptFields(options, policy) };
 		}
-		if (!policy.excludeDynamic || head.context === undefined) return [head, ...messages.slice(1)];
-		const { context, ...rest } = head;
-		const projected: AgentMessage[] = [rest, ...messages.slice(1)];
+		const { dynamic, ...staticSections } = head.sections ?? {};
+		if (!policy.excludeDynamic || dynamic === undefined || dynamic === null) return [head, ...messages.slice(1)];
+		const projected: AgentMessage[] = [{ ...head, sections: staticSections }, ...messages.slice(1)];
 		const index = projected.findIndex((message) => message.role === "user");
 		if (index === -1) return projected;
 		const user = projected[index] as Extract<AgentMessage, { role: "user" }>;
@@ -2003,7 +2022,7 @@ export class AgentSession {
 			typeof user.content === "string" ? [{ type: "text", text: user.content }] : user.content;
 		projected[index] = {
 			...user,
-			content: [{ type: "text", text: `<system-reminder>\n${context}\n</system-reminder>` }, ...content],
+			content: [{ type: "text", text: `<system-reminder>\n${dynamic}\n</system-reminder>` }, ...content],
 		};
 		return projected;
 	}
@@ -2875,6 +2894,7 @@ export class AgentSession {
 		}
 
 		if (isChanging) {
+			this._thinkingLevelChosen = true;
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
 			void this._extensionRunner.emit({

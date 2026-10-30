@@ -7,16 +7,21 @@ import {
 	CC_AUTO_BETAS,
 	ccWireProfile,
 	compactionWindow,
-	parseAutocompact,
 	parseFallbackModels,
-	resolveEffort,
 } from "../src/core/cc-policy.ts";
 
 const model = (id: string) => getModel("anthropic", id as never) as Model<"anthropic-messages">;
 
 const noFlags = { entrypoint: "sdk-cli" as const, customPrompt: false, flags: {} };
 
-describe("effort resolution", () => {
+describe("effort of a request", () => {
+	const profile = (
+		flag: string | undefined,
+		target: Model<"anthropic-messages">,
+		known: boolean,
+		levelChosen = false,
+	) => ccWireProfile(buildCcPolicy({ ...noFlags, flags: { effort: flag } }), target, known, false, levelChosen);
+
 	test.each([
 		["claude-opus-5-5", "medium"],
 		["claude-sonnet-5-5", "medium"],
@@ -24,33 +29,42 @@ describe("effort resolution", () => {
 		["claude-opus-4-8", "high"],
 		["claude-opus-4-7", "xhigh"],
 	] as const)("%s defaults to %s", (id, expected) => {
-		expect(resolveEffort(undefined, model(id), true)).toBe(expected);
+		expect(profile(undefined, model(id), true)?.defaultEffort).toBe(expected);
 	});
 
-	test("--effort beats the catalog default", () => {
-		expect(resolveEffort("max", model("claude-opus-5-5"), true)).toBe("max");
+	test("--effort travels separately so it beats the default and a chosen level", () => {
+		const result = profile("max", model("claude-opus-5-5"), true, true);
+
+		expect(result?.effort).toBe("max");
+		expect(result?.defaultEffort).toBe("medium");
+		expect(result?.levelChosen).toBe(true);
 	});
 
 	test("an id outside the catalog defaults to high", () => {
-		expect(resolveEffort(undefined, { ...model("claude-opus-5-5"), id: "claude-probe-alias-x" }, false)).toBe("high");
+		expect(
+			profile(undefined, { ...model("claude-opus-5-5"), id: "claude-probe-alias-x" }, false)?.defaultEffort,
+		).toBe("high");
 	});
 
 	test("a catalog model without effort control sends none, even with --effort", () => {
 		const plain = { ...model("claude-opus-5-5"), compat: {} };
+		const result = profile("high", plain, true);
 
-		expect(resolveEffort("high", plain, true)).toBeUndefined();
+		expect(result?.effort).toBeUndefined();
+		expect(result?.defaultEffort).toBeUndefined();
 	});
 
 	test("a dated id resolves through its undated entry", () => {
-		expect(resolveEffort(undefined, { ...model("claude-opus-5-5"), id: "claude-opus-5-5-20260801" }, true)).toBe(
-			"medium",
-		);
+		const dated = { ...model("claude-opus-5-5"), id: "claude-opus-5-5-20260801" };
+
+		expect(profile(undefined, dated, true)?.defaultEffort).toBe("medium");
 	});
 });
 
 describe("maximum output tokens", () => {
 	const profile = (id: string, known: boolean, capOverridden = false) =>
-		ccWireProfile(buildCcPolicy(noFlags), { ...model("claude-opus-5-5"), id }, known, capOverridden)?.maxTokens;
+		ccWireProfile(buildCcPolicy(noFlags), { ...model("claude-opus-5-5"), id }, known, capOverridden, false)
+			?.maxTokens;
 
 	test("an unknown id caps at 32000", () => {
 		expect(profile("claude-probe-alias-x", false)).toBe(32_000);
@@ -60,10 +74,12 @@ describe("maximum output tokens", () => {
 		expect(profile("claude-opus-5-5", true)).toBe(128_000);
 		expect(profile("claude-fable-5-1", true)).toBe(64_000);
 		expect(profile("claude-haiku-4-5", true)).toBe(32_000);
+		expect(profile("claude-sonnet-4-5", true)).toBe(32_000);
+		expect(profile("claude-opus-4-8", true)).toBe(64_000);
 	});
 
 	test("an unlisted catalog model keeps its catalog cap", () => {
-		expect(profile("claude-sonnet-4-5", true)).toBeUndefined();
+		expect(profile("claude-sonnet-5-5", true)).toBeUndefined();
 	});
 
 	test("CLAUDE_CODE_MAX_OUTPUT_TOKENS leaves the cap alone", () => {
@@ -72,14 +88,12 @@ describe("maximum output tokens", () => {
 });
 
 describe("flag parsing", () => {
-	test("autocompact accepts auto and tokens in range only", () => {
-		expect(parseAutocompact("auto")).toBeUndefined();
-		expect(parseAutocompact("500000")).toBe(500_000);
-		expect(parseAutocompact("100000")).toBe(100_000);
-		expect(parseAutocompact("1000000")).toBe(1_000_000);
-		expect(parseAutocompact("50")).toBeUndefined();
-		expect(parseAutocompact("2000000")).toBeUndefined();
-		expect(parseAutocompact("12abc")).toBeUndefined();
+	test("autocompact takes the window from --autocompact and none for auto", () => {
+		const window = (value: string) => buildCcPolicy({ ...noFlags, flags: { autocompact: value } }).autocompactWindow;
+
+		expect(window("auto")).toBeUndefined();
+		expect(window("500000")).toBe(500_000);
+		expect(window("200k")).toBe(200_000);
 	});
 
 	test("the fallback chain keeps order and drops blanks", () => {
@@ -118,16 +132,16 @@ describe("wire profile", () => {
 
 	test("carries the automatic betas first and --betas after them", () => {
 		const policy = buildCcPolicy({ ...noFlags, flags: { betas: ["probe-beta"] } });
-		const profile = ccWireProfile(policy, model("claude-opus-5-5"), true, false);
+		const profile = ccWireProfile(policy, model("claude-opus-5-5"), true, false, false);
 
 		expect(profile?.extraBetas).toEqual([...CC_AUTO_BETAS, "probe-beta"]);
-		expect(profile?.effort).toBe("medium");
+		expect(profile?.defaultEffort).toBe("medium");
 	});
 
 	test("is absent for a model off the Anthropic transport", () => {
 		const other = getModel("openai", "gpt-4.1")!;
 
-		expect(ccWireProfile(buildCcPolicy(noFlags), other, true, false)).toBeUndefined();
+		expect(ccWireProfile(buildCcPolicy(noFlags), other, true, false, false)).toBeUndefined();
 	});
 });
 

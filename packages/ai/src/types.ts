@@ -228,8 +228,12 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 export interface CcWireProfile {
 	/** First `system` block, sent uncached. */
 	billingHeader: string;
-	/** Level of `output_config.effort`; omitted when the model has no effort control. */
+	/** Effort the operator asked for, which beats everything else. */
 	effort?: "low" | "medium" | "high" | "xhigh" | "max";
+	/** Effort of the model when nothing else chooses one. Omitted for a model without effort control. */
+	defaultEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+	/** The reasoning level of the request was chosen by the operator, so it sets the effort or thinking budget. */
+	levelChosen: boolean;
 	/** Beta names added to the automatic list. */
 	extraBetas: readonly string[];
 	/** Output cap of the request, replacing the model's own. */

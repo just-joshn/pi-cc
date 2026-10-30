@@ -22,6 +22,8 @@ export interface CcFlags {
 	maxTurns?: number;
 	settingSources?: string;
 	systemPromptSnapshot?: string;
+	systemPromptFile?: string;
+	appendSystemPromptFile?: string[];
 	autocompact?: string;
 	debug?: string | true;
 	debugFile?: string;
@@ -120,6 +122,12 @@ function appendList(field: ListField) {
 	};
 }
 
+function appendListValue(field: ListField) {
+	return (value: CcValue, target: CcFlags): void => {
+		if (typeof value === "string") target[field] = [...(target[field] ?? []), value];
+	};
+}
+
 function cliError(message: string): CcDiagnostic {
 	return { type: "error", style: "cli", message };
 }
@@ -158,6 +166,32 @@ function validateMaxBudget(value: string): CcDiagnostic | undefined {
 	}
 	return cliError(
 		`option '--max-budget-usd <amount>' argument '${value}' is invalid. --max-budget-usd must be a positive number greater than 0`,
+	);
+}
+
+const AUTOCOMPACT_MIN_TOKENS = 100_000;
+const AUTOCOMPACT_MAX_TOKENS = 1_000_000;
+
+/**
+ * The window `--autocompact` names: "auto", or 100k to 1M tokens written as a count, with a `k` or
+ * `m` suffix, or as a bare number under 1000 meaning thousands. Undefined when the value is neither.
+ */
+export function parseAutocompact(value: string): "auto" | number | undefined {
+	if (value === "auto") return "auto";
+	const match = /^(\d+(?:\.\d+)?)([km])?$/i.exec(value.trim());
+	if (!match) return undefined;
+	const amount = Number(match[1]);
+	const unit = match[2]?.toLowerCase();
+	const tokens = Math.round(
+		unit === "m" ? amount * 1_000_000 : unit === "k" || amount < 1000 ? amount * 1000 : amount,
+	);
+	return tokens >= AUTOCOMPACT_MIN_TOKENS && tokens <= AUTOCOMPACT_MAX_TOKENS ? tokens : undefined;
+}
+
+function validateAutocompact(value: string): CcDiagnostic | undefined {
+	if (parseAutocompact(value) !== undefined) return undefined;
+	return cliError(
+		`option '--autocompact <auto|tokens>' argument '${value}' is invalid. It must be 'auto', or between 100k and 1M (e.g. 500k, 200000, or 200 as shorthand)`,
 	);
 }
 
@@ -258,11 +292,21 @@ export const CC_FLAGS: CcFlag[] = [
 		status: "wired",
 	},
 	{
+		name: "append-system-prompt-file",
+		arity: "value",
+		placeholder: "file",
+		summary: "Append the contents of a file to the system prompt (repeatable)",
+		hidden: true,
+		status: "wired",
+		apply: appendListValue("appendSystemPromptFile"),
+	},
+	{
 		name: "autocompact",
 		arity: "value",
 		placeholder: "auto|tokens",
 		summary: "Context compaction window size",
 		status: "wired",
+		validate: validateAutocompact,
 		apply: setString("autocompact"),
 	},
 	{
@@ -679,6 +723,15 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "prompt",
 		summary: "System prompt for this session",
 		status: "wired",
+	},
+	{
+		name: "system-prompt-file",
+		arity: "value",
+		placeholder: "file",
+		summary: "System prompt for this session, read from a file",
+		hidden: true,
+		status: "wired",
+		apply: setString("systemPromptFile"),
 	},
 	{
 		name: "system-prompt-snapshot",

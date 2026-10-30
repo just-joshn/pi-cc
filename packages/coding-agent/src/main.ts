@@ -5,6 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
@@ -452,6 +453,25 @@ function validateForkFlags(parsed: Args): void {
 	}
 }
 
+/** Read `--system-prompt-file` and `--append-system-prompt-file` into the prompt fields, verbatim. */
+function applyPromptFiles(parsed: Args): void {
+	const read = (path: string, flag: string): string => {
+		try {
+			return readFileSync(path, "utf8");
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			console.error(chalk.red(`Error: ${flag} could not read ${path}: ${reason}`));
+			process.exit(1);
+		}
+	};
+	if (parsed.systemPromptFile !== undefined) {
+		parsed.systemPrompt = read(parsed.systemPromptFile, "--system-prompt-file");
+	}
+	for (const path of parsed.appendSystemPromptFile ?? []) {
+		parsed.appendSystemPrompt = [...(parsed.appendSystemPrompt ?? []), read(path, "--append-system-prompt-file")];
+	}
+}
+
 function validateSessionIdFlags(parsed: Args): void {
 	if (parsed.sessionId === undefined) return;
 
@@ -852,6 +872,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
+	applyPromptFiles(parsed);
 	const sdkProblem = sdkFlagProblem({
 		mode: parsed.mode,
 		outputFormat: parsed.outputFormat,

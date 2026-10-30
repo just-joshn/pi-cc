@@ -18,6 +18,7 @@ function render(diagnostic: CcDiagnostic): string {
 const SESSION_ID = "123e4567-e89b-12d3-a456-426614174000";
 
 const SAMPLE_VALUES: Record<string, string> = {
+	autocompact: "auto",
 	effort: "low",
 	"json-schema": "{}",
 	"max-budget-usd": "1",
@@ -153,6 +154,32 @@ describe("validation diagnostics", () => {
 		expect(parseArgs(["--system-prompt-snapshot", "bogus"]).diagnostics.map(render)).toEqual([
 			"error: option '--system-prompt-snapshot <on|off>' argument 'bogus' is invalid. Allowed choices are on, off.",
 		]);
+	});
+
+	test("validates --autocompact against auto and 100k to 1M tokens", () => {
+		for (const value of ["auto", "500k", "200000", "200", "1m", "1000000"]) {
+			expect(parseArgs(["--autocompact", value]).diagnostics.map(render)).toEqual([]);
+		}
+		for (const value of ["50", "99999", "2000000", "2m", "abc", "50k"]) {
+			expect(parseArgs(["--autocompact", value]).diagnostics.map(render)).toEqual([
+				`error: option '--autocompact <auto|tokens>' argument '${value}' is invalid. It must be 'auto', or between 100k and 1M (e.g. 500k, 200000, or 200 as shorthand)`,
+			]);
+		}
+	});
+
+	test("stores the prompt file flags, the append one repeatable", () => {
+		const result = parseArgs([
+			"--system-prompt-file",
+			"a.md",
+			"--append-system-prompt-file",
+			"b.md",
+			"--append-system-prompt-file",
+			"c.md",
+		]);
+
+		expect(result.diagnostics).toEqual([]);
+		expect(result.systemPromptFile).toBe("a.md");
+		expect(result.appendSystemPromptFile).toEqual(["b.md", "c.md"]);
 	});
 
 	test("validates --setting-sources", () => {

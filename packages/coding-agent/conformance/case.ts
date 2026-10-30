@@ -60,6 +60,8 @@ export interface RequestSpec {
 	 * prompt block, which two clean-room texts can only match in length.
 	 */
 	bodyLength?: Record<string, BodyLengthSpec>;
+	/** Dotted body paths whose value must be identical on every matched request, so a case can pin a replayed prompt. */
+	bodySame?: string[];
 	/** Which matched request `bodyAt` reads. Negative counts from the end; the default is the last. */
 	index?: number;
 }
@@ -181,6 +183,7 @@ const REQUEST_KEYS = [
 	"bodyNotMatch",
 	"bodyAt",
 	"bodyLength",
+	"bodySame",
 	"index",
 ];
 const BODY_TEXT_KEYS = ["match", "notMatch"];
@@ -459,6 +462,7 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 			bodyNotMatch: asOptionalStringArray(object.bodyNotMatch, source, `${field}.bodyNotMatch`),
 			bodyAt: asBodyAt(object.bodyAt, source, `${field}.bodyAt`),
 			bodyLength: asBodyLength(object.bodyLength, source, `${field}.bodyLength`),
+			bodySame: asOptionalStringArray(object.bodySame, source, `${field}.bodySame`),
 			index: asOptionalInteger(object.index, source, `${field}.index`),
 		};
 	});

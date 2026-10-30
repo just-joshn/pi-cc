@@ -268,12 +268,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	let thinkingLevel = options.thinkingLevel;
+	let thinkingLevelChosen = thinkingLevel !== undefined;
 
 	// If session has data, restore thinking level from it
 	if (thinkingLevel === undefined && hasExistingSession) {
 		thinkingLevel = hasThinkingEntry
 			? (existingSession.thinkingLevel as ThinkingLevel)
 			: (settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL);
+		thinkingLevelChosen = thinkingLevel !== DEFAULT_THINKING_LEVEL;
 	}
 
 	// Fall back to per-model override, then global default
@@ -281,10 +283,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const perModel = settingsManager.getModelThinkingLevel(model.provider, model.id);
 		if (perModel) {
 			thinkingLevel = perModel;
+			thinkingLevelChosen = true;
 		}
 	}
 	if (thinkingLevel === undefined) {
-		thinkingLevel = settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
+		const configured = settingsManager.getDefaultThinkingLevel();
+		thinkingLevel = configured ?? DEFAULT_THINKING_LEVEL;
+		thinkingLevelChosen = configured !== undefined;
 	}
 
 	// Clamp to model capabilities
@@ -462,6 +467,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 								model,
 								modelRuntime.getModel(model.provider, model.id) !== undefined,
 								maxOutputTokens !== undefined,
+								session.thinkingLevelChosen,
 							)
 						: undefined;
 				const requestOptions = { ...buildRequestOptions(options), ...(ccWire ? { ccWire } : {}) };
@@ -517,6 +523,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRuntime,
 		cacheWarmer,
 		ccPolicy,
+		thinkingLevelChosen,
 		initialActiveToolNames,
 		usesDefaultTools: (options.tools === undefined || toolModifiers !== undefined) && !options.noTools,
 		defaultToolModifiers: toolModifiers,

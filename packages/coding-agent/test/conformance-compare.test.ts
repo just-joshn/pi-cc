@@ -266,6 +266,28 @@ describe("compare.requests bodyLength", () => {
 	});
 });
 
+describe("compare.requests bodySame", () => {
+	const request = (index: number, system: string) => ({
+		index,
+		path: "/v1/messages",
+		method: "POST",
+		headers: {},
+		body: { system: [{ type: "text", text: system }], messages: [index] },
+	});
+
+	test("passes when the path is identical on every matched request and fails when one differs or is absent", () => {
+		const same = [request(0, "prompt"), request(1, "prompt")];
+		const spec = { requests: [{ bodySame: ["system"] }] };
+
+		expect(checks(spec, { requests: same })).toEqual([]);
+		expect(checks(spec, { requests: [request(0, "prompt"), request(1, "other")] })).toEqual(["requests.bodySame"]);
+		expect(checks({ requests: [{ bodySame: ["system.4"] }] }, { requests: same })).toEqual(["requests.bodySame"]);
+		expect(checks({ requests: [{ pathStartsWith: "/none", bodySame: ["system"] }] }, { requests: same })).toEqual([
+			"requests.bodySame",
+		]);
+	});
+});
+
 describe("compare.requests bodyAt", () => {
 	const request = (index: number, text: string) => ({
 		index,

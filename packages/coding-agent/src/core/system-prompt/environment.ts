@@ -10,6 +10,8 @@ export interface CcEnvironment {
 	platform: string;
 	shell: string;
 	osVersion: string;
+	/** Local date as YYYY-MM-DD. */
+	date: string;
 }
 
 /** Read the facts of this machine for a working directory. */
@@ -20,6 +22,7 @@ export function readCcEnvironment(cwd: string): CcEnvironment {
 		platform: process.platform,
 		shell: basename(process.env.SHELL ?? "") || "unknown",
 		osVersion: `${type()} ${release()}`,
+		date: localDate(new Date()),
 	};
 }
 
@@ -28,4 +31,9 @@ function insideGitRepository(start: string): boolean {
 		if (existsSync(join(dir, ".git"))) return true;
 		if (dirname(dir) === dir) return false;
 	}
+}
+
+function localDate(now: Date): string {
+	const pad = (value: number) => String(value).padStart(2, "0");
+	return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }

@@ -34,6 +34,7 @@ const model: Model<"anthropic-messages"> = {
 const ccWire: CcWireProfile = {
 	billingHeader: "x-anthropic-billing-header: cc_version=1.0.0.abc; cc_entrypoint=sdk-cli;",
 	effort: "medium",
+	levelChosen: false,
 	extraBetas: ["extra-beta-1"],
 };
 
@@ -90,27 +91,27 @@ describe("Claude Code wire profile", () => {
 		expect(payload.messages.every((message) => message.role !== "system" || message.content.length > 0)).toBe(true);
 	});
 
-	it("sends no output_config when the profile carries no effort", async () => {
+	it("sends no output_config when neither the profile nor the options carry an effort", async () => {
 		const payload = await capture(
 			model,
 			{ messages: [head, firstUser] },
-			{ ccWire: { ...ccWire, effort: undefined } },
+			{ ccWire: { ...ccWire, effort: undefined }, effort: undefined },
 		);
 
 		expect(payload.output_config).toBeUndefined();
 	});
 
-	it("appends extra betas to the automatic list", async () => {
+	it("appends extra betas and leaves out the betas only effort markers and block binding need", async () => {
 		const payload = await capture(model, { messages: [head, firstUser] }, { ccWire });
 
-		expect(payload.betas).toContain("extra-beta-1");
-		expect(payload.betas?.length).toBeGreaterThan(1);
+		expect(payload.betas).toEqual(["extra-beta-1"]);
 	});
 
 	it("keeps pi's single block, markers and pinned effort without a profile", async () => {
 		const payload = await capture(model, { messages: [head, firstUser] });
 
 		expect(payload.system).toHaveLength(1);
+		expect(payload.betas).toContain("mid-conversation-output-config-2026-07-01");
 		expect(payload.output_config).toEqual({ effort: "low" });
 		expect(payload.thinking).toMatchObject({ block_binding: { prefix_mismatch_behavior: "drop_block" } });
 		expect(payload.messages.at(-1)?.role).toBe("system");
@@ -123,15 +124,38 @@ describe("Claude Code wire profile", () => {
 		expect(payload.system?.map((block) => block.text)).toEqual([ccWire.billingHeader, "FORCED"]);
 	});
 
-	it("appends the context to the working block for a model without mid-conversation system messages", async () => {
-		const plain: Model<"anthropic-messages"> = {
-			...model,
-			compat: { forceAdaptiveThinking: true },
+	it("joins the working text and its session-specific part into the working block", async () => {
+		const withDynamic: SystemMessage = {
+			...head,
+			sections: { identity: "IDENTITY", working: "WORKING", dynamic: "DYNAMIC" },
 		};
+		const payload = await capture(model, { messages: [withDynamic, firstUser] }, { ccWire });
+
+		expect(payload.system?.[2].text).toBe("WORKING\n\nDYNAMIC");
+	});
+
+	it("leads the first user message with the context for a model without mid-conversation system messages", async () => {
+		const plain: Model<"anthropic-messages"> = { ...model, compat: { forceAdaptiveThinking: true } };
 		const payload = await capture(plain, { messages: [head, firstUser] }, { ccWire });
 
-		expect(payload.system?.[2].text).toBe("WORKING\n\nMACHINE CONTEXT");
 		expect(payload.messages.map((message) => message.role)).toEqual(["user"]);
+		expect(payload.messages[0].content).toMatchObject([
+			{ type: "text", text: "<system-reminder>\nMACHINE CONTEXT\n</system-reminder>" },
+			{ type: "text", text: "hello" },
+		]);
+	});
+
+	it("sends one empty effort-marker system message when the record carries no context", async () => {
+		const bare: SystemMessage = {
+			role: "system",
+			content: "",
+			sections: { identity: "I", working: "W" },
+			timestamp: 1,
+		};
+		const payload = await capture(model, { messages: [bare, firstUser] }, { ccWire });
+
+		expect(payload.messages.map((message) => message.role)).toEqual(["user", "system"]);
+		expect(payload.messages[1]).toMatchObject({ content: [], output_config: { effort: "medium" } });
 	});
 
 	describe("through streamSimple", () => {
@@ -159,6 +183,27 @@ describe("Claude Code wire profile", () => {
 			expect(payload.output_config).toEqual({ effort: "xhigh" });
 			expect(payload.max_tokens).toBe(64000);
 			expect(payload.thinking?.display).toBe("omitted");
+		});
+
+		it("sends the default effort of the model unless a chosen level or --effort says otherwise", async () => {
+			const defaulted = { ...ccWire, effort: undefined, defaultEffort: "high" as const };
+
+			expect((await captureSimple(model, defaulted)).output_config).toEqual({ effort: "high" });
+			expect((await captureSimple(model, { ...defaulted, levelChosen: true })).output_config).toEqual({
+				effort: "medium",
+			});
+		});
+
+		it("keeps pi's thinking budget for a budget model whose level the operator chose", async () => {
+			const legacy: Model<"anthropic-messages"> = { ...model, compat: {}, maxTokens: 64000 };
+			const payload = await captureSimple(legacy, {
+				...ccWire,
+				effort: undefined,
+				levelChosen: true,
+				maxTokens: 32000,
+			});
+
+			expect(payload.thinking).toMatchObject({ type: "enabled", budget_tokens: 8192, display: "omitted" });
 		});
 
 		it("gives a model without adaptive thinking a budget of one token under the cap and no effort", async () => {

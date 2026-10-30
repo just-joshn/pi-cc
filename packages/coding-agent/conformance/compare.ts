@@ -321,6 +321,19 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				}
 			}
 		}
+		for (const path of request.bodySame ?? []) {
+			const values = matched.map((record) => bodyText(record.body, path));
+			if (matched.length === 0 || values.some((value) => value === undefined || value !== values[0])) {
+				diffs.push({
+					check: "requests.bodySame",
+					expected: `${path} identical on ${matched.length} requests`,
+					actual:
+						matched.length === 0
+							? "no matching request"
+							: values.map((value) => value?.length ?? "absent").join(", "),
+				});
+			}
+		}
 		const bodies = matched.map((record) => serializeBody(record.body));
 		for (const text of request.bodyIncludes ?? []) {
 			if (!bodies.some((body) => body.includes(text))) {
