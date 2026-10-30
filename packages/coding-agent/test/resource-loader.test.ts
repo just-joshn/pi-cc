@@ -521,6 +521,24 @@ Content`,
 			expect(loader.getMemory().files.map((file) => file.path)).toContain(join(cwd, "AGENTS.md"));
 		});
 
+		it("should send the agent directory's context file once when the agent directory is on the cwd walk", async () => {
+			const nestedCwd = join(agentDir, "work");
+			mkdirSync(nestedCwd, { recursive: true });
+			writeFileSync(join(agentDir, "AGENTS.md"), "global instructions");
+			writeFileSync(join(nestedCwd, "AGENTS.md"), "work instructions");
+
+			const loader = new DefaultResourceLoader({ cwd: nestedCwd, agentDir });
+			await loader.reload();
+
+			expect(loader.getAgentsFiles().agentsFiles.map((file) => file.path)).toEqual([join(agentDir, "AGENTS.md")]);
+			expect(
+				loader
+					.getMemory()
+					.files.map((file) => file.path)
+					.filter((path) => path.startsWith(tempDir)),
+			).toEqual([join(nestedCwd, "AGENTS.md")]);
+		});
+
 		it("should gate project memory on a decided trust before the session's trust", async () => {
 			writeFileSync(join(cwd, "CLAUDE.md"), "project memory");
 			const projectMemory = async (trustDecision: boolean | undefined, projectTrusted: boolean) => {
