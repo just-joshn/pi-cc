@@ -23,6 +23,7 @@ import {
 	findPresentPaths,
 	hashTree,
 	renderProfile,
+	scanWorkspace,
 	seedFiles,
 } from "../conformance/isolate.ts";
 
@@ -337,5 +338,48 @@ describe("seeding a case's files", () => {
 		const { roots } = seedRoot();
 		seedFiles(roots, { "$AGENT/trust.json": '{"$WORKSPACE": true}\n' });
 		expect(readFileSync(join(roots.agent, "trust.json"), "utf8")).toBe(`{"${roots.workspace}": true}\n`);
+	});
+});
+
+// Regression: a workspace the harness could not move out of the side's reach was scanned at a path that
+// cannot exist, so the failure looked like an unreadable workspace and named no cause.
+describe("scanning the workspace after the side exits", () => {
+	function sideRoots() {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-take-")), "take", "claude");
+		tempDirs.push(roots.root);
+		writeFileSync(join(roots.workspace, "result.txt"), "result\n");
+		return roots;
+	}
+
+	test("a workspace that moves is scanned where it landed", () => {
+		const roots = sideRoots();
+
+		const scan = scanWorkspace(roots, ["result.txt"]);
+
+		expect(scan.violations).toEqual([]);
+		expect(scan.text.get("result.txt")).toBe("result\n");
+		expect(existsSync(roots.workspace)).toBe(false);
+	});
+
+	test("a workspace that cannot move reports the move, not an unreadable tree", () => {
+		const roots = sideRoots();
+		const taken = join(dirname(roots.root), "snapshot-claude");
+		mkdirSync(join(taken, "occupied"), { recursive: true });
+		tempDirs.push(taken);
+
+		const scan = scanWorkspace(roots, ["result.txt"]);
+
+		expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
+		expect(scan.entries.size).toBe(0);
+		expect(existsSync(join(roots.workspace, "result.txt"))).toBe(true);
+	});
+
+	test("a workspace the side removed is still unreadable", () => {
+		const roots = sideRoots();
+		rmSync(roots.workspace, { recursive: true });
+
+		const scan = scanWorkspace(roots, []);
+
+		expect(scan.violations).toEqual([{ kind: "unreadable", path: null }]);
 	});
 });
