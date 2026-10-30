@@ -418,8 +418,8 @@ type ClearStatusContext = {
 	options: { tuiMode?: TuiMode };
 	ui: { getClearOnShrink: () => boolean };
 	idleStatus: Component;
-	ccTui: CcTuiSettings;
-	ccStillIndicator(): unknown;
+	ccTui?: CcTuiSettings;
+	ccStillIndicator?(): unknown;
 	setEditorWorkingStatusIndicator(indicator: StatusIndicator | undefined): boolean;
 };
 
