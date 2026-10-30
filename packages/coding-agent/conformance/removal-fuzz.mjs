@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PermissionState } from "../src/core/permissions/context.ts";
@@ -11,6 +11,8 @@ const CORPORA = {
 	holdout: { seed: 0x1badf00d, directory: "removal-fuzz-holdout", fixed: false },
 	blind: { seed: 0xc0ffee11, directory: "removal-fuzz-blind", fixed: false },
 	blind2: { seed: 0x0badcafe, directory: "removal-fuzz-blind2", fixed: false },
+	review1: { seed: 1986070319, directory: "removal-fuzz-review1", fixed: false },
+	review2: { seed: 2991041723, directory: "removal-fuzz-review2", fixed: false },
 };
 
 export function corpus(seed = SEED, fixed = true) {
@@ -77,7 +79,7 @@ export function evaluate(command, cwd, home) {
 
 const mode = process.argv[2];
 const corpusSpec = CORPORA[process.argv[3] ?? "main"];
-if (corpusSpec === undefined) throw new Error("Corpus must be main, holdout, blind, or blind2");
+if (corpusSpec === undefined) throw new Error(`Corpus must be one of ${Object.keys(CORPORA).join(", ")}`);
 if (mode === "generate") {
 	const seed = Number(process.argv[4] ?? corpusSpec.seed);
 	const lines = corpus(seed, corpusSpec.fixed);
@@ -129,11 +131,18 @@ if (mode === "record") {
 			const normalize = (value) => JSON.parse(JSON.stringify(value).replaceAll(join(root, "workspace"), "$WORKSPACE").replaceAll(join(root, "home"), "$HOME").replaceAll(root, "$CASE"));
 			const entry = normalize({ command, expected, toolResult: content });
 			fixtures.push(entry);
-			if (JSON.stringify(actual) !== JSON.stringify(expected)) differences.push(normalize({ command, expected, actual }));
+			if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+				const direction = expected.behavior === "allow" ? "stricter" : actual.behavior === "allow" ? "unsafe" : "message-only";
+				differences.push(normalize({ command, direction, expected, actual }));
+			}
 		}
 	}
 	writeFileSync(join(directory, `${corpusSpec.directory}-fixtures.json`), `${JSON.stringify({ seed: generated.seed, oracle: report.claude, run: report.run, entries: fixtures }, null, "\t")}\n`);
 	writeFileSync(join(directory, `.out/${corpusSpec.directory}-differences.json`), `${JSON.stringify(differences, null, "\t")}\n`);
-	console.log(`${fixtures.length} oracle observations, ${differences.length} differences`);
-	process.exitCode = differences.length === 0 ? 0 : 1;
+	const openPath = join(directory, `${corpusSpec.directory}-open.json`);
+	if (differences.length === 0) rmSync(openPath, { force: true });
+	else writeFileSync(openPath, `${JSON.stringify({ differences: differences.map(({ command, direction }) => ({ command, direction })) }, null, "\t")}\n`);
+	const counts = Object.fromEntries(["stricter", "message-only", "unsafe"].map(direction => [direction, differences.filter(entry => entry.direction === direction).length]));
+	console.log(`${fixtures.length} oracle observations, ${differences.length} differences ${JSON.stringify(counts)}`);
+	process.exitCode = differences.some(entry => entry.direction === "unsafe") ? 1 : 0;
 }

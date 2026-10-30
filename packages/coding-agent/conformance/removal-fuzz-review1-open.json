@@ -1,0 +1,16 @@
+{
+	"differences": [
+		{
+			"command": "typeset X=~ | rmdir p04-fuzz-does-not-exist/..",
+			"direction": "message-only"
+		},
+		{
+			"command": "for Y in one; do export X=~ | rmdir /; done",
+			"direction": "message-only"
+		},
+		{
+			"command": "(typeset X='$HOME' && rmdir $X/usr)",
+			"direction": "unsafe"
+		}
+	]
+}
