@@ -113,6 +113,10 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-opus-4-7",
 		"gpt-5",
 		"openai/gpt-5",
+		// values `--model` writes in the model-alias cases
+		"glm-4.6",
+		"opusplan",
+		"best",
 		// a value of `--setting-sources` in the memory cases, which narrows memory with the settings tiers
 		"user",
 	],
