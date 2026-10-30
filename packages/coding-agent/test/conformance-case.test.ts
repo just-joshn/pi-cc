@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(353);
+		expect(cases.length).toBe(355);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -550,7 +550,13 @@ describe("containment declarations", () => {
 		).toThrow(/must be relative to the workspace, without "\.\."/);
 	});
 
-	test("rejects a path on a survivor, which is a process", () => {
+	test.each(["unreaped", "workspace-unmovable"])("rejects %s, a harness failure no case may declare", (kind) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind }] } })).toThrow(
+			/harness failure/,
+		);
+	});
+
+	test("rejects a path on survivor, which names no path", () => {
 		expect(() =>
 			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "survivor", path: "late.txt" }] } }),
 		).toThrow(/is a process, not a path/);

@@ -1,32 +1,38 @@
 /** Runs each case against the pinned claude binary and the built pi-cc CLI, then prints a scoreboard. */
 
-import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { ConformanceCase, FileSpec, StdinSpec } from "./case.ts";
+import type { ConformanceCase, FileSpec } from "./case.ts";
 import { loadCases } from "./case.ts";
 import type { Diff, Observation } from "./compare.ts";
 import { compare } from "./compare.ts";
+import type { ExecLog } from "./execlog.ts";
+import { startExecLog } from "./execlog.ts";
 import type { Roots, Side, SideName, Violation } from "./isolate.ts";
 import {
 	baseEnv,
 	createRoots,
+	createRunRoot,
 	expandPlaceholders,
 	findPresentPaths,
 	hashTree,
 	REAL_HOME,
 	renderProfile,
+	scanWorkspace,
 	seedFiles,
 } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
+import { beginWatch } from "./processes.ts";
+import { WARNINGS } from "./reap.ts";
+import type { ProcessResult } from "./sandboxed.ts";
+import { runSandboxed } from "./sandboxed.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
 import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, createClaudeSide, hashClaude } from "./sides/claude.ts";
 import { CLI_PATH, piCcSide } from "./sides/pi-cc.ts";
-import { writeStdin } from "./stdin.ts";
 
 type Verdict = "PASS" | "FAIL" | "SKIP" | "UNVERIFIED";
 
@@ -47,17 +53,7 @@ interface CaseRun {
 	skip: string | null;
 }
 
-interface ProcessResult {
-	exitCode: number | null;
-	stdout: string;
-	stderr: string;
-	timedOut: boolean;
-	/** The side left a process behind, which the harness killed before it hashed the workspace. */
-	survivors: boolean;
-}
-
 const CONFORMANCE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
 async function main(): Promise<number> {
 	const { values } = parseArgs({
@@ -90,7 +86,7 @@ async function main(): Promise<number> {
 		return 2;
 	}
 
-	const runRoot = join(process.env.CONFORMANCE_TMP ?? join(tmpdir(), "pi-cc-conformance"), runStamp());
+	const runRoot = createRunRoot(process.env.CONFORMANCE_TMP ?? join(tmpdir(), "pi-cc-conformance"));
 	const claude = await probeClaude(runRoot);
 	if (claude === null) {
 		console.log("claude is absent. Every case runs on the pi-cc side and is reported unverified.\n");
@@ -104,6 +100,12 @@ async function main(): Promise<number> {
 		console.log("Every verdict is unverified. Pass --allow-claude-version-drift to compare anyway.\n");
 	}
 
+	const execLog = await startExecLog();
+	if (execLog === null) {
+		console.warn(
+			"exec log unavailable: /usr/bin/log did not deliver sandbox exec reports, so every case reports unreaped",
+		);
+	}
 	const results = new Map<string, CaseRun>();
 	const allowDrift = values["allow-claude-version-drift"] === true;
 	const compareClaude = claude !== null && claude.sha256 === CLAUDE_SHA256 && (claude.frozen || allowDrift);
@@ -114,7 +116,7 @@ async function main(): Promise<number> {
 		const skip = skipReason(testCase, claude === null);
 		const run: CaseRun =
 			skip === null
-				? await runCase(testCase, sides, runRoot)
+				? await runCase(testCase, sides, runRoot, execLog)
 				: { id: testCase.id, area: testCase.area, verdict: "SKIP", runs: [], skip };
 		results.set(testCase.id, run);
 		return run;
@@ -180,7 +182,12 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 	};
 }
 
-async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string): Promise<CaseRun> {
+async function runCase(
+	testCase: ConformanceCase,
+	sides: Side[],
+	runRoot: string,
+	execLog: ExecLog | null,
+): Promise<CaseRun> {
 	const runs: SideRun[] = [];
 	// The verdict is only PASS when every applicable side ran, so a claude side that was not selected reports here.
 	if (!sides.some((side) => side.name === "claude")) {
@@ -192,7 +199,7 @@ async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string
 			runs.push({ side: side.name, ran: false, diffs: [], stderr: "", notApplicable: reason });
 			continue;
 		}
-		runs.push(await runSide(testCase, side, runRoot));
+		runs.push(await runSide(testCase, side, runRoot, execLog));
 	}
 	const failed = runs.some((run) => run.diffs.length > 0);
 	const applicable = runs.filter((run) => run.notApplicable === null);
@@ -201,7 +208,12 @@ async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string
 	return { id: testCase.id, area: testCase.area, verdict, runs, skip: null };
 }
 
-async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): Promise<SideRun> {
+async function runSide(
+	testCase: ConformanceCase,
+	side: Side,
+	runRoot: string,
+	execLog: ExecLog | null,
+): Promise<SideRun> {
 	const roots = createRoots(runRoot, testCase.id, side.name);
 	const mock =
 		testCase.model === null ? null : await startMockServer({ turns: testCase.model.turns, outDir: roots.out });
@@ -223,10 +235,19 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		const cwd = testCase.cwd === undefined ? roots.workspace : join(roots.workspace, testCase.cwd);
 		mkdirSync(cwd, { recursive: true });
 		const workspaceBefore = hashTree(roots.workspace);
+		const watch = await beginWatch(execLog);
 		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
-		const workspaceAfter = hashTree(takeWorkspace(roots), expectedFilePaths(testCase));
+		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase), watch);
 		const violations: Violation[] = [...workspaceAfter.violations];
-		if (result.survivors) violations.push({ kind: "survivor", path: null });
+		if (result.reaped.survived) violations.push({ kind: "survivor", path: null });
+		if (!result.reaped.converged && !violations.some((violation) => violation.kind === "unreaped")) {
+			violations.push({ kind: "unreaped", path: null });
+		}
+		for (const left of workspaceAfter.leftBehind) {
+			console.warn(
+				`${testCase.id} (${side.name}): left running, not signalled: pid ${left.pid} started ${left.start} ${left.command}`,
+			);
+		}
 		const observation: Observation = {
 			timedOut: result.timedOut,
 			exitCode: result.exitCode,
@@ -253,24 +274,6 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 	}
 }
 
-/**
- * Moves the workspace out of the side's write grant before the harness reads it, and returns where it
- * now lives. A process that outlived the side can then neither add nor change a file in the tree the
- * harness hashes, because the profile grants writes only under `roots.root`. A workspace that no longer
- * exists is scanned where the case expected it, which reports it as unreadable.
- */
-function takeWorkspace(roots: Roots): string {
-	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
-	try {
-		renameSync(roots.workspace, snapshot);
-		return snapshot;
-	} catch {
-		// The workspace could not be moved out of the side's reach, so scan a path that cannot exist
-		// rather than a tree the side can still write. That reports as unreadable, which fails the case.
-		return join(dirname(roots.root), `snapshot-${roots.side}-unavailable`);
-	}
-}
-
 /** The workspace-relative paths a case asserts on, so a `contains` check never reads a path it was not given. */
 function expectedFilePaths(testCase: ConformanceCase): string[] {
 	return (testCase.compare.files ?? []).map((spec: FileSpec) => (typeof spec === "string" ? spec : spec.path));
@@ -290,171 +293,6 @@ function summarize(result: ProcessResult, requests: RecordedRequest[]) {
 	};
 }
 
-function runSandboxed(
-	profilePath: string,
-	argv: string[],
-	cwd: string,
-	roots: Roots,
-	env: Record<string, string>,
-	stdin: StdinSpec,
-	timeoutMs: number,
-): Promise<ProcessResult> {
-	return new Promise((resolve, reject) => {
-		const startedAt = Date.now();
-		const child = spawn(SANDBOX_EXEC, ["-f", profilePath, ...argv], {
-			cwd,
-			env,
-			detached: true,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
-		const stdout: Buffer[] = [];
-		const stderr: Buffer[] = [];
-		let timedOut = false;
-		child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-		child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-		// A child that exits before reading stdin closes the pipe under us; that is not a case failure.
-		child.stdin.on("error", () => {});
-		let stdinFailure: unknown;
-		const stdinAbort = new AbortController();
-		const stdinDone = writeStdin(
-			child.stdin,
-			stdin,
-			() => Buffer.concat(stdout).toString("utf8"),
-			stdinAbort.signal,
-		).then(
-			() => child.stdin.end(),
-			(error: unknown) => {
-				stdinFailure = error;
-				if (child.pid !== undefined) killGroup(child.pid);
-			},
-		);
-		const timer = setTimeout(() => {
-			timedOut = true;
-			if (child.pid !== undefined) killGroup(child.pid);
-		}, timeoutMs);
-		child.on("error", (error) => {
-			stdinAbort.abort();
-			clearTimeout(timer);
-			reject(error);
-		});
-		child.on("close", async (code) => {
-			stdinAbort.abort();
-			await stdinDone;
-			clearTimeout(timer);
-			const survivors = child.pid === undefined ? false : await reap(child.pid, roots, startedAt);
-			if (stdinFailure !== undefined) {
-				reject(stdinFailure);
-				return;
-			}
-			resolve({
-				exitCode: code,
-				stdout: Buffer.concat(stdout).toString("utf8"),
-				stderr: Buffer.concat(stderr).toString("utf8"),
-				timedOut,
-				survivors,
-			});
-		});
-	});
-}
-
-/**
- * Kills the side's process group and every process this run started that is still working inside the
- * side's root, then reports whether anything outlived the side. The group covers a child that stayed
- * in it. The sweep covers a SessionStart hook, which Claude Code spawns detached: the hook shell lands
- * in its own session, so `nohup ... &` inside it survives the group and has to be found in the process
- * table. Both run to completion before the caller hashes the workspace, so a delayed writer cannot
- * change what the case compared.
- */
-async function reap(pgid: number, roots: Roots, startedAt: number): Promise<boolean> {
-	killGroup(pgid);
-	let survived = false;
-	const deadline = Date.now() + 2_000;
-	for (;;) {
-		const stragglers = stragglersIn(roots.root, startedAt);
-		if (stragglers.length === 0) break;
-		survived = true;
-		for (const pid of stragglers) {
-			try {
-				process.kill(pid, "SIGKILL");
-			} catch {}
-		}
-		if (Date.now() >= deadline) break;
-		await delay(25);
-	}
-	return survived;
-}
-
-function killGroup(pgid: number): void {
-	try {
-		process.kill(-pgid, "SIGKILL");
-	} catch {}
-}
-
-/**
- * Processes that started after the run began and are still working inside the side's root. `ps` narrows
- * the table by start time first, because confirming every process's directory costs 20x more, and
- * `lsof` confirms the directory before anything is killed, so a process that merely started at the same
- * moment is never touched.
- */
-function stragglersIn(root: string, startedAt: number): number[] {
-	const listed = spawnSync("/bin/ps", ["-axo", "pid=,lstart="], { encoding: "utf8", timeout: 5_000 });
-	if (listed.stdout === null || listed.error !== undefined) {
-		warnOnce("survivor sweep unavailable: /bin/ps could not list processes");
-		return [];
-	}
-	const candidates: number[] = [];
-	let parsed = 0;
-	for (const line of listed.stdout.split("\n")) {
-		const fields = /^\s*(\d+)\s+(\S+ \S+ \S+ \S+ \S+)\s*$/.exec(line);
-		if (fields === null) continue;
-		parsed += 1;
-		const pid = Number.parseInt(fields[1], 10);
-		const started = Date.parse(fields[2]);
-		// `lstart` has one-second resolution, so a process that started just before the run still counts.
-		if (pid === process.pid || (!Number.isNaN(started) && started + 1_000 < startedAt)) continue;
-		candidates.push(pid);
-	}
-	if (parsed === 0) {
-		warnOnce("survivor sweep unavailable: /bin/ps no longer prints a start time this harness reads");
-		return [];
-	}
-	if (candidates.length === 0) return [];
-	const cwd = spawnSync("/usr/sbin/lsof", ["-a", "-d", "cwd", "-p", candidates.join(","), "-w", "-n", "-P", "-Fpn"], {
-		encoding: "utf8",
-		timeout: 5_000,
-	});
-	if (cwd.stdout === null || cwd.error !== undefined) {
-		warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories");
-		return [];
-	}
-	const pids: number[] = [];
-	let pid: number | null = null;
-	for (const line of cwd.stdout.split("\n")) {
-		if (line.startsWith("p")) {
-			pid = Number.parseInt(line.slice(1), 10);
-			continue;
-		}
-		if (line.startsWith("n") && pid !== null) {
-			const path = line.slice(1);
-			if (path === root || path.startsWith(`${root}/`)) pids.push(pid);
-		}
-	}
-	return pids;
-}
-
-const WARNINGS: string[] = [];
-
-/** One line on the console and in the report, so a sweep that cannot run is not mistaken for a clean one. */
-function warnOnce(message: string): void {
-	if (WARNINGS.includes(message)) return;
-	WARNINGS.push(message);
-	console.warn(message);
-}
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function skipReason(testCase: ConformanceCase, claudeAbsent: boolean): string | null {
 	for (const reason of testCase.skip) {
 		if (reason === "macos-only" && process.platform !== "darwin") return reason;
@@ -463,10 +301,6 @@ function skipReason(testCase: ConformanceCase, claudeAbsent: boolean): string | 
 		if (reason === "claude-binary-absent" && claudeAbsent) return reason;
 	}
 	return null;
-}
-
-function runStamp(): string {
-	return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 function printHeader(selected: number, total: number, claude: ClaudeIdentity | null, allowDrift: boolean): void {

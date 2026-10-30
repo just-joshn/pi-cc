@@ -18,16 +18,21 @@ import {
 	fstatSync,
 	lstatSync,
 	mkdirSync,
+	mkdtempSync,
 	openSync,
 	readdirSync,
 	readFileSync,
 	readlinkSync,
 	realpathSync,
+	renameSync,
 	writeFileSync,
 } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { LeftBehind, ProcessRow, RunWatch } from "./processes.ts";
+import { findLeftBehind } from "./processes.ts";
+import { reap } from "./reap.ts";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
 export const PROBES = { ls: "/bin/ls", nc: "/usr/bin/nc", open: "/usr/bin/open" } as const;
@@ -65,6 +70,12 @@ const MAX_READ_BYTES = 8 * 1024 * 1024;
 const FIXTURES_DIR = fileURLToPath(new URL("../fixtures/", import.meta.url));
 
 const MODEL_API_KEY = "sk-ant-conformance-fixture-0000000000000000";
+
+/** A new directory under `base` for one harness run, named by the time it started and unique even within one millisecond. */
+export function createRunRoot(base: string): string {
+	mkdirp(base);
+	return mkdtempSync(join(base, `${new Date().toISOString().replace(/[:.]/g, "-")}-`));
+}
 
 export function createRoots(tmpRoot: string, caseId: string, side: SideName): Roots {
 	const root = realpathSync(mkdirp(join(tmpRoot, caseId, side)));
@@ -183,8 +194,8 @@ export function seedFiles(roots: Roots, files: Record<string, string>, mockUrl?:
 	}
 }
 
-/** Every violation the harness can report against a side. Case data names one of these. */
-export const VIOLATION_KINDS = [
+/** Violations a case can plant on purpose, so case data may name them. */
+export const PLANTABLE_VIOLATION_KINDS = [
 	"symlink",
 	"escaping-symlink",
 	"dangling-symlink",
@@ -193,7 +204,16 @@ export const VIOLATION_KINDS = [
 	"survivor",
 ] as const;
 
-export type ViolationKind = (typeof VIOLATION_KINDS)[number];
+/**
+ * The harness could not establish what the side left behind: a process it could not remove, or a
+ * workspace it could not move out of the side's reach. No case plants these, so case data cannot name
+ * them and they always fail the case.
+ */
+export const HARNESS_FAILURE_KINDS = ["unreaped", "workspace-unmovable"] as const;
+
+export type PlantableViolationKind = (typeof PLANTABLE_VIOLATION_KINDS)[number];
+
+export type ViolationKind = PlantableViolationKind | (typeof HARNESS_FAILURE_KINDS)[number];
 
 export interface Violation {
 	kind: ViolationKind;
@@ -207,6 +227,8 @@ export interface TreeScan {
 	/** The text of the wanted paths, read in the same pass that hashed them. */
 	text: Map<string, string>;
 	violations: Violation[];
+	/** New processes of the side's sandbox that the process table showed after the run, reported and never signalled. */
+	leftBehind: ProcessRow[];
 }
 
 /**
@@ -222,7 +244,7 @@ export interface TreeScan {
  * rather than overflowing the stack.
  */
 export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan {
-	const scan: TreeScan = { entries: new Map(), text: new Map(), violations: [] };
+	const scan: TreeScan = { entries: new Map(), text: new Map(), violations: [], leftBehind: [] };
 	const wantedPaths = new Set(wanted);
 	const root = realpathOrNull(dir);
 	if (root === null) {
@@ -248,6 +270,60 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
 		if (current === undefined) break;
 		scanDirectory(current.path, current.prefix, root, wantedPaths, scan, pending);
 	}
+	return scan;
+}
+
+/**
+ * Moves the workspace out of the side's write grant, waits until nothing holds it, then hashes it where
+ * it landed. The profile grants writes only under `roots.root`, so a process that outlived the side can
+ * no longer open a file in the moved tree. One that already had a file open or its working directory
+ * there can still write through that handle, so the move is followed by a reap over the side root and
+ * the moved tree. A process found there is killed and reported as `unreaped`: the reap that ran before
+ * the move should have found it, so the digest is only taken once a scan finds the tree free of processes.
+ *
+ * No scan of what a process holds can see one that holds nothing under those paths, or a chain that is
+ * always one generation ahead of it. So the reap is followed by a comparison of the process table with
+ * what `watch` recorded before the side started, narrowed to processes the side's sandbox ran (see
+ * `processes.ts`): a new live one is reported as `unreaped` and left running, because the harness cannot
+ * prove it is the side's and not a concurrent run's. A missing watch, an unreadable listing, or an exec
+ * log that cannot be confirmed current is reported the same way, so nothing passes on a check that did
+ * not run. Quiet time after the reap would prove nothing about such a process and is not used.
+ *
+ * A workspace the side removed is scanned in place and reports as unreadable. Any other failed move
+ * reports `workspace-unmovable` and reads nothing, because the tree is still inside the side's reach.
+ */
+export async function scanWorkspace(
+	roots: Roots,
+	wanted: readonly string[],
+	watch: RunWatch | null,
+	options: { ps?: string } = {},
+): Promise<TreeScan> {
+	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
+	try {
+		renameSync(roots.workspace, snapshot);
+	} catch {
+		// A failed rename does not say which end was missing or denied, so only a source the lookup
+		// itself reports absent counts as removed.
+		if (lstatErrorCode(roots.workspace) !== "ENOENT") {
+			return {
+				entries: new Map(),
+				text: new Map(),
+				violations: [{ kind: "workspace-unmovable", path: null }],
+				leftBehind: [],
+			};
+		}
+		const left = await findLeftBehind(watch, options.ps);
+		return withProcessFindings(hashTree(roots.workspace, wanted), left, false);
+	}
+	const reaped = await reap(roots.root, { moved: snapshot, cleanSweeps: 1 });
+	const left = await findLeftBehind(watch, options.ps);
+	return withProcessFindings(hashTree(snapshot, wanted), left, reaped.survived || !reaped.converged);
+}
+
+function withProcessFindings(scan: TreeScan, left: LeftBehind, reapFailed: boolean): TreeScan {
+	scan.leftBehind = left.processes;
+	if (reapFailed || !left.complete || left.processes.length > 0)
+		scan.violations.push({ kind: "unreaped", path: null });
 	return scan;
 }
 
@@ -353,6 +429,15 @@ function lstatOrNull(path: string): Stats | null {
 	}
 }
 
+function lstatErrorCode(path: string): string | null {
+	try {
+		lstatSync(path);
+		return null;
+	} catch (error) {
+		return errorCode(error);
+	}
+}
+
 function realpathOrNull(path: string): string | null {
 	try {
 		return realpathSync(path);
@@ -397,7 +482,7 @@ export function renderProfile(options: ProfileOptions): string {
 	const rules = [
 		"(version 1)",
 		"(deny default)",
-		"(allow process-exec*)",
+		"(allow process-exec* (with report))",
 		"(allow process-fork)",
 		"(allow signal (target self))",
 		"(allow signal (target children))",
@@ -414,7 +499,8 @@ export function renderProfile(options: ProfileOptions): string {
 			"/Library/Keychains",
 			"/private/var/db/dslocal",
 			"/Library/Application Support/ClaudeCode",
-			"/etc/claude-code",
+			// `/etc` links to `/private/etc` and Seatbelt matches the resolved path, so only the canonical spelling denies.
+			"/private/etc/claude-code",
 		].map((path) => `(deny file-read* (subpath ${quote(path)}))`),
 		...executableRoots.map((path) => `(allow file-read* (subpath ${quote(path)}))`),
 		`(allow file-read* (subpath ${quote(roots.root)}))`,
