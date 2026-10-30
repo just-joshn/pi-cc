@@ -293,24 +293,29 @@ export function projectToolCall(call: {
 	if (issues.length > 0) {
 		return { name: covered.pi, arguments: {}, inputError: inputValidationText(covered.name, issues), modelCall };
 	}
-	if (covered.pi === "read" && typeof args.limit === "number" && args.limit > Number.MAX_SAFE_INTEGER) {
-		const rangeIssues = [
-			{
-				code: "too_big",
-				maximum: Number.MAX_SAFE_INTEGER,
-				note: "Integers must be within the safe integer range.",
-				origin: "int",
-				inclusive: true,
-				path: ["limit"],
-				message: "Too big: expected int to be <=9007199254740991",
-			},
-		];
-		return {
-			name: covered.pi,
-			arguments: {},
-			inputError: `<tool_use_error>InputValidationError: ${JSON.stringify(rangeIssues, null, 2)}</tool_use_error>`,
-			modelCall,
-		};
+	if (covered.pi === "read") {
+		for (const field of ["limit", "offset"] as const) {
+			const value = args[field];
+			if (typeof value === "number" && value > Number.MAX_SAFE_INTEGER) {
+				const rangeIssues = [
+					{
+						code: "too_big",
+						maximum: Number.MAX_SAFE_INTEGER,
+						note: "Integers must be within the safe integer range.",
+						origin: "int",
+						inclusive: true,
+						path: [field],
+						message: "Too big: expected int to be <=9007199254740991",
+					},
+				];
+				return {
+					name: covered.pi,
+					arguments: {},
+					inputError: `<tool_use_error>InputValidationError: ${JSON.stringify(rangeIssues, null, 2)}</tool_use_error>`,
+					modelCall,
+				};
+			}
+		}
 	}
 	return {
 		name: covered.pi,

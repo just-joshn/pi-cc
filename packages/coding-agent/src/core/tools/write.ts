@@ -111,7 +111,10 @@ export function createWriteToolDefinition(
 				// Older models require a prior read even for an auto-allowed workspace path.
 				const readGated = previous !== undefined && gated;
 				if (readGated && record === undefined) throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
-				if (readGated && record !== undefined && normalizeForComparison(previous) !== record.content) {
+				// Claude Code refuses a write over a file that changed since the model read it for every
+				// model, with no permission check (`chunk-r5cyd28m.js:44886-44893`): unlike Edit there is
+				// no recovery, because the write would discard the on-disk changes.
+				if (record !== undefined && previous !== undefined && normalizeForComparison(previous) !== record.content) {
 					throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
 				}
 

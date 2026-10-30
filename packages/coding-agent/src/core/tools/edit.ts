@@ -192,10 +192,8 @@ export function createEditToolDefinition(
 				const suffix = inContext ? ` ${CC_FILE_STATE_SUFFIX}` : "";
 
 				// Older models require a prior read even for an auto-allowed workspace path.
-				const readGated = raw !== undefined && options?.isReadGated?.(absolutePath) === true;
-				if (readGated && record === undefined) throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
-				if (readGated && record !== undefined && normalizeForComparison(raw) !== record.content) {
-					throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
+				if (raw !== undefined && options?.isReadGated?.(absolutePath) === true && record === undefined) {
+					throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				}
 
 				const { bom, text: content } = splitBom(raw ?? "");
@@ -213,6 +211,19 @@ export function createEditToolDefinition(
 				}
 
 				const creating = normalizedEdits.some((edit) => edit.oldText === "");
+				// Claude Code's stale-read handling is independent of the model gate: a read whose file
+				// changed on disk recovers when the edit still applies to the on-disk content (its `Qe`
+				// recovery, gated by the permission auto-allow `TSe`, which pi-cc treats as passing until
+				// P04 wires it); otherwise it reports the stale file instead of the failed match.
+				const stale = record !== undefined && raw !== undefined && normalizeForComparison(raw) !== record.content;
+				if (stale && !creating) {
+					for (const edit of normalizedEdits) {
+						const count = indexesOf(normalizedContent, edit.oldText).length;
+						if (count === 0 || (count > 1 && !replaceAll)) {
+							throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
+						}
+					}
+				}
 				if (creating) {
 					if (normalizedEdits.length !== 1) {
 						throw new Error(toolUseError(CC_TOOL_TEXT.editFileExists));
@@ -245,7 +256,8 @@ export function createEditToolDefinition(
 				options?.readState?.record(absolutePath, {
 					content: normalizeForComparison(finalContent),
 					partial: false,
-					unseen: !inContext,
+					// A recovered stale edit leaves other on-disk changes the model has not seen.
+					unseen: !inContext || stale,
 				});
 
 				const diffResult = generateDiffString(normalizedContent, applied.next);
@@ -253,8 +265,10 @@ export function createEditToolDefinition(
 				const wording = replaceAll
 					? `The file ${path} has been updated. All occurrences were successfully replaced.`
 					: `The file ${path} has been updated successfully.`;
+				// The recovery note replaces the file-state suffix: the content is no longer in context.
+				const text = stale ? `${wording}${CC_TOOL_TEXT.editStaleRecoveryNote}` : `${wording}${suffix}`;
 				return {
-					content: [{ type: "text", text: `${wording}${suffix}` }],
+					content: [{ type: "text", text }],
 					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },
 				};
 			});

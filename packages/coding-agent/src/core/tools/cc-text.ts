@@ -59,6 +59,9 @@ export const CC_TOOL_TEXT = {
 	editNotRead: "File has not been read yet. Read it first before writing to it.",
 	editStale:
 		"File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.",
+	/** Replaces the file-state suffix when Claude Code recovers a stale read by applying the edit. */
+	editStaleRecoveryNote:
+		" (note: the file had been modified on disk since you last read it — the edit applied cleanly, but the file contains other changes not in your context. Read it before edits that depend on surrounding content.)",
 	editNotFound: (oldText: string) => `String to replace not found in file.\nString: ${oldText}`,
 	editMultipleMatches: (count: number, oldText: string) =>
 		`Found ${count} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: ${oldText}`,
