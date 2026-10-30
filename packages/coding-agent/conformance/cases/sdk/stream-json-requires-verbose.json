@@ -1,0 +1,26 @@
+{
+	"id": "sdk/stream-json-requires-verbose",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"hello",
+		"--output-format",
+		"stream-json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "Error: When using --print, --output-format=stream-json requires --verbose"
+		}
+	},
+	"skip": []
+}

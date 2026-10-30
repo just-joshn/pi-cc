@@ -1,0 +1,38 @@
+{
+	"id": "sdk/pi-json-mode-unchanged",
+	"area": "sdk",
+	"argv": [
+		"--mode",
+		"json",
+		"-p",
+		"hello",
+		"--output-format",
+		"stream-json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"^\\{\"type\":\"session\",",
+				"\"type\":\"agent_start\"",
+				"\"type\":\"agent_end\""
+			]
+		}
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "--mode is pi's own protocol selector and Claude Code rejects the flag"
+	}
+}

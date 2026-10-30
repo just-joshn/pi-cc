@@ -1,0 +1,25 @@
+{
+	"id": "sdk/include-partial-coupling",
+	"area": "sdk",
+	"argv": [
+		"--include-partial-messages",
+		"-p",
+		"hello"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "Error: --include-partial-messages requires --print and --output-format=stream-json."
+		}
+	},
+	"skip": []
+}
