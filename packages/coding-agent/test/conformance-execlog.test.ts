@@ -41,6 +41,24 @@ describe.skipIf(!darwin)("the sandbox exec log", () => {
 		expect(execLog?.executedSince(since).has(reported)).toBe(true);
 	});
 
+	test("reads a time stamp the same in any time zone of the harness", async () => {
+		const zone = process.env.TZ;
+		process.env.TZ = "Pacific/Kiritimati";
+		const other = await startExecLog();
+		try {
+			const since = Date.now() - 100;
+			const reported = await run(PROFILE(true));
+
+			expect(await other?.catchUp()).toBe(true);
+
+			expect(other?.executedSince(since).has(reported)).toBe(true);
+		} finally {
+			other?.close();
+			if (zone === undefined) delete process.env.TZ;
+			else process.env.TZ = zone;
+		}
+	});
+
 	test("does not name a program whose profile does not report", async () => {
 		const since = Date.now() - 100;
 		const silent = await run(PROFILE(false));
