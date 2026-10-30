@@ -7,6 +7,7 @@ interface Run {
 	readonly mode: string;
 	readonly undos: number;
 	readonly history: string[];
+	readonly anchor: number | undefined;
 }
 
 const tokens = (keys: string): string[] => keys.match(/<Esc>|<BS>|[\s\S]/gu) ?? [];
@@ -33,7 +34,7 @@ function run(marked: string, keys: string, start: VimState = NORMAL_STATE, colum
 			offset += input.key.length;
 		}
 	}
-	return { text: `${text.slice(0, offset)}|${text.slice(offset)}`, mode: state.mode, undos, history };
+	return { text: `${text.slice(0, offset)}|${text.slice(offset)}`, mode: state.mode, undos, history, anchor: state.visual?.anchor };
 }
 
 const normal = (from: string, keys: string) => run(from, keys);
@@ -430,3 +431,140 @@ describe("vim gj and gk without a wrap width", () => {
 		assert.strictEqual(normal("ab|c\ndef\nghi", "dgj").text, "|ghi");
 	});
 });
+
+// Visual mode. Claude Code: v and V from idle or a count, the key router Bt and its table Sn, the operators It and vt
+// (chunk-hz2c9q6k.js:568-1046). The span is anchor..cursor inclusive, whole lines for V.
+const visual = (from: string, keys: string) => run(from, keys);
+
+function visualTable(name: string, rows: ReadonlyArray<readonly [string, string, string]>, mode = "normal") {
+	describe(name, () => {
+		for (const [from, keys, to] of rows) {
+			it(`${JSON.stringify(from)} ${keys} -> ${JSON.stringify(to)}`, () => {
+				const result = visual(from, keys);
+				assert.strictEqual(result.text, to);
+				assert.strictEqual(result.mode, mode);
+			});
+		}
+	});
+}
+
+visualTable("vim visual operators", [
+	["|foo bar", "vwd", "|ar"],
+	["|foo bar", "vey", "|foo bar"],
+	["ab|cd", "vhy", "a|bcd"],
+	["|foo bar", "vecX<Esc>", "|X bar"],
+	["a\n|b\nc", "Vd", "a\n|c"],
+	["a\n|b", "Vd", "|a"],
+	["a\n|b\nc", "Vjy", "a\n|b\nc"],
+	["a\n|b\nc", "VcX<Esc>", "a\n|X\nc"],
+	["|abc", "vlx", "|c"],
+	["|abc", "vlsX<Esc>", "|Xc"],
+	["a|bc\nd", "vX", "|d"],
+	["a|bc\nd", "vD", "|d"],
+	["a|bc\nd", "vCX<Esc>", "|X\nd"],
+	["a|bc\nd", "vSX<Esc>", "|X\nd"],
+	["a|bc\nd", "vRX<Esc>", "|X\nd"],
+	["a|bc\nd", "vYp", "abc\n|abc\nd"],
+]);
+
+visualTable("vim visual motions and counts", [
+	["|a b c d", "v2wd", "| d"],
+	["|abcd", "v2ld", "|d"],
+	["|abcd", "2vld", "|cd"],
+	["a|bc\ndef", "vjd", "a|f"],
+	["|a\nb\nc\nd", "v2jd", "|\nd"],
+	["|a,b,c", "vf,d", "|b,c"],
+	["|a,b,c", "vt,d", "|,b,c"],
+	["|a,b,c", "vf,;d", "|c"],
+	["a,b,|c", "vF,d", "a,|"],
+	["|ab\ncd", "v$d", "|cd"],
+	["|ab\ncde", "v$jd", "|"],
+	["|a\nb", "vGd", "|"],
+	["a\n|b", "vggd", "|"],
+	["|abc", "vl2<Esc>d", "|c"],
+	["|abc", "vlr<Esc>d", "|c"],
+]);
+
+visualTable("vim visual transforms", [
+	["|aBc", "vll~", "|AbC"],
+	["|abc", "vlU", "|ABc"],
+	["|ABC", "vlu", "|abC"],
+	["|abc", "vlrx", "|xxc"],
+	["|a\nb", "V>", "  |a\nb"],
+	["|a\nb", "V2>", "    |a\nb"],
+	["  |a", "V<", "|a"],
+	["a|b\ncd\nef", "vjJ", "ab| cd\nef"],
+	["|ab cd", "ywwvlp", "ab ab| "],
+	["|ab", "vlpd", "|"],
+]);
+
+visualTable("vim visual text objects", [
+	["f(a|b)g", "vi(d", "f(|)g"],
+	["f(a|b)g", "va(d", "f|g"],
+	['x "a|b" y', 'vi"d', 'x "|" y'],
+	["|foo bar", "viwd", "| bar"],
+	["|foo bar", "vawd", "|bar"],
+]);
+
+visualTable("vim visual toggling and leaving", [
+	["a|b\ncd", "vVd", "|cd"],
+	["|abc", "vlv", "a|bc"],
+	["|abc", "VV", "|abc"],
+	["|abc", "vl<Esc>", "a|bc"],
+	["|abc\nd", "v$<Esc>", "ab|c\nd"],
+	["|abcd", "lvlohd", "|d"],
+	["|abcd", "lvlod", "a|d"],
+]);
+
+visualTable(
+	"vim visual stays visual",
+	[
+		["|abc", "v", "|abc"],
+		["|abc", "vl", "a|bc"],
+		["|abc", "vV", "|abc"],
+		["|abc", "vlo", "|abc"],
+		["|abc", "v2", "|abc"],
+		["|abc", "vlp", "a|bc"],
+	],
+	"visual",
+);
+
+describe("vim visual state", () => {
+	it("v and V enter visual mode with their anchor, from idle or a count", () => {
+		assert.deepStrictEqual([visual("a|bc", "v").mode, visual("a|bc", "v").anchor], ["visual", 1]);
+		assert.strictEqual(visual("a|bc", "3V").mode, "visual");
+		assert.strictEqual(visual("a|bc", "dv").mode, "normal");
+	});
+
+	it("o swaps the anchor and the cursor", () => {
+		const result = visual("|abcd", "vllo");
+		assert.strictEqual(result.text, "|abcd");
+		assert.strictEqual(result.anchor, 2);
+	});
+
+	it("moves keep the anchor and never walk the history", () => {
+		const result = visual("|a", "vkj");
+		assert.deepStrictEqual(result.history, []);
+		assert.strictEqual(result.anchor, 0);
+		assert.deepStrictEqual(run("|a", "kj").history, ["up", "down"]);
+	});
+
+	it("an operator that changes opens insert mode", () => {
+		assert.strictEqual(visual("|abc", "vlc").mode, "insert");
+	});
+
+	it("keeps the display column across gj and gk", () => {
+		const result = run("aa|aa bbbb cccc dddd", "vgjd", NORMAL_STATE, 10);
+		assert.strictEqual(result.text, "aa|cc dddd");
+		assert.strictEqual(run("aaaa bbbb cc|cc dddd", "vgkd", NORMAL_STATE, 10).text, "aaaa bb|cc dddd");
+	});
+});
+
+visualTable("vim visual dot repeat", [
+	["|abcdefgh", "vld.", "|efgh"],
+	["|a\nb\nc\nd\ne", "Vjd.", "|e"],
+	["|abc abc", "vecX<Esc>w.", "X |X"],
+	["|abcd", "vlUl.", "A|BCd"],
+	["|abcd", "vlrxl.", "x|xxd"],
+	["|a\nb\nc", "Vj>j.", "  a\n    |b\n  c"],
+]);

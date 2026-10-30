@@ -351,3 +351,72 @@ describe("gj and gk follow the rendered wrap", () => {
 		assert.strictEqual(marked(editor), "abc\n|def");
 	});
 });
+
+describe("Editor vim visual mode", () => {
+	const INVERSE = "\x1b[7m";
+
+	it("shows -- VISUAL -- and -- VISUAL LINE -- under the editor, and nothing once it is left", () => {
+		const editor = createEditor();
+		editor.setPaddingX(1);
+		press(editor, "abc<Esc>0v");
+		assert.strictEqual(editor.getVimMode(), "visual");
+		assert.strictEqual(plain(editor).at(-1), " -- VISUAL --");
+		press(editor, "V");
+		assert.strictEqual(plain(editor).at(-1), " -- VISUAL LINE --");
+		press(editor, "<Esc>");
+		assert.strictEqual(editor.getVimMode(), "normal");
+		assert.ok(!plain(editor).some((line) => line.includes("VISUAL")));
+	});
+
+	it("Escape snaps the cursor back onto the last character", () => {
+		const editor = createEditor();
+		press(editor, "abc<Esc>0v$");
+		assert.strictEqual(marked(editor), "abc|");
+		press(editor, "<Esc>");
+		assert.strictEqual(marked(editor), "ab|c");
+	});
+
+	it("inverts the selected span and only in visual mode", () => {
+		const editor = createEditor();
+		press(editor, "abc def<Esc>0");
+		assert.ok(!editor.render(40).join("").includes(INVERSE));
+		press(editor, "vl");
+		const lines = editor.render(40);
+		assert.ok(lines.some((line) => line.includes(`${INVERSE}a\x1b[27m`)));
+		press(editor, "<Esc>");
+		assert.ok(!editor.render(40).join("").includes(INVERSE));
+	});
+
+	it("inverts whole lines for V", () => {
+		const editor = createEditor();
+		editor.setText("one\ntwo\nthree");
+		press(editor, "<Esc>ggVj");
+		const lines = editor.render(40);
+		assert.ok(lines.some((line) => line.includes(`${INVERSE}one\x1b[27m`)));
+		assert.ok(!lines.some((line) => line.includes(`${INVERSE}three`)));
+	});
+
+	it("a visual change and what it types undo as one step", () => {
+		const editor = createEditor();
+		press(editor, "abc def<Esc>0vecXY<Esc>");
+		assert.strictEqual(editor.getText(), "XY def");
+		press(editor, "u");
+		assert.strictEqual(editor.getText(), "abc def");
+	});
+
+	it("Enter moves down like j and does not leave visual mode", () => {
+		const editor = createEditor();
+		editor.setText("a\nb");
+		press(editor, "<Esc>ggv");
+		key(editor, "\r");
+		assert.strictEqual(marked(editor), "a\n|b");
+		assert.strictEqual(editor.getVimMode(), "visual");
+	});
+
+	it("a key outside vim's table leaves visual mode and is consumed", () => {
+		const editor = createEditor();
+		press(editor, "abc<Esc>0v");
+		assert.strictEqual(editor.handleVimInput("\x03", false), true);
+		assert.strictEqual(editor.getVimMode(), "normal");
+	});
+});
