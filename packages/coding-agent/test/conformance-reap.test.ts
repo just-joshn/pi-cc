@@ -2,11 +2,19 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { baseEnv, createRoots, type Roots } from "../conformance/isolate.ts";
 import { reap } from "../conformance/reap.ts";
+import {
+	acquireProcessTable,
+	PROCESS_TABLE_LOCK_TIMEOUT_MS,
+	releaseProcessTable,
+} from "./conformance-process-table.ts";
 
 const darwin = process.platform === "darwin";
+beforeAll(acquireProcessTable, PROCESS_TABLE_LOCK_TIMEOUT_MS);
+afterAll(releaseProcessTable);
+
 const roots: string[] = [];
 const bases: string[] = [];
 

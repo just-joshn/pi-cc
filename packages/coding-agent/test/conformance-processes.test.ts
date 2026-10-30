@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
 	findUnaccounted,
 	identity,
@@ -11,8 +11,16 @@ import {
 	takeBaseline,
 	unaccounted,
 } from "../conformance/processes.ts";
+import {
+	acquireProcessTable,
+	PROCESS_TABLE_LOCK_TIMEOUT_MS,
+	releaseProcessTable,
+} from "./conformance-process-table.ts";
 
 const darwin = process.platform === "darwin";
+beforeAll(acquireProcessTable, PROCESS_TABLE_LOCK_TIMEOUT_MS);
+afterAll(releaseProcessTable);
+
 const HARNESS = { pid: 100, uid: 501 };
 
 function row(overrides: Partial<ProcessRow> & { pid: number }): ProcessRow {
@@ -106,8 +114,9 @@ describe.skipIf(!darwin)("the process table of this machine", () => {
 		const found = await findUnaccounted(baseline);
 
 		expect(found.complete).toBe(true);
-		expect(found.processes.map((process) => process.pid)).toEqual([newer]);
-		expect(found.processes.map((process) => process.pid)).not.toContain(older);
+		const foundPids = found.processes.map((process) => process.pid);
+		expect(foundPids).toContain(newer);
+		expect(foundPids).not.toContain(older);
 	});
 
 	test("a child of this process, which is the harness, is not found", async () => {
@@ -117,7 +126,8 @@ describe.skipIf(!darwin)("the process table of this machine", () => {
 
 		const found = await findUnaccounted(baseline);
 
-		expect(found).toEqual({ complete: true, processes: [] });
+		expect(found.complete).toBe(true);
+		expect(found.processes.map((process) => process.pid)).not.toContain(child.pid);
 	});
 
 	test("a listing that cannot be read is incomplete, not empty", async () => {

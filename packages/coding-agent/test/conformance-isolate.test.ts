@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
 	baseEnv,
 	createRoots,
@@ -29,8 +29,16 @@ import {
 	seedFiles,
 } from "../conformance/isolate.ts";
 import { takeBaseline } from "../conformance/processes.ts";
+import {
+	acquireProcessTable,
+	PROCESS_TABLE_LOCK_TIMEOUT_MS,
+	releaseProcessTable,
+} from "./conformance-process-table.ts";
 
 const darwin = process.platform === "darwin";
+beforeAll(acquireProcessTable, PROCESS_TABLE_LOCK_TIMEOUT_MS);
+afterAll(releaseProcessTable);
+
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 const tempDirs: string[] = [];
 
@@ -517,21 +525,25 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 		["a fast chain", { pause: 0, regroup: false }],
 		["a chain slower than any quiet window the harness could afford", { pause: 0.4, regroup: false }],
 		["a chain that also moves into a new process group in every generation", { pause: 0, regroup: true }],
-	])("%s is reported as unreaped and never passes in silence", async (_name, options) => {
-		const roots = sideRoots();
-		const baseline = await takeBaseline();
-		const chain = startHoppingChain(roots, options);
-		await delay(600);
-		expect(readFileSync(chain.log, "utf8").length).toBeGreaterThan(0);
+	])(
+		"%s is reported as unreaped and never passes in silence",
+		async (_name, options) => {
+			const roots = sideRoots();
+			const baseline = await takeBaseline();
+			const chain = startHoppingChain(roots, options);
+			await delay(600);
+			expect(readFileSync(chain.log, "utf8").length).toBeGreaterThan(0);
 
-		const scan = await scanWorkspace(roots, ["result.txt"], baseline);
-		const afterScan = readFileSync(chain.log, "utf8").length;
-		await delay(1000);
+			const scan = await scanWorkspace(roots, ["result.txt"], baseline);
+			const afterScan = readFileSync(chain.log, "utf8").length;
+			await delay(1000);
 
-		const stillRunning = readFileSync(chain.log, "utf8").length > afterScan;
-		expect(stillRunning).toBe(true);
-		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
-	}, 60_000);
+			const stillRunning = readFileSync(chain.log, "utf8").length > afterScan;
+			expect(stillRunning).toBe(true);
+			expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
+		},
+		60_000,
+	);
 });
 
 // /etc/claude-code does not exist here, so the rule form is proven on /private/etc/hosts, which does.
