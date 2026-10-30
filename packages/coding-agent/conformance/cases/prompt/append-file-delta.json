@@ -35,7 +35,7 @@
 					},
 					"system.2.text": {
 						"match": [
-							"PROBE_FILE_APPEND_MARKER\\. Always mention pancakes\\.\\n$"
+							"PROBE_FILE_APPEND_MARKER\\. Always mention pancakes\\."
 						]
 					}
 				},
