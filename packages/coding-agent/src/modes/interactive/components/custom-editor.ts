@@ -2,6 +2,7 @@ import {
 	Editor,
 	type EditorOptions,
 	type EditorTheme,
+	type Keybinding,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
@@ -97,19 +98,45 @@ export class CustomEditor extends Editor {
 	handleInput(data: string): void {
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
-			this.keybindings.cancelChord();
+			this.keybindings.cc.cancel();
 			return;
 		}
 
-		this.keybindings.dispatchInput(
-			data,
-			"Chat",
-			() => this.handleBoundInput(data),
-			(message) => {
-				this.chordStatus = message;
-				this.tui.requestRender();
-			},
-		);
+		if (!this.keybindings.cc.active) {
+			this.handleBoundInput(data);
+			return;
+		}
+
+		// An open autocomplete menu owns its keys, like CC's Autocomplete context declared after Chat.
+		const menuKey =
+			this.isShowingAutocomplete() &&
+			(this.keybindings.matches(data, "tui.input.tab") ||
+				(
+					[
+						"tui.select.cancel",
+						"tui.select.up",
+						"tui.select.down",
+						"tui.select.pageUp",
+						"tui.select.pageDown",
+						"tui.select.confirm",
+					] as const
+				).some((action) => this.keybindings.matches(data, action)));
+		const result = menuKey
+			? ({ kind: "none" } as const)
+			: this.keybindings.cc.dispatch(data, (message) => {
+					this.chordStatus = message;
+					this.tui.requestRender();
+				});
+		if (result.kind === "pending" || result.kind === "cancelled") return;
+		if (result.kind === "action" && this.runCcAction(result.action, data)) return;
+		this.handleBoundInput(data);
+	}
+
+	/** Runs an imported action and consumes the key, or returns false when the action declines (app.exit on a non-empty prompt). */
+	private runCcAction(action: Keybinding, data: string): boolean {
+		if (action === "app.exit" && this.getText().length > 0) return false;
+		this.keybindings.runAs(data, action, () => this.handleBoundInput(data));
+		return true;
 	}
 
 	private handleBoundInput(data: string): void {

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Keybinding, setKeybindings, TuiMainScreen } from "@earendil-works/pi-tui";
+import { setKeybindings, TuiMainScreen } from "@earendil-works/pi-tui";
 import { Compile } from "typebox/compile";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
@@ -10,8 +10,8 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createEventBus } from "../src/core/event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import { ExtensionRunner } from "../src/core/extensions/runner.ts";
-import { type Binding, ChordResolver } from "../src/core/keybindings/chords.ts";
-import { importCcKeybindings, parseKeySequence, resolveBindings } from "../src/core/keybindings/import-cc.ts";
+import { CcLayer } from "../src/core/keybindings/cc-layer.ts";
+import { importCcKeybindings, parseKeySequence, resolveLayer } from "../src/core/keybindings/import-cc.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { KeybindingsSchema } from "../src/core/keybindings-schema.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -51,6 +51,41 @@ function writeCcFile(bindings: unknown) {
 	writeFileSync(join(process.env.CLAUDE_CONFIG_DIR!, "keybindings.json"), JSON.stringify(bindings));
 }
 
+const slashProvider = (items: { value: string; label: string }[]) => ({
+	getSuggestions: async () => ({ items, prefix: "/" }),
+	applyCompletion: (lines: string[], cursorLine: number, _cursorCol: number, item: { value: string }) => ({
+		lines: lines.map((line, index) => (index === cursorLine ? item.value : line)),
+		cursorLine,
+		cursorCol: item.value.length,
+	}),
+});
+
+function newEditor(manager: KeybindingsManager) {
+	return new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, manager);
+}
+
+/** Records the observable outcome of keystrokes: editor text and which app handlers ran. */
+function probe(file: unknown, ccFile?: unknown) {
+	if (ccFile !== undefined) writeCcFile(ccFile);
+	const { manager, editor } = load(file);
+	const events: string[] = [];
+	editor.onAction("app.clear", () => events.push("clear"));
+	editor.onAction("app.model.select", () => events.push("model"));
+	editor.onAction("app.message.copy", () => events.push("copy"));
+	editor.onCtrlD = () => events.push("exit");
+	editor.onEscape = () => events.push("escape");
+	editor.onSubmit = (text) => events.push(`submit:${text}`);
+	return {
+		manager,
+		editor,
+		events,
+		press(...keys: string[]) {
+			for (const key of keys) editor.handleInput(key);
+			return { text: editor.getText(), events: [...events] };
+		},
+	};
+}
+
 describe("CC keybinding file import", () => {
 	it("validates the CC array envelope and rejects malformed blocks atomically", () => {
 		expect(importCcKeybindings({ bindings: {} }, new Set()).diagnostics).toHaveLength(1);
@@ -60,23 +95,17 @@ describe("CC keybinding file import", () => {
 	});
 
 	it("rejects a malformed block on disk without applying an earlier valid block", () => {
-		const { manager, editor } = load({
+		const { manager } = load({
 			bindings: [
-				{ context: "Chat", bindings: { enter: null, "ctrl+y": "chat:submit" } },
+				{ context: "Chat", bindings: { "ctrl+y": "chat:submit" } },
 				{ context: "Chat", bindings: { "ctrl+l": 4 } },
 			],
 		});
 		expect(manager.getImportDiagnostics()).toHaveLength(1);
-		expect(manager.getPromptKeys("tui.input.submit")).toEqual(["enter"]);
-		expect(manager.getPromptKeys("app.model.select")).toEqual(["ctrl+l"]);
-		const submitted: string[] = [];
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.setText("draft");
-		editor.handleInput("\r");
-		expect(submitted).toEqual(["draft"]);
+		expect(manager.cc.active).toBe(false);
 	});
 
-	it("ignores unknown CC root fields including help metadata", () => {
+	it("ignores unknown CC root fields including help metadata and native action fields", () => {
 		const mixed = {
 			...cc({ "ctrl+y": "chat:submit" }),
 			$docs: "https://example.test",
@@ -84,10 +113,11 @@ describe("CC keybinding file import", () => {
 			"app.model.select": "ctrl+b",
 		};
 		expect(Compile(KeybindingsSchema).Check(mixed)).toBe(true);
-		const { manager } = load(mixed);
-		expect(manager.getImportDiagnostics()).toEqual([]);
-		expect(manager.getPromptKeys("tui.input.submit")).toContain("ctrl+y");
-		expect(manager.getPromptKeys("app.model.select")).not.toContain("ctrl+b");
+		writeCcFile(mixed);
+		const t = probe({});
+		expect(t.manager.getImportDiagnostics()).toEqual([]);
+		expect(t.manager.cc.getBindings().map((binding) => binding.keys)).toEqual([["ctrl+y"]]);
+		expect(t.press("\x02").events).toEqual([]);
 	});
 
 	it.each([
@@ -105,43 +135,27 @@ describe("CC keybinding file import", () => {
 		expect(parseKeySequence(key)).toEqual([expected]);
 	});
 
-	it("loads CC config separately and lets pi native assignments win conflicts", () => {
-		const ccDir = mkdtempSync(join(tmpdir(), "cc-keybindings-"));
-		roots.push(ccDir);
-		vi.stubEnv("CLAUDE_CONFIG_DIR", ccDir);
-		writeFileSync(
-			join(ccDir, "keybindings.json"),
-			JSON.stringify(cc({ "ctrl+y": "chat:submit", "ctrl+b": "chat:submit" })),
-		);
-		const { manager } = load({ "app.model.select": "ctrl+b" });
-		expect(manager.getPromptKeys("tui.input.submit")).toContain("ctrl+y");
-		expect(manager.getPromptKeys("tui.input.submit")).not.toContain("ctrl+b");
-		expect(manager.getPromptKeys("app.model.select")).toContain("ctrl+b");
-	});
-
-	it("falls back to ~/.claude and layers a pi CC envelope last", () => {
-		const home = mkdtempSync(join(tmpdir(), "cc-keybindings-home-"));
-		roots.push(home);
-		vi.stubEnv("HOME", home);
-		vi.stubEnv("CLAUDE_CONFIG_DIR", "");
-		mkdirSync(join(home, ".claude"));
-		writeFileSync(
-			join(home, ".claude", "keybindings.json"),
-			JSON.stringify(cc({ "ctrl+y": "chat:submit", "ctrl+b": "chat:submit" })),
-		);
-		const { manager } = load(cc({ "ctrl+b": "chat:modelPicker" }));
-		expect(manager.getPromptKeys("tui.input.submit")).toContain("ctrl+y");
-		expect(manager.getPromptKeys("tui.input.submit")).not.toContain("ctrl+b");
-		expect(manager.getPromptKeys("app.model.select")).toContain("ctrl+b");
+	it("normalizes aliases and validates each stroke", () => {
+		expect(parseKeySequence(" Opt+K   CTRL+S ")).toEqual(["alt+k", "ctrl+s"]);
+		expect(parseKeySequence("meta+PageUp")).toEqual(["alt+pageUp"]);
+		expect(parseKeySequence(" ")).toEqual(["space"]);
+		for (const invalid of ["", "ctrl+ctrl+k", "ctrl+unknown", "ctrl+k ctrl+unknown", "ctrl++k"]) {
+			expect(parseKeySequence(invalid)).toBeUndefined();
+		}
 	});
 
 	it.each([
+		["chat:submit", "tui.input.submit"],
 		["chat:newline", "tui.input.newLine"],
 		["chat:undo", "tui.editor.undo"],
 		["chat:imagePaste", "app.clipboard.pasteImage"],
 		["history:previous", "tui.editor.cursorUp"],
 		["history:next", "tui.editor.cursorDown"],
-	])("maps %s to its pi action", (action, expected) => {
+		["chat:cancel", "app.interrupt"],
+		["chat:modelPicker", "app.model.select"],
+		["chat:externalEditor", "app.editor.external"],
+		["app:exit", "app.exit"],
+	])("maps %s to %s", (action, expected) => {
 		expect(importCcKeybindings(cc({ "ctrl+y": action }), new Set()).bindings[0]?.action).toBe(expected);
 	});
 
@@ -151,22 +165,7 @@ describe("CC keybinding file import", () => {
 		expect(imported.warnings).toEqual([`Unsupported keybinding action: ${action}`]);
 	});
 
-	it("treats all CC root metadata as opaque and accepts CC's literal space spelling", () => {
-		expect(importCcKeybindings({ ...cc({ "ctrl+y": "chat:submit" }), $schema: 42 }, new Set()).bindings).toHaveLength(
-			1,
-		);
-		expect(parseKeySequence(" ")).toEqual(["space"]);
-	});
-
-	it("normalizes aliases and validates each stroke", () => {
-		expect(parseKeySequence(" Opt+K   CTRL+S ")).toEqual(["alt+k", "ctrl+s"]);
-		expect(parseKeySequence("meta+PageUp")).toEqual(["alt+pageUp"]);
-		for (const invalid of ["", "ctrl+ctrl+k", "ctrl+unknown", "ctrl+k ctrl+unknown", "ctrl++k"]) {
-			expect(parseKeySequence(invalid)).toBeUndefined();
-		}
-	});
-
-	it("reports unsupported actions and contexts without enabling them globally", () => {
+	it("reports unsupported actions and contexts without creating bindings", () => {
 		const { bindings, warnings } = importCcKeybindings(
 			{
 				bindings: [
@@ -180,85 +179,302 @@ describe("CC keybinding file import", () => {
 		expect(warnings).toHaveLength(3);
 	});
 
-	it("applies ordered null unbinding and keeps Chat declarations out of Global", () => {
+	it("does not treat object prototype properties as action aliases", () => {
+		const imported = importCcKeybindings(cc({ "ctrl+k": "constructor", "ctrl+s": "__proto__" }), new Set());
+		expect(imported.bindings).toEqual([]);
+		expect(imported.warnings).toHaveLength(2);
+	});
+
+	it("takes the last declaration per sequence and drops nulls from the layer", () => {
 		const imported = importCcKeybindings(
 			{
 				bindings: [
-					{ context: "Global", bindings: { "ctrl+k": "chat:submit" } },
-					{ context: "Chat", bindings: { "ctrl+k": null } },
+					{ context: "Global", bindings: { "ctrl+k": "chat:submit", "shift+ctrl+p": "chat:undo" } },
+					{ context: "Chat", bindings: { "ctrl+k": "chat:newline", "ctrl+shift+p": null } },
 				],
 			},
 			new Set(),
 		);
-		expect(resolveBindings([], imported.bindings, "Global")[0]?.action).toBe("tui.input.submit");
-		expect(resolveBindings([], imported.bindings, "Chat")[0]?.action).toBeNull();
+		expect(resolveLayer(imported.bindings)).toEqual([{ keys: ["ctrl+k"], action: "tui.input.newLine" }]);
 	});
 
-	it("keeps select actions bound when CC restates prompt defaults", () => {
-		const { manager } = load(cc({ enter: "chat:submit", escape: "chat:cancel", up: "history:previous" }));
-		const bound: string[] = [];
-		const probes: [string, Keybinding[]][] = [
-			["\r", ["tui.select.confirm", "tui.input.submit"]],
-			["\u001b", ["tui.select.cancel", "app.interrupt"]],
-			["\u001b[A", ["tui.select.up", "tui.editor.cursorUp"]],
-		];
-		for (const [data, actions] of probes) {
-			manager.dispatchInput(data, "Chat", () => {
-				for (const action of actions) if (manager.matches(data, action)) bound.push(action);
-			});
-		}
-		expect(bound.sort()).toEqual([
-			"app.interrupt",
-			"tui.editor.cursorUp",
-			"tui.input.submit",
-			"tui.select.cancel",
-			"tui.select.confirm",
-			"tui.select.up",
+	it("loads CC's file from CLAUDE_CONFIG_DIR, then layers a pi-dir envelope after it", () => {
+		writeCcFile(cc({ "ctrl+y": "chat:submit", "ctrl+b": "chat:submit" }));
+		const { manager } = load(cc({ "ctrl+b": "chat:modelPicker" }));
+		expect(manager.cc.getBindings()).toEqual([
+			{ keys: ["ctrl+y"], action: "tui.input.submit" },
+			{ keys: ["ctrl+b"], action: "app.model.select" },
 		]);
 	});
 
-	it("keeps autocomplete confirm when a pi file reassigns submit alongside a CC file", () => {
-		const ccDir = mkdtempSync(join(tmpdir(), "cc-keybindings-"));
-		roots.push(ccDir);
-		vi.stubEnv("CLAUDE_CONFIG_DIR", ccDir);
-		writeFileSync(join(ccDir, "keybindings.json"), JSON.stringify(cc({ "ctrl+y": "chat:submit" })));
-		const { manager } = load({ "tui.input.submit": "enter" });
-		const bound: string[] = [];
-		manager.dispatchInput("\r", "Chat", () => {
-			for (const action of ["tui.select.confirm", "tui.input.submit"] as Keybinding[]) {
-				if (manager.matches("\r", action)) bound.push(action);
-			}
-		});
-		expect(bound.sort()).toEqual(["tui.input.submit", "tui.select.confirm"]);
+	it("falls back to ~/.claude when CLAUDE_CONFIG_DIR is empty", () => {
+		const home = mkdtempSync(join(tmpdir(), "cc-keybindings-home-"));
+		roots.push(home);
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+		mkdirSync(join(home, ".claude"));
+		writeFileSync(join(home, ".claude", "keybindings.json"), JSON.stringify(cc({ "ctrl+y": "chat:submit" })));
+		expect(load({}).manager.cc.getBindings()).toEqual([{ keys: ["ctrl+y"], action: "tui.input.submit" }]);
 	});
 
-	it("keeps native submit working under a CC unbinding of the same sequence", () => {
-		const overrides = importCcKeybindings(cc({ enter: null }), new Set()).bindings;
-		const resolved = resolveBindings(
-			[{ context: "Global", keys: ["enter"], action: "tui.input.submit", origin: "pi-base" }],
-			overrides,
-			"Chat",
+	it("provides source-qualified import diagnostics only for unreadable files, and logs entries", () => {
+		const { path, root, manager } = load(cc({ "ctrl+y": "unknown:action" }));
+		expect(manager.getImportDiagnostics()).toEqual([]);
+		expect(readFileSync(join(root, "pi-debug.log"), "utf-8")).toContain(
+			`${path}: Unsupported keybinding action: unknown:action`,
 		);
-		expect(resolved).toContainEqual({
-			context: "Global",
-			keys: ["enter"],
-			action: "tui.input.submit",
-			origin: "pi-base",
-		});
-		expect(resolved.at(-1)).toMatchObject({ keys: ["enter"], action: null });
+		const broken = mkdtempSync(join(tmpdir(), "cc-keybindings-broken-"));
+		roots.push(broken);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", broken);
+		writeFileSync(join(broken, "keybindings.json"), "{oops");
+		expect(load({}).manager.getImportDiagnostics()).toEqual([
+			`${join(broken, "keybindings.json")}: CC keybindings file could not be read as JSON`,
+		]);
 	});
 
-	it("publishes schemas for native sequences and the CC envelope", () => {
+	it("publishes a schema for pi's action file and the CC envelope", () => {
 		const schema = Compile(KeybindingsSchema);
 		expect(schema.Check(cc({ "ctrl+k ctrl+s": "chat:submit", enter: null }))).toBe(true);
-		expect(schema.Check({ "app.model.select": ["ctrl+k ctrl+s", "ctrl+l"] })).toBe(true);
-		expect(schema.Check({ "app.model.select": "ctrl+k ctrl+ctrl+s" })).toBe(false);
+		expect(schema.Check({ "app.model.select": ["ctrl+l"] })).toBe(true);
 		expect(schema.Check({ bindings: {} })).toBe(false);
 		expect(schema.Check({ bindings: ["ctrl+k"] })).toBe(false);
 	});
 });
 
-describe("prompt chord dispatch", () => {
+describe("pi behavior is unchanged by the CC layer", () => {
+	it("leaves the layer inactive and the effective config equal to pi's without a CC file", () => {
+		const { manager } = load({ "app.exit": "ctrl+d", "tui.input.newLine": "ctrl+c" });
+		expect(manager.cc.active).toBe(false);
+		expect(manager.getEffectiveConfig()).toEqual(manager.getResolvedBindings());
+	});
+
+	it("never alters pi's bindings when a CC file loads", () => {
+		const piOnly = load({ "app.exit": "ctrl+d" }).manager.getResolvedBindings();
+		const withCc = probe(
+			{ "app.exit": "ctrl+d" },
+			cc({ enter: null, "ctrl+c": "chat:newline", "ctrl+d": "app:exit" }),
+		);
+		expect(withCc.manager.getResolvedBindings()).toEqual(piOnly);
+	});
+
+	const script = ["a", "b", "\x01", "\x04", "\x03", "\x0c", "\r", "\x1f", "\x1b[A", "\x1b[B", "\x1b", "\x18"];
+	it.each([
+		["pi file reassigns newline onto Ctrl+C", { "tui.input.newLine": "ctrl+c" }],
+		["pi file restates app.exit on Ctrl+D", { "app.exit": "ctrl+d" }],
+		["pi file moves submit", { "tui.input.submit": "ctrl+y" }],
+	])("behaves as the pi file alone when an unrelated CC file is present: %s", (_name, piFile) => {
+		const alone = probe(piFile);
+		const aloneOutcomes = script.map((key) => alone.press(key));
+		const ccDir = process.env.CLAUDE_CONFIG_DIR!;
+		writeFileSync(join(ccDir, "keybindings.json"), JSON.stringify(cc({ "ctrl+n": "chat:undo" })));
+		const withCc = probe(piFile);
+		expect(script.map((key) => withCc.press(key))).toEqual(aloneOutcomes);
+	});
+
+	it("behaves like no CC file under CC's full default table except for the chord prefix it adds", () => {
+		const defaults = {
+			bindings: [
+				{ context: "Global", bindings: { "ctrl+c": "app:interrupt", "ctrl+d": "app:exit" } },
+				{
+					context: "Chat",
+					bindings: {
+						enter: "chat:submit",
+						"ctrl+j": "chat:newline",
+						"ctrl+-": "chat:undo",
+						up: "history:previous",
+						down: "history:next",
+						escape: "chat:cancel",
+						"ctrl+g": "chat:externalEditor",
+						"ctrl+v": "chat:imagePaste",
+						"ctrl+l": "chat:modelPicker",
+						"ctrl+x ctrl+e": "chat:externalEditor",
+					},
+				},
+			],
+		};
+		const keys = ["a", "b", "c", "\x01", "\x04", "\x03", "\x0c", "\x1f", "\x1b[A", "\x1b[B", "\x1b", "\r"];
+		const base = probe({});
+		const expected = keys.map((key) => base.press(key));
+		const imported = probe({}, defaults);
+		expect(keys.map((key) => imported.press(key))).toEqual(expected);
+		expect(imported.manager.getEffectiveConfig()["app.editor.external"]).toContain("ctrl+x");
+	});
+});
+
+describe("imported keys dispatch before pi handling", () => {
+	it("runs the mapped pi action for an imported key and consumes it", () => {
+		const t = probe({}, cc({ "ctrl+y": "chat:submit", "ctrl+l": "chat:modelPicker" }));
+		t.editor.setText("draft");
+		expect(t.press("\x19").events).toEqual(["submit:draft"]);
+		expect(t.press("\x0c").events).toEqual(["submit:draft", "model"]);
+	});
+
+	it("takes precedence over pi's own binding of the same key", () => {
+		const t = probe({}, cc({ "ctrl+c": "chat:newline" }));
+		t.editor.setText("a");
+		expect(t.press("\x03")).toEqual({ text: "a\n", events: [] });
+	});
+
+	it("lets a pi action name in a CC file dispatch without disturbing other keys", () => {
+		const t = probe({}, cc({ "ctrl+c": "tui.input.newLine" }));
+		t.editor.setText("a");
+		expect(t.press("\x03")).toEqual({ text: "a\n", events: [] });
+		expect(t.press("\x0c").events).toEqual(["model"]);
+	});
+
+	it("keeps Ctrl+C clearing when chat:newline is bound and then nulled on it", () => {
+		const t = probe(
+			{},
+			{
+				bindings: [
+					{ context: "Chat", bindings: { "ctrl+c": "chat:newline" } },
+					{ context: "Chat", bindings: { "ctrl+c": null } },
+				],
+			},
+		);
+		t.editor.setText("a");
+		expect(t.press("\x03")).toEqual({ text: "a", events: ["clear"] });
+	});
+
+	it.each([
+		["ctrl+c", "\x03"],
+		["ctrl+d", "\x04"],
+		["ctrl+l", "\x0c"],
+	])("inserts a newline for chat:newline on %s", (key, data) => {
+		const t = probe({}, cc({ [key]: "chat:newline" }));
+		t.editor.setText("abc");
+		t.press("\x01");
+		expect(t.press(data)).toEqual({ text: "\nabc", events: [] });
+	});
+
+	it("leaves other input keys alone when chat:newline takes Ctrl+D", () => {
+		const t = probe({}, cc({ "ctrl+d": "chat:newline" }));
+		t.editor.setText("abc");
+		expect(t.press("\x01", "\x1b[3~").text).toBe("bc");
+		expect(t.press("\x03").events).toEqual(["clear"]);
+	});
+
+	it("runs undo and the history pair as the matching pi editor actions", () => {
+		const t = probe({}, cc({ "ctrl+y": "chat:undo", "ctrl+n": "history:previous" }));
+		t.press("a", "b");
+		t.editor.setText("one\ntwo");
+		expect(t.press("\x0e").text).toBe("one\ntwo");
+	});
+});
+
+describe("declining actions fall through to pi", () => {
+	it("deletes forward on a non-empty prompt and exits on an empty one with CC app:exit on Ctrl+D", () => {
+		const t = probe({}, ccGlobal({ "ctrl+d": "app:exit" }));
+		t.editor.setText("abc");
+		expect(t.press("\x01", "\x04")).toEqual({ text: "bc", events: [] });
+		const empty = probe({}, ccGlobal({ "ctrl+d": "app:exit" }));
+		expect(empty.press("\x04").events).toEqual(["exit"]);
+	});
+
+	it("deletes forward when a pi file restates app.exit beside a CC file", () => {
+		const t = probe({ "app.exit": "ctrl+d" }, cc({ "ctrl+y": "chat:submit" }));
+		t.editor.setText("abc");
+		expect(t.press("\x01", "\x04").text).toBe("bc");
+	});
+
+	it("keeps Ctrl+C clearing when CC imports app:exit on it, and exits only on an empty prompt", () => {
+		const t = probe({}, cc({ "ctrl+c": "app:exit" }));
+		t.editor.setText("abc");
+		expect(t.press("\x03").events).toEqual(["clear"]);
+		t.editor.setText("");
+		expect(t.press("\x03").events).toEqual(["clear", "exit"]);
+	});
+});
+
+describe("null removes only the CC layer's key", () => {
+	it("keeps Return submitting under a lone null", () => {
+		expect(probe({}, cc({ enter: null })).press("h", "\r").events).toEqual(["submit:h"]);
+	});
+
+	it("keeps Return submitting when a later null follows a restated submit", () => {
+		const t = probe(
+			{},
+			{
+				bindings: [
+					{ context: "Chat", bindings: { enter: "chat:submit" } },
+					{ context: "Chat", bindings: { enter: null } },
+				],
+			},
+		);
+		expect(t.press("h", "\r").events).toEqual(["submit:h"]);
+	});
+
+	it("keeps Ctrl+C, Ctrl+D and undo working under nulls on them", () => {
+		const t = probe({}, cc({ "ctrl+c": null, "ctrl+d": null, "ctrl+-": null }));
+		t.editor.setText("abc");
+		expect(t.press("\x03").events).toEqual(["clear"]);
+		expect(t.press("\x01", "\x04").text).toBe("bc");
+	});
+
+	it("removes an imported binding on the same sequence and not pi's key", () => {
+		const t = probe(
+			{},
+			{
+				bindings: [
+					{ context: "Global", bindings: { "ctrl+y": "chat:submit" } },
+					{ context: "Chat", bindings: { "ctrl+y": null } },
+				],
+			},
+		);
+		t.editor.setText("draft");
+		expect(t.press("\x19").events).toEqual([]);
+	});
+});
+
+describe("autocomplete keys win while the menu is open", () => {
+	const items = ["/command-0", "/command-1", "/command-2"].map((value) => ({ value, label: value }));
+	const openMenu = async (t: ReturnType<typeof probe>) => {
+		t.editor.setAutocompleteProvider(slashProvider(items));
+		t.editor.handleInput("/");
+		await vi.waitFor(() => expect(t.editor.isShowingAutocomplete()).toBe(true));
+	};
+
+	it("confirms /mod with Enter after CC restates enter", async () => {
+		const t = probe({}, cc({ enter: "chat:submit" }));
+		t.editor.setAutocompleteProvider(slashProvider([{ value: "/model", label: "model" }]));
+		t.press("/", "m", "o", "d");
+		await vi.waitFor(() => expect(t.editor.isShowingAutocomplete()).toBe(true));
+		expect(t.press("\r").events).toEqual(["submit:/model"]);
+	});
+
+	it("confirms with Enter when CC binds Ctrl+Y and the pi file restates submit", async () => {
+		const t = probe({ "tui.input.submit": "enter" }, cc({ "ctrl+y": "chat:submit" }));
+		await openMenu(t);
+		expect(t.press("\r").events).toEqual(["submit:/command-0"]);
+		t.editor.setText("draft");
+		expect(t.press("\x19").events).toEqual(["submit:/command-0", "submit:draft"]);
+	});
+
+	it("navigates the menu with Up and Down despite CC's history pair", async () => {
+		const t = probe({}, cc({ up: "history:previous", down: "history:next" }));
+		await openMenu(t);
+		t.press("\x1b[B", "\x1b[A", "\x1b[B");
+		expect(t.press("\r").events).toEqual(["submit:/command-1"]);
+	});
+
+	it("dismisses the menu with Escape instead of running chat:cancel", async () => {
+		const t = probe({}, cc({ escape: "chat:cancel" }));
+		await openMenu(t);
+		t.press("\x1b");
+		expect(t.editor.isShowingAutocomplete()).toBe(false);
+		expect(t.events).toEqual([]);
+		expect(t.press("\x1b").events).toEqual(["escape"]);
+	});
+
+	it("moves the multiline cursor up with CC's history restate instead of browsing history", () => {
+		const t = probe({}, cc({ up: "history:previous", down: "history:next" }));
+		t.editor.addToHistory("queued entry");
+		t.editor.setText("one\ntwo");
+		expect(t.press("\x1b[A").text).toBe("one\ntwo");
+	});
+});
+
+describe("prompt chords", () => {
 	it("shows pending and timeout feedback in the prompt border", () => {
 		vi.useFakeTimers();
 		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
@@ -270,126 +486,89 @@ describe("prompt chord dispatch", () => {
 		expect(editor.render(80).join("\n")).not.toContain("Chord cancelled");
 	});
 
-	it("provides source-qualified import diagnostics for startup warnings", () => {
-		const { path, root, manager } = load(cc({ "ctrl+y": "unknown:action" }));
-		expect(manager.getImportDiagnostics()).toEqual([]);
-		expect(readFileSync(join(root, "pi-debug.log"), "utf-8")).toContain(
-			`${path}: Unsupported keybinding action: unknown:action`,
-		);
-	});
-
-	it("warns at startup only when the CC file cannot be loaded at all", () => {
-		const broken = mkdtempSync(join(tmpdir(), "cc-keybindings-broken-"));
-		roots.push(broken);
-		vi.stubEnv("CLAUDE_CONFIG_DIR", broken);
-		writeFileSync(join(broken, "keybindings.json"), "{oops");
-		const { manager } = load(cc({ "ctrl+y": "chat:submit" }));
-		expect(manager.getImportDiagnostics()).toEqual([
-			`${join(broken, "keybindings.json")}: CC keybindings file could not be read as JSON`,
-		]);
-	});
-	it("does not treat object prototype properties as action aliases", () => {
-		const imported = importCcKeybindings(cc({ "ctrl+k": "constructor", "ctrl+s": "__proto__" }), new Set());
-		expect(imported.bindings).toEqual([]);
-		expect(imported.warnings).toHaveLength(2);
-	});
 	it("consumes a prefix and submits only after its final stroke", () => {
-		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
-		const submitted: string[] = [];
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.setText("draft");
-		editor.handleInput("\x0b");
-		expect(editor.getText()).toBe("draft");
-		expect(submitted).toEqual([]);
-		editor.handleInput("\x13");
-		expect(submitted).toEqual(["draft"]);
+		const t = probe({}, cc({ "ctrl+k ctrl+s": "chat:submit" }));
+		t.editor.setText("draft");
+		expect(t.press("\x0b")).toEqual({ text: "draft", events: [] });
+		expect(t.press("\x13").events).toEqual(["submit:draft"]);
 	});
 
-	it("dispatches an app chord once despite repeated matches calls", () => {
-		const { editor } = load(cc({ "ctrl+k ctrl+m": "chat:modelPicker" }));
-		let count = 0;
-		editor.onAction("app.model.select", () => count++);
-		editor.handleInput("\x0b");
-		editor.handleInput("\r");
-		expect(count).toBe(1);
-	});
-
-	it("honors sequence reassignment and keeps Return submitting after a CC enter unbinding", () => {
-		const { editor } = load(cc({ enter: null, "ctrl+l": "chat:submit" }));
-		let models = 0;
-		const submitted: string[] = [];
-		editor.onAction("app.model.select", () => models++);
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.setText("draft");
-		editor.handleInput("\r");
-		expect(submitted).toEqual(["draft"]);
-		editor.setText("again");
-		editor.handleInput("\x0c");
-		expect(submitted).toEqual(["draft", "again"]);
-		expect(models).toBe(0);
+	it("dispatches an app chord once", () => {
+		const t = probe({}, cc({ "ctrl+k ctrl+m": "chat:modelPicker" }));
+		expect(t.press("\x0b", "\r").events).toEqual(["model"]);
 	});
 
 	it("keeps an unbound chord's prefix and next keystroke working", () => {
-		const { editor } = load(cc({ "ctrl+x ctrl+k": null }));
-		let copies = 0;
-		editor.onAction("app.message.copy", () => copies++);
-		editor.handleInput("\x18");
-		expect(editor.render(80).join("\n")).not.toContain("Waiting for next key");
-		expect(copies).toBe(1);
-		editor.handleInput("q");
-		expect(editor.getText()).toBe("q");
+		const t = probe({}, cc({ "ctrl+x ctrl+k": null }));
+		expect(t.press("\x18").events).toEqual(["copy"]);
+		expect(t.editor.render(80).join("\n")).not.toContain("Waiting for next key");
+		expect(t.press("q").text).toBe("q");
+	});
+
+	it("hides the prefix key's pi action only while a longer binding exists", () => {
+		const t = probe({}, cc({ "ctrl+x ctrl+e": "chat:externalEditor" }));
+		expect(t.press("\x18").events).toEqual([]);
+		expect(t.editor.render(80).join("\n")).toContain("Waiting for next key");
 	});
 
 	it("swallows a mismatching stroke and does not restart on a repeated prefix", () => {
-		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
-		const submitted: string[] = [];
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.setText("draft");
-		editor.handleInput("\x0b");
-		editor.handleInput("x");
-		expect(editor.getText()).toBe("draft");
-		editor.handleInput("\x0b");
-		editor.handleInput("\x0b");
-		editor.handleInput("\x13");
-		expect(submitted).toEqual([]);
+		const t = probe({}, cc({ "ctrl+k ctrl+s": "chat:submit" }));
+		t.editor.setText("draft");
+		t.press("\x0b", "x", "\x0b", "\x0b", "\x13");
+		expect(t.events).toEqual([]);
+		expect(t.editor.getText()).toBe("draft");
 	});
 
 	it("swallows Escape after a prefix even if Escape is a configured suffix", () => {
-		const { editor } = load(cc({ "ctrl+k escape": "chat:modelPicker" }));
-		let count = 0;
-		editor.onAction("app.model.select", () => count++);
-		editor.onEscape = () => count++;
-		editor.handleInput("\x0b");
-		editor.handleInput("\x1b");
-		expect(count).toBe(0);
+		const t = probe({}, cc({ "ctrl+k escape": "chat:modelPicker" }));
+		expect(t.press("\x0b", "\x1b").events).toEqual([]);
 	});
 
 	it("clears a pending chord when an extension consumes input", () => {
-		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:modelPicker" }));
+		const t = probe({}, cc({ "ctrl+k ctrl+s": "chat:modelPicker" }));
+		t.editor.onExtensionShortcut = (data) => data === "x";
+		expect(t.press("\x0b", "x", "\x13").events).toEqual([]);
+	});
+
+	it("shows chord status only on the editor that received the prefix", () => {
+		const { manager, editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
+		const second = newEditor(manager);
+		editor.handleInput("\x0b");
+		expect(editor.render(80).join("\n")).toContain("Waiting for next key");
+		expect(second.render(80).join("\n")).not.toContain("Waiting for next key");
+		second.handleInput("\x13");
+		expect(editor.render(80).join("\n")).not.toContain("Waiting for next key");
+	});
+
+	it("expires pending prefixes without treating a late suffix as completion", () => {
+		const layer = new CcLayer();
+		layer.setBindings([{ keys: ["ctrl+k", "ctrl+s"], action: "tui.input.submit" }]);
+		expect(layer.dispatch("\x0b", undefined, 0)).toEqual({ kind: "pending" });
+		expect(layer.dispatch("\x13", undefined, 2999)).toEqual({ kind: "action", action: "tui.input.submit" });
+		layer.dispatch("\x0b", undefined, 4000);
+		expect(layer.dispatch("\x13", undefined, 7000)).toEqual({ kind: "none" });
+	});
+
+	it("resets a pending chord on reload", () => {
+		const { path, manager, editor } = load(cc({ "ctrl+k ctrl+s": "chat:modelPicker" }));
 		let count = 0;
 		editor.onAction("app.model.select", () => count++);
-		editor.onExtensionShortcut = (data) => data === "x";
 		editor.handleInput("\x0b");
-		editor.handleInput("x");
+		writeFileSync(path, JSON.stringify(cc({ "ctrl+k ctrl+s": "chat:modelPicker" })));
+		manager.reload();
 		editor.handleInput("\x13");
 		expect(count).toBe(0);
 	});
 
-	it("matches modifier permutations when unbinding a default", () => {
-		const { manager } = load(cc({ "ctrl+shift+p": null }));
-		expect(manager.getPromptKeys("app.model.cycleBackward")).not.toContain("shift+ctrl+p");
+	it("logs when an imported chord prefix hides a pi single-key action", () => {
+		const { root } = load(cc({ "ctrl+x ctrl+e": "chat:externalEditor" }));
+		expect(readFileSync(join(root, "pi-debug.log"), "utf-8")).toContain(
+			`imported chord prefix "ctrl+x" hides pi action "app.message.copy"`,
+		);
 	});
+});
 
-	it("exposes imported prompt keys and chord prefixes to extension conflict checks", () => {
-		const { manager } = load(cc({ "ctrl+y": "chat:submit", "ctrl+b ctrl+s": "chat:modelPicker", "ctrl+l": null }));
-		const config = manager.getEffectiveConfig();
-		expect(config["tui.input.submit"]).toContain("ctrl+y");
-		expect(config["app.model.select"]).toContain("ctrl+b");
-		expect(config["app.model.select"]).not.toContain("ctrl+l");
-		expect(manager.matches("\x0c", "app.model.select")).toBe(true);
-		expect(manager.getKeys("tui.input.submit")).toEqual(["enter"]);
-	});
-
+describe("extension shortcut conflicts", () => {
 	it("blocks extension shortcuts for imported reserved keys and chord prefixes", async () => {
 		const { manager } = load(cc({ "ctrl+y": "chat:submit", "ctrl+b ctrl+s": "chat:modelPicker", "ctrl+l": null }));
 		const runtime = createExtensionRuntime();
@@ -415,303 +594,19 @@ describe("prompt chord dispatch", () => {
 			const shortcuts = runner.getShortcuts(manager.getEffectiveConfig());
 			expect(shortcuts.has("ctrl+y")).toBe(false);
 			expect(shortcuts.has("ctrl+b")).toBe(false);
+			expect(shortcuts.has("ctrl+l")).toBe(false);
 			expect(shortcuts.has("ctrl+c")).toBe(false);
-			expect(shortcuts.has("ctrl+l")).toBe(true);
 			expect(shortcuts.has("ctrl+f")).toBe(true);
 		} finally {
 			warn.mockRestore();
 		}
 	});
 
-	it("expires pending prefixes without treating a late suffix as completion", () => {
-		const resolver = new ChordResolver();
-		const bindings = importCcKeybindings(cc({ "ctrl+k ctrl+s": "chat:submit" }), new Set()).bindings;
-		expect(resolver.resolve("\x0b", bindings, 0)).toEqual({ kind: "pending" });
-		expect(resolver.resolve("\x13", bindings, 2999)).toEqual({
-			kind: "input",
-			actions: new Set(["tui.input.submit"]),
-		});
-		resolver.resolve("\x0b", bindings, 4000);
-		expect(resolver.resolve("\x13", bindings, 7000)).toEqual({ kind: "input", actions: new Set() });
-	});
-
-	it("starts a chord only when a longer binding has an action", () => {
-		const bindings: Binding[] = [
-			{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null, origin: "cc-import" },
-			{ context: "Chat", keys: ["ctrl+x", "ctrl+s"], action: "app.exit", origin: "cc-import" },
-		];
-		expect(new ChordResolver().resolve("\x18", bindings, 0)).toEqual({ kind: "pending" });
-		const nullOnly: Binding[] = [{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null, origin: "cc-import" }];
-		expect(new ChordResolver().resolve("\x18", nullOnly, 0)).toEqual({ kind: "input", actions: new Set() });
-	});
-
-	it("imports native named-action chords alongside ordinary bindings and resets on reload", () => {
-		const { path, manager, editor } = load({ "app.model.select": ["ctrl+k ctrl+s", "ctrl+l"] });
-		expect(manager.getPromptKeys("app.model.select")).toEqual(["ctrl+l", "ctrl+k ctrl+s"]);
-		let count = 0;
-		editor.onAction("app.model.select", () => count++);
-		editor.handleInput("\x0c");
-		editor.handleInput("\x0b");
-		editor.handleInput("\x13");
-		expect(count).toBe(2);
-		editor.handleInput("\x0b");
-		writeFileSync(path, JSON.stringify(cc({ "ctrl+k ctrl+s": "chat:submit" })));
-		manager.reload();
-		editor.handleInput("\x13");
-		expect(count).toBe(2);
-	});
-
-	it("restores match scope when a handler throws", () => {
-		const { manager } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
-		expect(() =>
-			manager.dispatchInput("\r", "Chat", () => {
-				throw new Error("handler");
-			}),
-		).toThrow("handler");
-		expect(manager.matches("\x0c", "app.model.select")).toBe(true);
-	});
-});
-
-describe("CC imports keep pi input behavior", () => {
-	const slashProvider = (items: { value: string; label: string }[]) => ({
-		getSuggestions: async () => ({ items, prefix: "/" }),
-		applyCompletion: (lines: string[], cursorLine: number, _cursorCol: number, item: { value: string }) => ({
-			lines: lines.map((line, index) => (index === cursorLine ? item.value : line)),
-			cursorLine,
-			cursorCol: item.value.length,
-		}),
-	});
-
-	it("confirms an open autocomplete menu with Enter after CC restates submit", async () => {
-		const { editor } = load(cc({ enter: "chat:submit" }));
-		editor.setAutocompleteProvider(slashProvider([{ value: "/model", label: "model" }]));
-		editor.handleInput("/mod");
-		await vi.waitFor(() => expect(editor.isShowingAutocomplete()).toBe(true));
-		const submitted: string[] = [];
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.handleInput("\r");
-		expect(submitted).toEqual(["/model"]);
-	});
-
-	it("moves the multiline cursor up with CC's history restate instead of browsing history", () => {
-		const { editor } = load(cc({ up: "history:previous", down: "history:next" }));
-		editor.addToHistory("queued entry");
-		editor.setText("one\ntwo");
-		editor.handleInput("\u001b[A");
-		expect(editor.getText()).toBe("one\ntwo");
-	});
-
-	it("navigates an open autocomplete menu with Up after CC's history restate", async () => {
-		const { editor } = load(cc({ up: "history:previous" }));
-		editor.setAutocompleteProvider(
-			slashProvider(["/command-0", "/command-1", "/command-2"].map((value) => ({ value, label: value }))),
-		);
-		editor.handleInput("/");
-		await vi.waitFor(() => expect(editor.isShowingAutocomplete()).toBe(true));
-		editor.handleInput("\u001b[B");
-		editor.handleInput("\u001b[A");
-		const submitted: string[] = [];
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.handleInput("\r");
-		expect(submitted).toEqual(["/command-0"]);
-	});
-});
-
-describe("CC imports keep the built-in input layer", () => {
-	it("deletes forward when CC imports app:exit on ctrl+d, and exits on an empty prompt", () => {
-		writeCcFile(ccGlobal({ "ctrl+d": "app:exit" }));
-		const { manager, editor } = load({});
-		editor.setText("abc");
-		editor.handleInput("\x01");
-		editor.handleInput("\x04");
-		expect(editor.getText()).toBe("bc");
-		const empty = new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, manager);
-		let exits = 0;
-		empty.onCtrlD = () => exits++;
-		empty.handleInput("\x04");
-		expect(exits).toBe(1);
-	});
-
-	it("deletes forward when a pi file restates app.exit alongside any CC file", () => {
-		writeCcFile(cc({ "ctrl+y": "chat:submit" }));
-		const { editor } = load({ "app.exit": "ctrl+d" });
-		editor.setText("abc");
-		editor.handleInput("\x01");
-		editor.handleInput("\x04");
-		expect(editor.getText()).toBe("bc");
-	});
-
-	it("keeps the input layer when CC replaces an application action on the same key", () => {
-		writeCcFile(cc({ "ctrl+c": "app:exit" }));
-		const { manager } = load({});
-		const bound: string[] = [];
-		manager.dispatchInput("\x03", "Chat", () => {
-			for (const action of ["tui.input.copy", "app.exit", "app.clear"] as Keybinding[]) {
-				if (manager.matches("\x03", action)) bound.push(action);
-			}
-		});
-		expect(bound.sort()).toEqual(["app.exit", "tui.input.copy"]);
-	});
-
-	it("keeps input actions bound under CC null unbindings", () => {
-		writeCcFile(cc({ "ctrl+c": null, "ctrl+d": null, "ctrl+-": null }));
-		const { manager } = load({});
-		const bound: string[] = [];
-		const probes: [string, Keybinding[]][] = [
-			["\x03", ["tui.input.copy", "app.clear"]],
-			["\x04", ["tui.editor.deleteCharForward", "app.exit"]],
-			["\x1f", ["tui.editor.undo"]],
-		];
-		for (const [data, actions] of probes) {
-			manager.dispatchInput(data, "Chat", () => {
-				for (const action of actions) if (manager.matches(data, action)) bound.push(action);
-			});
-		}
-		expect(bound).toEqual(["tui.input.copy", "tui.editor.deleteCharForward", "tui.editor.undo"]);
-	});
-
-	it("restating CC's default table changes no prompt keys except the chord prefixes it adds", () => {
-		const { manager } = load({});
-		const mapped = [
-			"tui.input.submit",
-			"tui.input.newLine",
-			"tui.editor.undo",
-			"tui.editor.cursorUp",
-			"tui.editor.cursorDown",
-			"app.interrupt",
-			"app.clipboard.pasteImage",
-			"app.model.select",
-			"app.editor.external",
-			"app.exit",
-		] as const satisfies Keybinding[];
-		const before = new Map(mapped.map((action) => [action, manager.getPromptKeys(action)]));
-		writeCcFile({
-			bindings: [
-				{ context: "Global", bindings: { "ctrl+c": "app:interrupt", "ctrl+d": "app:exit" } },
-				{
-					context: "Chat",
-					bindings: {
-						enter: "chat:submit",
-						"ctrl+j": "chat:newline",
-						"ctrl+-": "chat:undo",
-						up: "history:previous",
-						down: "history:next",
-						escape: "chat:cancel",
-						"ctrl+g": "chat:externalEditor",
-						"ctrl+v": "chat:imagePaste",
-						"ctrl+l": "chat:modelPicker",
-						"ctrl+x ctrl+e": "chat:externalEditor",
-					},
-				},
-			],
-		});
-		manager.reload();
-		for (const action of mapped) {
-			const expected = before.get(action)!.concat(action === "app.editor.external" ? ["ctrl+x ctrl+e"] : []);
-			expect(manager.getPromptKeys(action)).toEqual(expected);
-		}
-	});
-
-	it("logs when an imported chord prefix hides a pi single-key action", () => {
-		const { root } = load(cc({ "ctrl+x ctrl+e": "chat:externalEditor" }));
-		expect(readFileSync(join(root, "pi-debug.log"), "utf-8")).toContain(
-			`imported chord prefix "ctrl+x" hides pi action "app.message.copy"`,
-		);
-	});
-
-	it("shows chord status only on the editor that received the prefix", () => {
-		const { manager, editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
-		const second = new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, manager);
-		editor.handleInput("\x0b");
-		expect(editor.render(80).join("\n")).toContain("Waiting for next key");
-		expect(second.render(80).join("\n")).not.toContain("Waiting for next key");
-		second.handleInput("\x13");
-		expect(editor.render(80).join("\n")).not.toContain("Waiting for next key");
-	});
-});
-
-describe("CC binding identity", () => {
-	const submitsOnEnter = (editor: CustomEditor) => {
-		const submitted: string[] = [];
-		editor.onSubmit = (text) => submitted.push(text);
-		editor.handleInput("h");
-		editor.handleInput("\r");
-		return submitted;
-	};
-	const boundActions = (manager: KeybindingsManager, data: string, actions: Keybinding[]) => {
-		const bound: string[] = [];
-		manager.dispatchInput(data, "Chat", () => {
-			for (const action of actions) if (manager.matches(data, action)) bound.push(action);
-		});
-		return bound;
-	};
-
-	it("keeps Return submitting when a later null follows a restated submit", () => {
-		const { editor } = load({
-			bindings: [
-				{ context: "Chat", bindings: { enter: "chat:submit" } },
-				{ context: "Chat", bindings: { enter: null } },
-			],
-		});
-		expect(submitsOnEnter(editor)).toEqual(["h"]);
-	});
-
-	it("keeps Return submitting under a lone null", () => {
-		const { editor } = load(cc({ enter: null }));
-		expect(submitsOnEnter(editor)).toEqual(["h"]);
-	});
-
-	it("inserts a newline for chat:newline on Ctrl+C instead of clearing or doing nothing", () => {
-		const { editor } = load(cc({ "ctrl+c": "chat:newline" }));
-		let clears = 0;
-		editor.onAction("app.clear", () => clears++);
-		editor.setText("a");
-		editor.handleInput("\x03");
-		expect(editor.getText()).toBe("a\n");
-		expect(clears).toBe(0);
-	});
-
-	it("inserts a newline for chat:newline on Ctrl+D instead of deleting forward", () => {
-		const { editor } = load(cc({ "ctrl+d": "chat:newline" }));
-		editor.setText("abc");
-		editor.handleInput("\x01");
-		editor.handleInput("\x04");
-		expect(editor.getText()).toBe("\nabc");
-	});
-
-	it("keeps input actions on other keys when chat:newline takes Ctrl+D", () => {
-		const { manager, editor } = load(cc({ "ctrl+d": "chat:newline" }));
-		editor.setText("abc");
-		editor.handleInput("\x01");
-		editor.handleInput("\x1b[3~");
-		expect(editor.getText()).toBe("bc");
-		expect(boundActions(manager, "\x03", ["tui.input.copy"])).toEqual(["tui.input.copy"]);
-	});
-
-	it("inserts a newline for chat:newline on Ctrl+L", () => {
-		const { editor } = load(cc({ "ctrl+l": "chat:newline" }));
-		editor.setText("a");
-		editor.handleInput("\x0c");
-		expect(editor.getText()).toBe("a\n");
-	});
-
-	it("restores the displaced input action when a later null removes the import", () => {
-		const { manager } = load({
-			bindings: [
-				{ context: "Chat", bindings: { "ctrl+c": "chat:newline" } },
-				{ context: "Chat", bindings: { "ctrl+c": null } },
-			],
-		});
-		expect(boundActions(manager, "\x03", ["tui.input.copy", "tui.input.newLine", "app.clear"])).toEqual([
-			"tui.input.copy",
-		]);
-	});
-
-	it("tags each binding with its origin and layer", () => {
-		const imported = importCcKeybindings(
-			cc({ enter: "chat:submit", "ctrl+y": "tui.editor.undo" }),
-			new Set(["tui.editor.undo"]),
-		);
-		expect(imported.bindings.map((binding) => binding.origin)).toEqual(["cc-import", "pi-file"]);
+	it("adds imported first strokes to the effective config without changing pi's own keys", () => {
+		const { manager } = load(cc({ "ctrl+y": "chat:submit", "ctrl+b ctrl+s": "chat:modelPicker" }));
+		const config = manager.getEffectiveConfig();
+		expect(config["tui.input.submit"]).toEqual(["enter", "ctrl+y"]);
+		expect(config["app.model.select"]).toEqual(["ctrl+l", "ctrl+b"]);
+		expect(manager.getKeys("tui.input.submit")).toEqual(["enter"]);
 	});
 });

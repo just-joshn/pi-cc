@@ -42,13 +42,11 @@ Examples: `ctrl+shift+x`, `alt+ctrl+x`, `ctrl+shift+alt+x`, `super+k`, `ctrl+sup
 
 `super` bindings require a terminal that reports the modifier separately, typically through the Kitty keyboard protocol. They may not work in terminals without that support.
 
-## Prompt chords and CC files
+## Claude Code keybinding import
 
-The default prompt editor accepts space-separated sequences in the same file. For example, `"app.model.select": "ctrl+k ctrl+s"` opens the model selector after both strokes. A chord prefix takes precedence over a single-key action on that prefix, including a single-key pi default: importing CC's default table makes Ctrl+X a chord prefix (`ctrl+x ctrl+e`), so pi's `app.message.copy` no longer fires on Ctrl+X. That matches CC, and pi logs each such hidden action to its debug log. The prefix expires after three seconds without running the single-key action. A mismatching next stroke is consumed, including Escape or another prefix. Escape cancels even if configured as a chord suffix. The prompt border shows a pending indicator, then a three-second timeout notice if no next key arrives.
+Pi-cc reads Claude Code's `keybindings.json` and runs it as its own dispatch layer in front of the default prompt editor, the way CC's dispatcher runs before its text input. The layer never edits pi's binding table. Pi's own `<agent-dir>/keybindings.json` keeps its normal pi meaning, with or without a CC file.
 
-CC's file is loaded from `$CLAUDE_CONFIG_DIR/keybindings.json`, or `~/.claude/keybindings.json` when the environment variable is unset or empty. Pi still loads `<agent-dir>/keybindings.json`. The layering is pi defaults, then CC's file, then pi's file, and later declarations win conflicts on the same sequence, the way CC's dispatcher takes the last declaration across active contexts. An import is a dispatched declaration: it replaces earlier imports and the sequence's application-level pi bindings, but pi's built-in input actions (`tui.editor.*`, `tui.input.*`) are the text-input layer CC's dispatched actions decline and fall through to, so an import never removes them. CC's `app:exit` on Ctrl+D keeps delete-forward working in a non-empty prompt, and restating a pi default collapses to that default rather than duplicating it. Autocomplete and selection actions (`tui.select.*`) and fullscreen viewport actions (`tui.altScreen.*`) also stay bound; while the autocomplete menu is open its keys take priority, matching CC's Autocomplete context. Native pi action assignments still replace that action's pi defaults. CC assignments on other sequences remain active. Importing CC's full default table is therefore not entirely behavior-neutral: it adds the `ctrl+x ctrl+e` chord, which takes over the Ctrl+X prefix as described above.
-
-Either file can use CC's context-block format. Only `bindings` is required. Unknown root fields, including `$docs`, are ignored. Native action fields in a CC envelope are ignored rather than interpreted:
+CC's file is `$CLAUDE_CONFIG_DIR/keybindings.json`, or `~/.claude/keybindings.json` when the variable is unset or empty. A pi-dir `keybindings.json` written in CC's context-block format is read into the same layer after CC's file. Later declarations on the same sequence win. Only `bindings` is required, and unknown root fields such as `$schema` and `$docs` are ignored:
 
 ```json
 {
@@ -64,9 +62,24 @@ Either file can use CC's context-block format. Only `bindings` is required. Unkn
 }
 ```
 
-The default prompt editor applies `Global` and `Chat` blocks in file order. Later declarations replace earlier declarations for the same sequence. A `null` action unbinds that sequence's imported and application-level prompt bindings, but the keys CC's text input handles natively keep working: Return still submits, Up and Down still move the cursor and browse history at the ends, and editing keys still edit. A CC action that dispatches before the text input, such as `chat:newline` or `chat:undo`, takes its key from pi's built-in input action on that key (`chat:newline` on `ctrl+c` inserts a newline instead of clearing or copying). Input actions on other keys are untouched, and a later `null` on the key restores the displaced action. Other contexts do not apply. Where two supported contexts declare the same sequence, the later declaration wins, and pi keeps its built-in autocomplete actions active so menu keys keep priority while the menu is open. Extension shortcut conflict checks use the effective prompt bindings, including the first stroke of a chord. Reserved actions block conflicting extension shortcuts. Other extension shortcut handlers keep their existing precedence.
+`Global` and `Chat` blocks apply in file order. Other contexts are ignored. Imported bindings use pi's defaults, not CC's default table: nothing is installed unless the file declares it.
 
-Supported CC action mappings are:
+### Dispatch
+
+For each key in the default prompt editor, in this order:
+
+1. Extension shortcuts, unchanged.
+2. While the autocomplete menu is open, keys bound to pi's menu actions (`tui.select.*`, the completion key) go straight to pi. This matches CC's Autocomplete context, which is declared after Chat and wins on its default keys (escape, up, down, tab). Pi also keeps Enter and the page keys for the menu. A user Chat block that rebinds one of the menu's own keys would win in CC while the menu is open. Pi-cc keeps the menu.
+3. A key matching an imported binding runs the mapped pi action and is consumed. An action may decline, which sends the key to step 4. `app:exit` declines on a non-empty prompt, as CC's handler does, so Ctrl+D still deletes forward there.
+4. Everything else is handled by pi exactly as without a CC file.
+
+An imported `null` removes that sequence from the CC layer. It does not touch pi's own binding on the key, so `"enter": null` still submits and `"ctrl+c": null` still clears. Moving a pi key is done in pi's own file.
+
+A key can start a chord only when a longer imported binding exists. Its first stroke is consumed, so pi's action on that key stops firing while the chord is pending (importing CC's `ctrl+x ctrl+e` hides pi's Ctrl+X copy, and pi logs each hidden action to its debug log). A null chord never starts one. The pending prefix expires after three seconds. A mismatching next stroke, including Escape, is consumed and cancels. The prompt border shows a pending indicator, then a timeout notice.
+
+Because the CC layer runs first, an imported key beats pi's own binding of the same key.
+
+### Action mapping
 
 | CC action | Pi action |
 |---|---|
@@ -81,11 +94,11 @@ Supported CC action mappings are:
 | `chat:externalEditor` | `app.editor.external` |
 | `app:exit` | `app.exit` |
 
-`chat:thinkingToggle` and `app:interrupt` have no pi action with the same behavior (CC's thinking toggle turns model thinking on and off, and CC's Ctrl+C aborts running work and exits on a second press when idle), so they stay unmapped. The `history` pair maps to the cursor actions because CC's Up and Down are built into its text input: they move the cursor and only browse history at the first or last row, which is what pi's cursor actions already do.
+`chat:thinkingToggle` and `app:interrupt` have no pi action with the same behavior, so they stay unmapped. A built-in pi action name as the value also works. The history pair maps to the cursor actions because CC's Up and Down move the cursor and only browse history at the first or last row, as pi's cursor actions do.
 
-CC blocks also accept built-in pi action identifiers. Imported bindings use pi's defaults, not CC's default table. The importer accepts `control` for `ctrl`, `meta`/`opt`/`option` for `alt`, `cmd`/`command`/`win` for `super`, `esc` for `escape`, `return` for `enter`, `del` for `delete`, and arrow glyphs for their named directions. A file that cannot be read at all produces a startup warning through `KeybindingsManager.getImportDiagnostics()`. Unsupported actions, contexts, and malformed sequences are logged to pi's debug log and do not create bindings, matching how CC logs validation issues to its debug log.
+The importer accepts `control` for `ctrl`, `meta`/`opt`/`option` for `alt`, `cmd`/`command`/`win` for `super`, `esc` for `escape`, `return` for `enter`, `del` for `delete`, and arrow glyphs. A CC file that cannot be read at all produces a startup warning. Unsupported actions, contexts, and malformed sequences go to pi's debug log and create no bindings.
 
-Chords and context overrides apply only while the default prompt editor handles input. They do not change extension editors, selector dialogs, or fullscreen viewport shortcuts that handle input before the prompt. `getPromptKeys()` returns the prompt's effective sequences for key hints. `getEffectiveConfig()` returns single-stroke keys for prompt extension conflict checks, using a chord's first stroke. The lower-level `getKeys()`, `getResolvedBindings()`, and matching outside prompt dispatch retain the native single-key configuration.
+The layer applies only while the default prompt editor handles input. Selector dialogs, extension editors, and fullscreen viewport shortcuts keep their behavior. `getEffectiveConfig()` adds each imported binding's first stroke to its action for extension shortcut conflict checks. `getKeys()` and `getResolvedBindings()` return pi's own bindings.
 
 ## Actions
 
