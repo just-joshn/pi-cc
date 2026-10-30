@@ -80,7 +80,7 @@ describe("CC model-specific prior-read checks", () => {
 			const { session, tool, readTool, args } = await sessionWithTool(cwd, id, "edit");
 			try {
 				await readTool.execute("read", { path: "a.txt" });
-				writeFileSync(join(cwd, "a.txt"), "changed before\n");
+				rewriteLater(join(cwd, "a.txt"), "changed before\n");
 				const result = await tool.execute("stale", args);
 				const text = result.content[0].type === "text" ? result.content[0].text : "";
 				expect(text).toContain("(note: the file had been modified on disk since you last read it");
@@ -99,7 +99,7 @@ describe("CC model-specific prior-read checks", () => {
 			const { session, tool, readTool } = await sessionWithTool(cwd, id, "edit");
 			try {
 				await readTool.execute("read", { path: "a.txt" });
-				writeFileSync(join(cwd, "a.txt"), "moved away\n");
+				rewriteLater(join(cwd, "a.txt"), "moved away\n");
 				await expect(
 					tool.execute("stale", { path: "a.txt", edits: [{ oldText: "before", newText: "after" }] }),
 				).rejects.toThrow(toolUseError(CC_TOOL_TEXT.editStale));
@@ -178,7 +178,7 @@ describe("CC model-specific prior-read checks", () => {
 		const { session, tool, readTool, args } = await sessionWithTool(cwd, id, "write");
 		try {
 			await readTool.execute("read", { path: "a.txt" });
-			writeFileSync(join(cwd, "a.txt"), "changed before\n");
+			rewriteLater(join(cwd, "a.txt"), "changed before\n");
 			await expect(tool.execute("stale", args)).rejects.toThrow(toolUseError(CC_TOOL_TEXT.editStale));
 			expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("changed before\n");
 		} finally {
@@ -267,6 +267,12 @@ describe("CC model-specific prior-read checks", () => {
 		},
 	);
 });
+
+function rewriteLater(file: string, text: string): void {
+	writeFileSync(file, text);
+	const later = new Date(Date.now() + 5000);
+	utimesSync(file, later, later);
+}
 
 function tooBigError(...fields: Array<"limit" | "offset">): string {
 	return `<tool_use_error>InputValidationError: ${JSON.stringify(

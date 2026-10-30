@@ -61,7 +61,14 @@ export {
 	type ReadToolInput,
 	type ReadToolOptions,
 } from "./read.ts";
-export { createReadState, normalizeForComparison, type ReadRecord, type ReadState } from "./read-state.ts";
+export {
+	createReadState,
+	isStaleSinceRead,
+	normalizeForComparison,
+	type ReadRecord,
+	type ReadState,
+	readMtimeMs,
+} from "./read-state.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

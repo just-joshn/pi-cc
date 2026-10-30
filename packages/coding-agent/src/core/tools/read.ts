@@ -16,7 +16,7 @@ import {
 	toolUseError,
 } from "./cc-text.ts";
 import { resolveReadPathAsync } from "./path-utils.ts";
-import { normalizeForComparison, type ReadState } from "./read-state.ts";
+import { normalizeForComparison, type ReadState, readMtimeMs } from "./read-state.ts";
 import { readRenderers } from "./renderers/read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import type { TruncationResult } from "./truncate.ts";
@@ -77,12 +77,15 @@ export interface ReadOperations {
 	access: (absolutePath: string) => Promise<void>;
 	/** Detect image MIME type, return null or undefined for non-images */
 	detectImageMimeType?: (absolutePath: string) => Promise<string | null | undefined>;
+	/** Modification time in milliseconds, recorded so Edit and Write can tell a changed file from a touched one. */
+	mtimeMs?: (absolutePath: string) => Promise<number>;
 }
 
 const defaultReadOperations: ReadOperations = {
 	readFile: (path) => fsReadFile(path),
 	access: (path) => fsAccess(path, constants.R_OK),
 	detectImageMimeType: detectSupportedImageMimeTypeFromFile,
+	mtimeMs: async (path) => (await fsStat(path)).mtimeMs,
 };
 
 export interface ReadToolOptions {
@@ -206,6 +209,7 @@ export function createReadToolDefinition(
 							const allLines = fileContent === "" ? [] : fileContent.split("\n");
 							const totalLines = allLines.length;
 							rawText = "";
+							let selectedCount = 0;
 							if (totalLines === 0) {
 								content = [{ type: "text", text: CC_TOOL_TEXT.readEmptyFile }];
 							} else {
@@ -221,6 +225,7 @@ export function createReadToolDefinition(
 									const endIndex =
 										lineLimit === undefined ? totalLines : Math.min(startIndex + lineLimit, totalLines);
 									const selected = allLines.slice(startIndex, endIndex);
+									selectedCount = selected.length;
 									const selectedText = selected.join("\n");
 									const tokens = estimateTextTokens(selectedText);
 									const fromStart = offset === undefined || offset <= 1;
@@ -276,11 +281,17 @@ export function createReadToolDefinition(
 							}
 							const readState = options?.readState;
 							if (readState !== undefined && details?.firstLineNumber !== undefined) {
+								// Claude Code's full-read test (`PR`): from the first line, nothing cut, and no
+								// limit unless the file ended before it.
 								const wholeFile =
 									details.truncation === undefined &&
-									(limit === undefined || limit <= 0) &&
-									details.firstLineNumber <= 1;
-								readState.record(absolutePath, { content: fileContent, partial: !wholeFile });
+									(offset ?? 1) <= 1 &&
+									(limit === undefined || selectedCount < limit);
+								readState.record(absolutePath, {
+									content: fileContent,
+									partial: !wholeFile,
+									timestamp: await readMtimeMs(ops.mtimeMs, absolutePath),
+								});
 							}
 						}
 

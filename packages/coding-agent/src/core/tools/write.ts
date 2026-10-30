@@ -6,7 +6,7 @@ import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { CC_FILE_STATE_SUFFIX, CC_TOOL_TEXT, toolUseError } from "./cc-text.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { normalizeForComparison, type ReadState } from "./read-state.ts";
+import { isStaleSinceRead, normalizeForComparison, type ReadState, readMtimeMs } from "./read-state.ts";
 import { writeRenderers } from "./renderers/write.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -38,6 +38,8 @@ export interface WriteOperations {
 	 */
 	readFile?: (absolutePath: string) => Promise<Buffer>;
 	stat?: (absolutePath: string) => Promise<{ isFile: () => boolean }>;
+	/** Modification time in milliseconds. Without it the content alone decides whether a read went stale. */
+	mtimeMs?: (absolutePath: string) => Promise<number>;
 }
 
 const defaultWriteOperations: WriteOperations = {
@@ -45,6 +47,7 @@ const defaultWriteOperations: WriteOperations = {
 	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
 	readFile: (path) => fsReadFile(path),
 	stat: (path) => fsStat(path),
+	mtimeMs: async (path) => (await fsStat(path)).mtimeMs,
 };
 
 export interface WriteToolOptions {
@@ -114,7 +117,11 @@ export function createWriteToolDefinition(
 				// Claude Code refuses a write over a file that changed since the model read it for every
 				// model, with no permission check (`chunk-r5cyd28m.js:44886-44893`): unlike Edit there is
 				// no recovery, because the write would discard the on-disk changes.
-				if (record !== undefined && previous !== undefined && normalizeForComparison(previous) !== record.content) {
+				if (
+					record !== undefined &&
+					previous !== undefined &&
+					isStaleSinceRead(record, await readMtimeMs(ops.mtimeMs, absolutePath), previous)
+				) {
 					throw new Error(toolUseError(CC_TOOL_TEXT.editStale));
 				}
 
@@ -125,7 +132,11 @@ export function createWriteToolDefinition(
 				// Write the file contents.
 				await ops.writeFile(absolutePath, content);
 				throwIfAborted();
-				options?.readState?.record(absolutePath, { content: normalizeForComparison(content), partial: false });
+				options?.readState?.record(absolutePath, {
+					content: normalizeForComparison(content),
+					partial: false,
+					timestamp: await readMtimeMs(ops.mtimeMs, absolutePath),
+				});
 
 				// Claude Code calls it a create when the file did not exist or held nothing.
 				const text =

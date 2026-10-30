@@ -1,6 +1,12 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { constants } from "fs";
-import { access as fsAccess, mkdir as fsMkdir, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
+import {
+	access as fsAccess,
+	mkdir as fsMkdir,
+	readFile as fsReadFile,
+	stat as fsStat,
+	writeFile as fsWriteFile,
+} from "fs/promises";
 import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import { splitBom } from "../../utils/text.ts";
@@ -16,7 +22,7 @@ import {
 } from "./edit-diff.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { normalizeForComparison, type ReadState } from "./read-state.ts";
+import { isStaleSinceRead, normalizeForComparison, type ReadState, readMtimeMs } from "./read-state.ts";
 import { type EditRenderState, editRenderers } from "./renderers/edit.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -93,6 +99,8 @@ export interface EditOperations {
 	access: (absolutePath: string) => Promise<void>;
 	/** Create parent directories before creating a new file. */
 	mkdir?: (dir: string) => Promise<void>;
+	/** Modification time in milliseconds. Without it the content alone decides whether a read went stale. */
+	mtimeMs?: (absolutePath: string) => Promise<number>;
 }
 
 const defaultEditOperations: EditOperations = {
@@ -100,6 +108,7 @@ const defaultEditOperations: EditOperations = {
 	writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
 	access: (path) => fsAccess(path, constants.R_OK | constants.W_OK),
 	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
+	mtimeMs: async (path) => (await fsStat(path)).mtimeMs,
 };
 
 export interface EditToolOptions {
@@ -215,7 +224,11 @@ export function createEditToolDefinition(
 				// changed on disk recovers when the edit still applies to the on-disk content (its `Qe`
 				// recovery, gated by the permission auto-allow `TSe`, which pi-cc treats as passing until
 				// P04 wires it); otherwise it reports the stale file instead of the failed match.
-				const stale = record !== undefined && raw !== undefined && normalizeForComparison(raw) !== record.content;
+				const stale =
+					record !== undefined &&
+					raw !== undefined &&
+					isStaleSinceRead(record, await readMtimeMs(ops.mtimeMs, absolutePath), raw);
+				throwIfAborted();
 				if (stale && !creating) {
 					for (const edit of normalizedEdits) {
 						const count = indexesOf(normalizedContent, edit.oldText).length;
@@ -238,6 +251,7 @@ export function createEditToolDefinition(
 					options?.readState?.record(absolutePath, {
 						content: normalizeForComparison(normalizedEdits[0].rawNew),
 						partial: false,
+						timestamp: await readMtimeMs(ops.mtimeMs, absolutePath),
 						unseen: !inContext,
 					});
 					return {
@@ -256,6 +270,7 @@ export function createEditToolDefinition(
 				options?.readState?.record(absolutePath, {
 					content: normalizeForComparison(finalContent),
 					partial: false,
+					timestamp: await readMtimeMs(ops.mtimeMs, absolutePath),
 					unseen: !inContext || stale,
 				});
 

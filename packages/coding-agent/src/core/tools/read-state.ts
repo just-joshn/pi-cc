@@ -7,8 +7,10 @@
 export interface ReadRecord {
 	/** The whole file, without a byte-order mark, with line endings normalized to `\n`. */
 	readonly content: string;
-	/** True when the Read returned only part of the file. */
+	/** True unless the Read returned the whole file: Claude Code's full-read test (`PR`) failed. */
 	readonly partial: boolean;
+	/** The file's modification time in whole milliseconds when the model read or last wrote it, when known. */
+	readonly timestamp?: number;
 	/** True when an Edit changed the file without the model having read it, so the content is not in its context. */
 	readonly unseen?: boolean;
 }
@@ -33,4 +35,28 @@ export function createReadState(): ReadState {
 /** The form two copies of a file are compared in: no byte-order mark, `\n` line endings. */
 export function normalizeForComparison(text: string): string {
 	return (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).replace(/\r\n/g, "\n");
+}
+
+/** The modification time in whole milliseconds from the operations' own lookup, or undefined when they have none. */
+export async function readMtimeMs(
+	mtimeMs: ((absolutePath: string) => Promise<number>) | undefined,
+	absolutePath: string,
+): Promise<number | undefined> {
+	if (mtimeMs === undefined) return undefined;
+	try {
+		return Math.floor(await mtimeMs(absolutePath));
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Claude Code's stale-read test (`chunk-r5cyd28m.js:124266-124269`, `:44880-44887`): the file is
+ * stale when its modification time is newer than the read's, unless the read was a full read and
+ * the content is unchanged. Without a modification time on either side the content decides.
+ */
+export function isStaleSinceRead(record: ReadRecord, mtimeMs: number | undefined, current: string): boolean {
+	const unchanged = normalizeForComparison(current) === record.content;
+	if (mtimeMs === undefined || record.timestamp === undefined) return !unchanged;
+	return mtimeMs > record.timestamp && !(!record.partial && unchanged);
 }

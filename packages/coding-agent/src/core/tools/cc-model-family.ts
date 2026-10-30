@@ -109,15 +109,20 @@ interface CcParsedId {
 export function claudeModelFamily(id: string): string {
 	const e = id.toLowerCase();
 	const parsed = parseId(e);
-	if (parsed !== null) {
+	if (parsed !== null && parsed.trailer === undefined) {
 		for (const candidate of CC_CATALOG_IDS) {
 			if (sameShape(parsed, parseId(candidate))) return candidate;
 		}
+		return stripDate(parsed.base);
 	}
 	for (const [pattern, family] of CC_NAME_PATTERNS) {
 		if (typeof pattern === "string" ? e.includes(pattern) : pattern.test(e)) return family;
 	}
-	return e.replace(/-\d{8}$/, "");
+	return stripDate(e);
+}
+
+function stripDate(name: string): string {
+	return name.replace(/-\d{8}$/, "");
 }
 
 /** Whether Claude Code refuses unread mutations by this model, before permission checks. */

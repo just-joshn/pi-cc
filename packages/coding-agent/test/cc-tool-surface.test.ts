@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -452,6 +452,7 @@ describe("read and write gates", () => {
 
 		await read.execute("4", { path: file });
 		writeFileSync(file, "changed-underneath\n");
+		utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
 		await expect(write.execute("5", { path: file, content: "overwrite\n" })).rejects.toThrow(CC_TOOL_TEXT.editStale);
 		expect(readFileSync(file, "utf-8")).toBe("changed-underneath\n");
 	});
