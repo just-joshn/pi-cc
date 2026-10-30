@@ -304,6 +304,41 @@ describe("a line with too many command substitutions", () => {
 	});
 });
 
+describe("round 5 parser regressions", () => {
+	it("counts substitutions through eight nested wrappers", () => {
+		let command = `: ${Array(65).fill("$(:)").join(" ")}`;
+		for (let depth = 1; depth <= 8; depth++) {
+			command = `: $(${command})`;
+			expect(removal(command)?.message).toContain(`contains ${65 + depth} command substitutions`);
+		}
+	});
+
+	it("follows HOME in assignment values", () => {
+		expect(removal("X=$HOME; rmdir $X")?.message).toContain(`'${home}'`);
+	});
+
+	it("checks commands substituted into an unquoted heredoc, not literal body text", () => {
+		expect(removal("true <<EOF\n$(rmdir /usr)\nEOF")?.message).toContain("'/usr'");
+		expect(removal("true <<'EOF'\n$(rmdir /usr)\nEOF")).toBeUndefined();
+		expect(removal("true <<EOF\nrmdir /usr\nEOF")).toBeUndefined();
+	});
+
+	it.each(["X=/usr; rmdir '$X'", "X=/usr; rmdir \\$X"])("preserves literal dollars in %s", (command) => {
+		expect(removal(command)).toBeUndefined();
+	});
+
+	it("keeps an absolute dot-dot spelling and checks it as a workspace ancestor", () => {
+		const target = `${cwd}/missing/..`;
+		expect(removal(`rmdir ${target}`)?.message).toBe(
+			`Dangerous rmdir operation detected: '${target}'\n\nThis command would remove a workspace directory (the working directory, an additional working directory, or one of their parent directories). This requires explicit approval and cannot be auto-allowed by permission rules.`,
+		);
+	});
+
+	it("does not treat assignment tilde as a known literal", () => {
+		expect(removal("X=~; rmdir $X")).toBeUndefined();
+	});
+});
+
 describe("a removal target in quotes", () => {
 	it.each(['rm -rf "*"', "rm -rf '*'", "rmdir \\*", 'rm -rf "./*"', 'rm -rf "/*"'])("refuses %s", (command) => {
 		expect(removal(command)?.message, command).toMatch(/^Dangerous (?:rm|rmdir) operation detected/);
