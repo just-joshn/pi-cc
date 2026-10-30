@@ -89,12 +89,14 @@ export class FrameRenderer {
 			case "message_end":
 				if (event.message.role === "assistant") {
 					this.assistantEnd(event.message as AssistantMessage);
-				} else if (event.message.role === "toolResult") {
+				} else if (event.message.role === "toolResult" && this.tally?.outcome.kind !== "budget") {
 					this.context.emit(this.toolResultFrame(event.message as ToolResultMessage));
 				}
 				return;
 			case "turn_end":
-				if (event.toolResults.length > 0 && this.tally !== undefined) this.tally.toolBatches += 1;
+				if (event.toolResults.length > 0 && this.tally !== undefined && this.tally.outcome.kind !== "budget") {
+					this.tally.toolBatches += 1;
+				}
 				return;
 			default:
 				return;
@@ -174,10 +176,10 @@ export class FrameRenderer {
 		const usage: MessageUsage = { input_tokens: partial.usage.input, output_tokens: partial.usage.output };
 		if (partial.usage.cacheWrite > 0) {
 			usage.cache_creation_input_tokens = partial.usage.cacheWrite;
-			if (partial.usage.cacheWrite1h !== undefined) {
+			if (partial.usage.cacheWrite1h !== undefined || partial.usage.cacheWrite5m !== undefined) {
 				usage.cache_creation = {
-					ephemeral_5m_input_tokens: partial.usage.cacheWrite - partial.usage.cacheWrite1h,
-					ephemeral_1h_input_tokens: partial.usage.cacheWrite1h,
+					ephemeral_5m_input_tokens: partial.usage.cacheWrite5m ?? 0,
+					ephemeral_1h_input_tokens: partial.usage.cacheWrite1h ?? 0,
 				};
 			}
 		}

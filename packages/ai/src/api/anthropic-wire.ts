@@ -130,7 +130,10 @@ export interface AnthropicUsage {
 	output_tokens?: number | null;
 	cache_read_input_tokens?: number | null;
 	cache_creation_input_tokens?: number | null;
-	cache_creation?: { ephemeral_1h_input_tokens?: number | null } | null;
+	cache_creation?: { ephemeral_1h_input_tokens?: number | null; ephemeral_5m_input_tokens?: number | null } | null;
+	server_tool_use?: { web_search_requests?: number | null } | null;
+	inference_geo?: string | null;
+	speed?: string | null;
 	output_tokens_details?: { thinking_tokens?: number | null } | null;
 }
 

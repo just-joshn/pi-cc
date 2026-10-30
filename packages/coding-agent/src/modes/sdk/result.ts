@@ -2,6 +2,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import { budgetErrorText, budgetExhausted } from "../../core/usage/budget.ts";
+import { breakdownOf, type Charge, type CostBasis, canonicalName } from "../../core/usage/cost.ts";
 import type { Json, ResultFrame } from "./frames.ts";
 
 export interface ModelTotals {
@@ -10,10 +12,17 @@ export interface ModelTotals {
 	cacheReadInputTokens: number;
 	cacheCreationInputTokens: number;
 	cacheCreation1h: number;
+	/** The 5m figure the responses reported, which is zero for a response with no TTL split. */
+	cacheCreation5m: number;
+	webSearchRequests: number;
 	thinkingTokens: number;
 	costUSD: number;
+	costBasis: CostBasis;
 	limits: ModelLimits;
 }
+
+/** Prices a finished request. The host supplies it, with the model catalog and the operator's pricing policy behind it. */
+export type RequestPricer = (message: AssistantMessage) => Charge;
 
 export interface ModelLimits {
 	contextWindow: number;
@@ -26,23 +35,17 @@ export interface Denial {
 	tool_input: Json;
 }
 
-/** Claude Code reports a 32000-token output cap for the 4.x model generations whatever the catalog allows (measured: sonnet-4-5 and haiku-4-5). */
-const LEGACY_OUTPUT_CAP = 32_000;
-const LEGACY_GENERATION = /^claude-(?:opus|sonnet|haiku)-4/;
-
-/** The `maxOutputTokens` a `modelUsage` entry reports for a model. */
-export function reportedOutputCap(modelId: string, catalogMaxTokens: number): number {
-	return LEGACY_GENERATION.test(modelId) ? Math.min(catalogMaxTokens, LEGACY_OUTPUT_CAP) : catalogMaxTokens;
-}
-
 const ZERO: ModelTotals = {
 	inputTokens: 0,
 	outputTokens: 0,
 	cacheReadInputTokens: 0,
 	cacheCreationInputTokens: 0,
 	cacheCreation1h: 0,
+	cacheCreation5m: 0,
+	webSearchRequests: 0,
 	thinkingTokens: 0,
 	costUSD: 0,
+	costBasis: "list",
 	limits: { contextWindow: 0, maxOutputTokens: 0 },
 };
 
@@ -67,7 +70,8 @@ export type TurnOutcome =
 	| ApiErrorOutcome
 	| { kind: "aborted_streaming" }
 	| { kind: "aborted_tools" }
-	| { kind: "max_turns"; limit: number; terminalReason: "max_turns" | "aborted_tools" };
+	| { kind: "max_turns"; limit: number; terminalReason: "max_turns" | "aborted_tools" }
+	| { kind: "budget"; limit: number };
 
 /** What one user message cost: model calls, tokens per model, and the last assistant text. */
 export class TurnTally {
@@ -86,9 +90,25 @@ export class TurnTally {
 	outcome: TurnOutcome = { kind: "completed" };
 	ttftMs = 0;
 	denials: Denial[] = [];
+	private readonly price: RequestPricer;
+	private readonly priorCostUSD: number;
+	private readonly budgetUsd: number | undefined;
 
-	constructor(startedAt: number) {
+	constructor(startedAt: number, price: RequestPricer, priorCostUSD = 0, budgetUsd?: number) {
 		this.startedAt = startedAt;
+		this.price = price;
+		this.priorCostUSD = priorCostUSD;
+		this.budgetUsd = budgetUsd;
+	}
+
+	/** What the session has spent so far, this user message included. */
+	spentUSD(): number {
+		return Object.values(this.models).reduce((total, model) => total + model.costUSD, this.priorCostUSD);
+	}
+
+	/** Whether the run is past `--max-budget-usd`. */
+	overBudget(): boolean {
+		return budgetExhausted(this.spentUSD(), this.budgetUsd);
 	}
 
 	/** Folds one finished assistant message in; `apiMs` is how long its request took. */
@@ -96,7 +116,7 @@ export class TurnTally {
 		if (message.stopReason === "aborted") return;
 		if (message.stopReason === "error") {
 			const failure = apiErrorOutcome(message.errorMessage);
-			this.failedUsage = addUsage(this.failedUsage, message.usage, limits);
+			this.failedUsage = addUsage(this.failedUsage, message.usage, limits, { usd: 0, basis: "list" });
 			this.outcome = failure;
 			this.stopReason = "stop_sequence";
 			this.lastText = apiErrorText(failure);
@@ -104,12 +124,18 @@ export class TurnTally {
 		}
 		this.turns += 1;
 		this.apiMs += apiMs;
-		this.models[message.model] = addUsage(this.models[message.model] ?? ZERO, message.usage, limits);
+		this.models[message.model] = addUsage(
+			this.models[message.model] ?? ZERO,
+			message.usage,
+			limits,
+			this.price(message),
+		);
 		this.lastText = message.content
 			.filter((block) => block.type === "text")
 			.map((block) => block.text)
 			.join("");
 		this.stopReason = anthropicStopReason(message.stopReason);
+		if (this.budgetUsd !== undefined && this.overBudget()) this.outcome = { kind: "budget", limit: this.budgetUsd };
 	}
 }
 
@@ -137,15 +163,19 @@ export function apiErrorText(outcome: ApiErrorOutcome): string {
 	return outcome.status === undefined ? `API Error: ${outcome.text}` : `API Error: ${outcome.status} ${outcome.text}`;
 }
 
-function addUsage(totals: ModelTotals, usage: Usage, limits: ModelLimits): ModelTotals {
+function addUsage(totals: ModelTotals, usage: Usage, limits: ModelLimits, charge: Charge): ModelTotals {
+	const tokens = breakdownOf(usage);
 	return {
-		inputTokens: totals.inputTokens + usage.input,
-		outputTokens: totals.outputTokens + usage.output,
-		cacheReadInputTokens: totals.cacheReadInputTokens + usage.cacheRead,
-		cacheCreationInputTokens: totals.cacheCreationInputTokens + usage.cacheWrite,
-		cacheCreation1h: totals.cacheCreation1h + (usage.cacheWrite1h ?? 0),
+		inputTokens: totals.inputTokens + tokens.input,
+		outputTokens: totals.outputTokens + tokens.output,
+		cacheReadInputTokens: totals.cacheReadInputTokens + tokens.cacheRead,
+		cacheCreationInputTokens: totals.cacheCreationInputTokens + tokens.cacheWrite,
+		cacheCreation1h: totals.cacheCreation1h + tokens.cacheWrite1h,
+		cacheCreation5m: totals.cacheCreation5m + tokens.cacheWrite5m,
+		webSearchRequests: totals.webSearchRequests + tokens.webSearchRequests,
 		thinkingTokens: totals.thinkingTokens + (usage.reasoning ?? 0),
-		costUSD: totals.costUSD + usage.cost.total,
+		costUSD: totals.costUSD + charge.usd,
+		costBasis: charge.basis,
 		limits,
 	};
 }
@@ -160,30 +190,39 @@ function merge(base: Record<string, ModelTotals>, extra: Record<string, ModelTot
 			cacheReadInputTokens: current.cacheReadInputTokens + totals.cacheReadInputTokens,
 			cacheCreationInputTokens: current.cacheCreationInputTokens + totals.cacheCreationInputTokens,
 			cacheCreation1h: current.cacheCreation1h + totals.cacheCreation1h,
+			cacheCreation5m: current.cacheCreation5m + totals.cacheCreation5m,
+			webSearchRequests: current.webSearchRequests + totals.webSearchRequests,
 			thinkingTokens: current.thinkingTokens + totals.thinkingTokens,
 			costUSD: current.costUSD + totals.costUSD,
+			costBasis: totals.costBasis,
 			limits: totals.limits,
 		};
 	}
 	return out;
 }
 
-const sum = (models: Record<string, ModelTotals>, key: Exclude<keyof ModelTotals, "limits">): number =>
+type CountKey = Exclude<keyof ModelTotals, "limits" | "costBasis">;
+
+const sum = (models: Record<string, ModelTotals>, key: CountKey): number =>
 	Object.values(models).reduce((total, model) => total + model[key], 0);
 
 /** The `usage` block counts every request, failed ones included. */
 function usageBlock(models: Record<string, ModelTotals>, failed: ModelTotals = ZERO): Json {
 	const write = sum(models, "cacheCreationInputTokens") + failed.cacheCreationInputTokens;
 	const write1h = sum(models, "cacheCreation1h") + failed.cacheCreation1h;
+	const write5m = sum(models, "cacheCreation5m") + failed.cacheCreation5m;
 	return {
 		input_tokens: sum(models, "inputTokens") + failed.inputTokens,
 		cache_creation_input_tokens: write,
 		cache_read_input_tokens: sum(models, "cacheReadInputTokens") + failed.cacheReadInputTokens,
 		output_tokens: sum(models, "outputTokens") + failed.outputTokens,
 		output_tokens_details: { thinking_tokens: sum(models, "thinkingTokens") + failed.thinkingTokens },
-		server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+		server_tool_use: {
+			web_search_requests: sum(models, "webSearchRequests") + failed.webSearchRequests,
+			web_fetch_requests: 0,
+		},
 		service_tier: "standard",
-		cache_creation: { ephemeral_1h_input_tokens: write1h, ephemeral_5m_input_tokens: write - write1h },
+		cache_creation: { ephemeral_1h_input_tokens: write1h, ephemeral_5m_input_tokens: write5m },
 		inference_geo: "",
 		iterations: [],
 		speed: "standard",
@@ -200,15 +239,15 @@ function modelUsageBlock(models: Record<string, ModelTotals>): Json {
 				outputTokens: totals.outputTokens,
 				cacheReadInputTokens: totals.cacheReadInputTokens,
 				cacheCreationInputTokens: totals.cacheCreationInputTokens,
-				webSearchRequests: 0,
+				webSearchRequests: totals.webSearchRequests,
 				costUSD: totals.costUSD,
 				...totals.limits,
 				thinkingTokens: totals.thinkingTokens,
-				cacheCreationEphemeral5mInputTokens: totals.cacheCreationInputTokens - totals.cacheCreation1h,
+				cacheCreationEphemeral5mInputTokens: totals.cacheCreation5m,
 				cacheCreationEphemeral1hInputTokens: totals.cacheCreation1h,
-				canonicalModel: model,
+				canonicalModel: canonicalName(model),
 				provider: "firstParty",
-				costBasis: "list",
+				costBasis: totals.costBasis,
 			},
 		]),
 	);
@@ -226,6 +265,8 @@ function terminalReason(outcome: TurnOutcome): string {
 			return "aborted_tools";
 		case "max_turns":
 			return outcome.terminalReason;
+		case "budget":
+			return "budget_exhausted";
 	}
 }
 
@@ -245,6 +286,11 @@ const SUBAGENT_STATS = {
 /** The totals that outlive one user message: cost, API time and per-model usage grow across turns. */
 export class SessionLedger {
 	private models: Record<string, ModelTotals> = {};
+
+	/** What the session has spent over every user message folded in. */
+	spentUSD(): number {
+		return sum(this.models, "costUSD");
+	}
 	private apiMs = 0;
 	private resultIndex = 0;
 
@@ -314,6 +360,13 @@ export class SessionLedger {
 					...common,
 					subtype: "error_max_turns",
 					errors: [`Reached maximum number of turns (${outcome.limit})`],
+					...tail,
+				};
+			case "budget":
+				return {
+					...common,
+					subtype: "error_max_budget_usd",
+					errors: [budgetErrorText(sum(this.models, "costUSD"), outcome.limit)],
 					...tail,
 				};
 		}

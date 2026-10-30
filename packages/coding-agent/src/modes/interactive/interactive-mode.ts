@@ -122,6 +122,8 @@ import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import { withBuiltInRenderers } from "../../core/tools/renderers/index.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
+import type { PricingPolicy } from "../../core/usage/cost.ts";
+import { collectUsage, formatUsageReport, nativePricedBy } from "../../core/usage/report.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { addMcpServerConfig, loadMcpConfig } from "../../extensions/mcp/config.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
@@ -183,6 +185,7 @@ import { ThinkingSelectorComponent } from "./components/thinking-selector.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
+import { UsageDialogComponent } from "./components/usage-dialog.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { editInExternalEditor } from "./external-editor.ts";
@@ -430,6 +433,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
+	/** The operator's `modelPricing` policy setting, read each time `/usage` opens. */
+	pricing?: () => PricingPolicy | undefined;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Diagnostics collected before the interactive TUI was initialized. */
@@ -3373,6 +3378,11 @@ export class InteractiveMode {
 			if (text === "/session") {
 				this.handleSessionCommand();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/usage" || text === "/cost" || text === "/stats") {
+				this.editor.setText("");
+				this.showUsageDialog();
 				return;
 			}
 			if (text === "/changelog") {
@@ -6843,6 +6853,20 @@ export class InteractiveMode {
 		const displayName = sessionName ?? name;
 		this.chatContainer.addChild(new ThemedText(() => theme.fg("dim", `Session name set: ${displayName}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	private showUsageDialog(): void {
+		const session = this.session;
+		const input = collectUsage(
+			this.sessionManager.getBranch().flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
+			process.uptime() * 1000,
+			this.options.pricing?.(),
+			nativePricedBy((provider, model) => session.modelRuntime.getModel(provider, model)),
+		);
+		this.showSelector((done) => {
+			const dialog = new UsageDialogComponent(formatUsageReport(input), done);
+			return { component: dialog, focus: dialog };
+		});
 	}
 
 	private handleSessionCommand(): void {

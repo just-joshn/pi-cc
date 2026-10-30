@@ -9,6 +9,8 @@ import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
+import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
+import { catalogLimits, chargeFor, hasNativeRates, type PricingPolicy } from "../../core/usage/cost.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
 import { encodeFrame, parseInputLine } from "./codec.ts";
@@ -16,7 +18,7 @@ import { handleControlRequest } from "./control.ts";
 import type { Json, SdkFrame, UserReplayFrame } from "./frames.ts";
 import { buildInitFrame, readSessionFacts } from "./init.ts";
 import { FrameRenderer } from "./render.ts";
-import { reportedOutputCap, SessionLedger, TurnTally } from "./result.ts";
+import { SessionLedger, TurnTally } from "./result.ts";
 import { syntheticApiErrorFrame } from "./synthetic.ts";
 
 export interface SdkHostOptions {
@@ -29,6 +31,10 @@ export interface SdkHostOptions {
 	permissionMode: string;
 	/** `--max-turns`: model requests one user message may take before it ends with `error_max_turns`. */
 	maxTurns?: number;
+	/** `--max-budget-usd`: what the session may spend before a user message ends with `error_max_budget_usd`. */
+	maxBudgetUsd?: number;
+	/** The operator's `modelPricing` policy setting, when one is set. */
+	pricing?: PricingPolicy;
 	/** Whether the provider has a credential, asked for the model selected now so a `set_model` shows. */
 	hasAuth(provider: string): boolean;
 	/** Where stream-json user messages and control requests arrive. */
@@ -70,10 +76,12 @@ export class SdkHost {
 			now: () => Date.now(),
 			limitsOf: (message) => {
 				const model = this.getSession().modelRuntime.getModel(message.provider, message.model);
-				return {
-					contextWindow: model?.contextWindow ?? 0,
-					maxOutputTokens: reportedOutputCap(message.model, model?.maxTokens ?? 0),
-				};
+				return (
+					catalogLimits(message.model) ?? {
+						contextWindow: model?.contextWindow ?? 0,
+						maxOutputTokens: model?.maxTokens ?? 0,
+					}
+				);
 			},
 		});
 	}
@@ -102,6 +110,7 @@ export class SdkHost {
 			const next = await inbox.next();
 			if (next === undefined || this.ended) break;
 			await this.turn(next);
+			if (budgetExhausted(this.ledger.spentUSD(), this.options.maxBudgetUsd)) break;
 		}
 		if (inbox.failure !== undefined) {
 			this.options.fail(inbox.failure);
@@ -130,16 +139,26 @@ export class SdkHost {
 		}
 		if (this.options.includePartial) this.renderer.status();
 		if (this.options.replayUser) this.emit(replayFrame(facts.sessionId, prompt));
-		const tally = new TurnTally(startedAt);
+		const tally = new TurnTally(
+			startedAt,
+			(message) => {
+				const model = session.modelRuntime.getModel(message.provider, message.model);
+				return chargeFor(message.model, message.usage, hasNativeRates(model?.cost), this.options.pricing);
+			},
+			this.ledger.spentUSD(),
+			this.options.maxBudgetUsd,
+		);
 		this.renderer.beginTurn(tally);
 		const limit = limitTurns(session.agent, this.options.maxTurns);
+		const budget = gateBudget(session.agent, () => tally.overBudget());
 		try {
 			await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
 			await session.waitForIdle();
 		} finally {
+			budget.release();
 			limit.release();
 		}
-		if (limit.reached() && this.options.maxTurns !== undefined) {
+		if (tally.outcome.kind !== "budget" && limit.reached() && this.options.maxTurns !== undefined) {
 			tally.outcome = {
 				kind: "max_turns",
 				limit: this.options.maxTurns,

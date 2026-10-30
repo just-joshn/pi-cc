@@ -469,6 +469,14 @@ export interface Usage {
 	cacheWrite: number;
 	/** Subset of `cacheWrite` written with 1h retention. Only Anthropic reports this split. */
 	cacheWrite1h?: number;
+	/** The 5m figure the response reported, which need not equal `cacheWrite - cacheWrite1h`. Only Anthropic reports this split. */
+	cacheWrite5m?: number;
+	/** Server-side web searches the response made. Only Anthropic reports this. */
+	webSearchRequests?: number;
+	/** Region the response was served from (`us` is billed at a premium). Only Anthropic reports this. */
+	inferenceGeo?: string;
+	/** Speed tier the response was served at (`fast` is billed at its own rates). Only Anthropic reports this. */
+	speed?: string;
 	/**
 	 * Reasoning/thinking tokens, when the provider reports them. This is a subset of
 	 * `output`: `output` already includes these tokens. Set to a number (possibly 0) by

@@ -1,0 +1,137 @@
+{
+	"id": "usage/inference-geo-us-multiplier",
+	"area": "usage",
+	"argv": [
+		"-p",
+		"go now",
+		"--model",
+		"claude-sonnet-4-5",
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_u0",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-sonnet-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 1000,
+								"cache_creation_input_tokens": 0,
+								"cache_read_input_tokens": 0,
+								"output_tokens": 1,
+								"inference_geo": "us",
+								"server_tool_use": {
+									"web_search_requests": 2
+								}
+							}
+						}
+					},
+					{
+						"type": "content_block_start",
+						"index": 0,
+						"content_block": {
+							"type": "text",
+							"text": ""
+						}
+					},
+					{
+						"type": "content_block_delta",
+						"index": 0,
+						"delta": {
+							"type": "text_delta",
+							"text": "OK"
+						}
+					},
+					{
+						"type": "content_block_stop",
+						"index": 0
+					},
+					{
+						"type": "message_delta",
+						"delta": {
+							"stop_reason": "end_turn",
+							"stop_sequence": null
+						},
+						"usage": {
+							"output_tokens": 400,
+							"server_tool_use": {
+								"web_search_requests": 2
+							}
+						}
+					},
+					{
+						"type": "message_stop"
+					}
+				]
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "json",
+			"shape": {
+				"$ref": "cc-result-json",
+				"set": {
+					"subtype": "success",
+					"is_error": false,
+					"num_turns": 1,
+					"result": "OK",
+					"terminal_reason": "completed",
+					"stop_reason": "end_turn",
+					"permission_denials": [],
+					"total_cost_usd": {
+						"$near": [
+							0.029900000000000003,
+							1e-09
+						]
+					},
+					"modelUsage": {
+						"claude-sonnet-4-5": {
+							"inputTokens": 1000,
+							"outputTokens": 400,
+							"cacheReadInputTokens": 0,
+							"cacheCreationInputTokens": 0,
+							"webSearchRequests": 2,
+							"costUSD": {
+								"$near": [
+									0.029900000000000003,
+									1e-09
+								]
+							},
+							"contextWindow": 200000,
+							"maxOutputTokens": 32000,
+							"thinkingTokens": "$number",
+							"cacheCreationEphemeral5mInputTokens": 0,
+							"cacheCreationEphemeral1hInputTokens": 0,
+							"canonicalModel": "claude-sonnet-4-5",
+							"provider": "firstParty",
+							"costBasis": "list"
+						}
+					},
+					"usage.input_tokens": 1000,
+					"usage.cache_creation_input_tokens": 0,
+					"usage.cache_read_input_tokens": 0,
+					"usage.output_tokens": 400,
+					"usage.server_tool_use.web_search_requests": 2,
+					"usage.cache_creation.ephemeral_1h_input_tokens": 0,
+					"usage.cache_creation.ephemeral_5m_input_tokens": 0
+				}
+			}
+		}
+	},
+	"skip": []
+}

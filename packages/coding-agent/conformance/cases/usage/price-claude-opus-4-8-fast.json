@@ -1,0 +1,134 @@
+{
+	"id": "usage/price-claude-opus-4-8-fast",
+	"area": "usage",
+	"argv": [
+		"-p",
+		"go now",
+		"--model",
+		"claude-opus-4-8",
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_u0",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-opus-4-8",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 10000,
+								"cache_creation_input_tokens": 6000,
+								"cache_read_input_tokens": 8000,
+								"output_tokens": 1,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 4000,
+									"ephemeral_1h_input_tokens": 2000
+								},
+								"server_tool_use": {
+									"web_search_requests": 1
+								},
+								"speed": "fast"
+							}
+						}
+					},
+					{
+						"type": "content_block_start",
+						"index": 0,
+						"content_block": {
+							"type": "text",
+							"text": ""
+						}
+					},
+					{
+						"type": "content_block_delta",
+						"index": 0,
+						"delta": {
+							"type": "text_delta",
+							"text": "OK"
+						}
+					},
+					{
+						"type": "content_block_stop",
+						"index": 0
+					},
+					{
+						"type": "message_delta",
+						"delta": {
+							"stop_reason": "end_turn",
+							"stop_sequence": null
+						},
+						"usage": {
+							"output_tokens": 2000,
+							"server_tool_use": {
+								"web_search_requests": 1
+							}
+						}
+					},
+					{
+						"type": "message_stop"
+					}
+				]
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "json",
+			"shape": {
+				"$ref": "cc-result-json",
+				"set": {
+					"subtype": "success",
+					"is_error": false,
+					"num_turns": 1,
+					"result": "OK",
+					"terminal_reason": "completed",
+					"stop_reason": "end_turn",
+					"permission_denials": [],
+					"total_cost_usd": {
+						"$near": [
+							0.308,
+							1e-09
+						]
+					},
+					"modelUsage": {
+						"claude-opus-4-8": {
+							"inputTokens": 10000,
+							"outputTokens": 2000,
+							"cacheReadInputTokens": 8000,
+							"cacheCreationInputTokens": 6000,
+							"webSearchRequests": 1,
+							"costUSD": {
+								"$near": [
+									0.308,
+									1e-09
+								]
+							},
+							"contextWindow": 1000000,
+							"maxOutputTokens": 64000,
+							"thinkingTokens": "$number",
+							"cacheCreationEphemeral5mInputTokens": 4000,
+							"cacheCreationEphemeral1hInputTokens": 2000,
+							"canonicalModel": "claude-opus-4-8",
+							"provider": "firstParty",
+							"costBasis": "list"
+						}
+					}
+				}
+			}
+		}
+	},
+	"skip": []
+}

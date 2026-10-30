@@ -14,7 +14,7 @@ function renderer(includePartial = false) {
 		now: () => 1_000,
 		limitsOf: () => ({ contextWindow: 0, maxOutputTokens: 0 }),
 	});
-	instance.beginTurn(new TurnTally(0));
+	instance.beginTurn(new TurnTally(0, () => ({ usd: 0, basis: "list" })));
 	return { instance, frames };
 }
 
