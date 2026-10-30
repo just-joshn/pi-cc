@@ -69,11 +69,11 @@ async function capture(
 const firstUser = { role: "user" as const, content: "hello", timestamp: 2 };
 
 describe("Claude Code wire profile", () => {
-	it("splits the system prompt into billing, identity and working blocks", async () => {
+	it("sends only the identity and working blocks without client attribution", async () => {
 		const payload = await capture(model, { messages: [head, firstUser] }, { ccWire });
 
-		expect(payload.system?.map((block) => block.text)).toEqual([ccWire.billingHeader, "IDENTITY", "WORKING"]);
-		expect(payload.system?.map((block) => block.cache_control !== undefined)).toEqual([false, true, true]);
+		expect(payload.system?.map((block) => block.text)).toEqual(["IDENTITY", "WORKING"]);
+		expect(payload.system?.map((block) => block.cache_control !== undefined)).toEqual([true, true]);
 	});
 
 	it("places the machine context in a system message after the first user message", async () => {
@@ -117,11 +117,11 @@ describe("Claude Code wire profile", () => {
 		expect(payload.messages.at(-1)?.role).toBe("system");
 	});
 
-	it("folds a head without the identity split into one block after the billing line", async () => {
+	it("folds a head without the identity split into one block", async () => {
 		const forced: SystemMessage = { role: "system", content: "FORCED", timestamp: 1 };
 		const payload = await capture(model, { messages: [forced, firstUser] }, { ccWire });
 
-		expect(payload.system?.map((block) => block.text)).toEqual([ccWire.billingHeader, "FORCED"]);
+		expect(payload.system?.map((block) => block.text)).toEqual(["FORCED"]);
 	});
 
 	it("joins the working text and its session-specific part into the working block", async () => {
@@ -131,7 +131,7 @@ describe("Claude Code wire profile", () => {
 		};
 		const payload = await capture(model, { messages: [withDynamic, firstUser] }, { ccWire });
 
-		expect(payload.system?.[2].text).toBe("WORKING\n\nDYNAMIC");
+		expect(payload.system?.[1].text).toBe("WORKING\n\nDYNAMIC");
 	});
 
 	it("leads the first user message with the context for a model without mid-conversation system messages", async () => {

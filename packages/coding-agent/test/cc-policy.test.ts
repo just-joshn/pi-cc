@@ -2,7 +2,6 @@ import type { Model } from "@earendil-works/pi-ai";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { describe, expect, test } from "vitest";
 import {
-	billingHeader,
 	buildCcPolicy,
 	CC_AUTO_BETAS,
 	ccWireProfile,
@@ -122,12 +121,11 @@ describe("flag parsing", () => {
 });
 
 describe("wire profile", () => {
-	test("derives the billing header from the entrypoint", () => {
-		expect(billingHeader("sdk-cli")).toMatch(
-			/^x-anthropic-billing-header: cc_version=2\.1\.312\.[0-9a-f]{3}; cc_entrypoint=sdk-cli;$/,
-		);
-		expect(billingHeader("cli")).toContain("cc_entrypoint=cli;");
-		expect(billingHeader("sdk-cli")).toHaveLength(74);
+	test("omits client attribution and client betas", () => {
+		const policy = buildCcPolicy({ ...noFlags, flags: { betas: ["claude-code-20250219"] } });
+		const profile = ccWireProfile(policy, model("claude-opus-5-5"), true, false, false);
+		expect.soft(profile).not.toHaveProperty("billingHeader");
+		expect.soft(profile?.extraBetas).not.toContain("claude-code-20250219");
 	});
 
 	test("carries the automatic betas first and the recognized --betas values after them, dropping the rest", () => {
