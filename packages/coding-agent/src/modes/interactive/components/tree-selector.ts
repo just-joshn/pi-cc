@@ -13,6 +13,7 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { SessionTreeNode } from "../../../core/session-manager.ts";
+import { CC_DEFAULT_CLOCK, type CcClock, formatCcClock } from "../../../core/settings/cc/clock.ts";
 import { formatReadLineRange } from "../../../core/tools/render-utils.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -120,6 +121,7 @@ class TreeList implements Component {
 	private visibleChildrenMap: Map<string | null, string[]> = new Map();
 	private lastSelectedId: string | null = null;
 	private foldedNodes: Set<string> = new Set();
+	private clock: CcClock;
 
 	public onSelect?: (entryId: string) => void;
 	public onCancel?: () => void;
@@ -132,7 +134,9 @@ class TreeList implements Component {
 		maxVisibleLines: number,
 		initialSelectedId?: string,
 		initialFilterMode?: FilterMode,
+		clock: CcClock = CC_DEFAULT_CLOCK,
 	) {
+		this.clock = clock;
 		this.currentLeafId = currentLeafId;
 		this.maxVisibleLines = maxVisibleLines;
 		this.filterMode = initialFilterMode ?? "default";
@@ -863,9 +867,13 @@ class TreeList implements Component {
 	private formatLabelTimestamp(timestamp: string): string {
 		const date = new Date(timestamp);
 		const now = new Date();
+		const configured = formatCcClock(this.clock, date);
+		if (this.clock.kind === "pattern" && configured !== undefined) {
+			return configured;
+		}
 		const hours = date.getHours().toString().padStart(2, "0");
 		const minutes = date.getMinutes().toString().padStart(2, "0");
-		const time = `${hours}:${minutes}`;
+		const time = configured ?? `${hours}:${minutes}`;
 
 		if (
 			date.getFullYear() === now.getFullYear() &&
@@ -1356,13 +1364,14 @@ export class TreeSelectorComponent extends Container implements Focusable {
 		onLabelChange?: (entryId: string, label: string | undefined) => void,
 		initialSelectedId?: string,
 		initialFilterMode?: FilterMode,
+		clock?: CcClock,
 	) {
 		super();
 
 		this.onLabelChangeCallback = onLabelChange;
 		const maxVisibleLines = Math.max(5, Math.floor(terminalHeight / 2));
 
-		this.treeList = new TreeList(tree, currentLeafId, maxVisibleLines, initialSelectedId, initialFilterMode);
+		this.treeList = new TreeList(tree, currentLeafId, maxVisibleLines, initialSelectedId, initialFilterMode, clock);
 		this.treeList.onSelect = onSelect;
 		this.treeList.onCancel = onCancel;
 		this.treeList.onCopy = (text) => this.onCopy?.(text);

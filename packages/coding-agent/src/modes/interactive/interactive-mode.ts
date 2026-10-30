@@ -113,6 +113,8 @@ import {
 	sessionEntryToContextMessages,
 	type UsageEntry,
 } from "../../core/session-manager.ts";
+import { formatCcClock } from "../../core/settings/cc/clock.ts";
+import { type CcTuiSettings, NO_CC_TUI } from "../../core/settings/cc/tui.ts";
 import type { FullscreenExitOutput, TuiMode } from "../../core/settings-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import { getSourcePackageKey, type SourceInfo } from "../../core/source-info.ts";
@@ -448,6 +450,11 @@ export interface InteractiveModeOptions {
 	tuiMode?: TuiMode;
 	/** Initial interactive theme setting for this invocation. */
 	initialThemeSetting?: string;
+	/**
+	 * The Claude Code terminal settings admitted for the current directory. Interactive mode calls it
+	 * again whenever it rebinds a session, so a directory change is seen without any shared state.
+	 */
+	ccTui?: () => CcTuiSettings;
 	/** Terminal implementation. Defaults to the current process terminal. */
 	terminal?: Terminal;
 }
@@ -488,6 +495,7 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
 	private pendingUserInputs: string[] = [];
+	private ccTui: CcTuiSettings = NO_CC_TUI;
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private activeWorkingIndicatorEmbedded = false;
 	private readonly idleStatus = new IdleStatus();
@@ -619,7 +627,8 @@ export class InteractiveMode {
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
 		setCapabilityOverrides(this.settingsManager.getTerminalCapabilityOverrides());
-		const tuiMode = options.tuiMode ?? this.settingsManager.getTuiMode();
+		this.ccTui = options.ccTui?.() ?? NO_CC_TUI;
+		const tuiMode = options.tuiMode ?? this.ccTui.tuiMode ?? this.settingsManager.getTuiMode();
 		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
@@ -662,6 +671,8 @@ export class InteractiveMode {
 			embedWorkingStatus: true,
 		});
 		this.editor = this.defaultEditor;
+		this.defaultEditor.setVimMode(this.ccTui.vim);
+		this.defaultEditor.setFlat(this.ccTui.screenReader);
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
@@ -864,7 +875,7 @@ export class InteractiveMode {
 		if (this.chatContainer.children.length > 0) {
 			this.chatContainer.addChild(new Spacer(1));
 		}
-		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(this.newBorder());
 		if (this.changelogMarkdown) {
 			if (this.settingsManager.getCollapseChangelog()) {
 				const versionMatch = this.changelogMarkdown.match(/##\s+\[?(\d+\.\d+\.\d+)\]?/);
@@ -899,7 +910,7 @@ export class InteractiveMode {
 				this.chatContainer.addChild(new Spacer(1));
 			}
 		}
-		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(this.newBorder());
 	}
 
 	private mountInteractiveTui(tui: TuiMainScreen | TuiAltScreen, components: readonly Component[]): void {
@@ -1249,7 +1260,8 @@ export class InteractiveMode {
 
 		const crash = takeUnnotifiedCrash();
 		if (crash) {
-			const when = new Date(crash.timestamp).toLocaleString();
+			const crashedAt = new Date(crash.timestamp);
+			const when = formatCcClock(this.ccTui.clock, crashedAt) ?? crashedAt.toLocaleString();
 			this.showWarning(
 				`${APP_NAME} crashed on ${when} (${crash.message}). Run /bug to report it; the crash details are attached automatically.`,
 			);
@@ -1466,6 +1478,11 @@ export class InteractiveMode {
 		})
 			.then(() => undefined)
 			.catch(() => undefined);
+	}
+
+	private getAssistantMarkdownTheme(): MarkdownTheme {
+		const theme = this.getMarkdownThemeWithSettings();
+		return this.ccTui.maxProseWidth === undefined ? theme : { ...theme, maxProseWidth: this.ccTui.maxProseWidth };
 	}
 
 	private getMarkdownThemeWithSettings(): MarkdownTheme {
@@ -2173,7 +2190,27 @@ export class InteractiveMode {
 		});
 	}
 
+	/** A rule line, or nothing in screen reader mode, which leaves decoration out. */
+	private newBorder(color?: (text: string) => string): Component {
+		return this.ccTui.screenReader ? new Spacer(0) : new DynamicBorder(color);
+	}
+
+	private applyCcTui(): void {
+		this.ccTui = this.options.ccTui?.() ?? NO_CC_TUI;
+		this.defaultEditor.setVimMode(this.ccTui.vim);
+		this.defaultEditor.setFlat(this.ccTui.screenReader);
+		this.setWorkingIndicator(this.workingIndicatorOptions);
+	}
+
+	/** The spinner CC's reduced-motion and screen reader settings leave: one still frame, or none at all. */
+	private ccStillIndicator(): WorkingIndicatorOptions | undefined {
+		if (this.ccTui.screenReader) return { frames: [] };
+		if (this.ccTui.reducedMotion) return { frames: ["●"] };
+		return undefined;
+	}
+
 	private applyRuntimeSettings(): void {
+		this.applyCcTui();
 		setCapabilityOverrides(this.settingsManager.getTerminalCapabilityOverrides());
 		this.ensurePngTranscoder();
 		configureHttpDispatcher(this.settingsManager.getHttpIdleTimeoutMs());
@@ -2426,6 +2463,8 @@ export class InteractiveMode {
 	}
 
 	private showStatusIndicator(indicator: StatusIndicator): void {
+		const still = this.ccStillIndicator();
+		if (still && indicator.kind !== "working") indicator.setIndicator(still);
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = indicator;
 		this.activeWorkingIndicatorEmbedded = false;
@@ -2468,7 +2507,7 @@ export class InteractiveMode {
 			new WorkingStatusIndicator(
 				this.ui,
 				this.workingMessage ?? this.defaultWorkingMessage,
-				this.workingIndicatorOptions,
+				this.workingIndicatorOptions ?? this.ccStillIndicator(),
 				colorFn,
 			),
 		);
@@ -2490,7 +2529,7 @@ export class InteractiveMode {
 	private setWorkingIndicator(options?: WorkingIndicatorOptions): void {
 		this.workingIndicatorOptions = options;
 		if (this.activeStatusIndicator?.kind === "working") {
-			this.activeStatusIndicator.setIndicator(options);
+			this.activeStatusIndicator.setIndicator(options ?? this.ccStillIndicator());
 		}
 		this.ui.requestRender();
 	}
@@ -3585,7 +3624,7 @@ export class InteractiveMode {
 					this.streamingComponent = new AssistantMessageComponent(
 						undefined,
 						this.hideThinkingBlock,
-						this.getMarkdownThemeWithSettings(),
+						this.getAssistantMarkdownTheme(),
 						this.hiddenThinkingLabel,
 						this.outputPad,
 						this.getMarkdownTransformers(),
@@ -4065,7 +4104,7 @@ export class InteractiveMode {
 				const assistantComponent = new AssistantMessageComponent(
 					message,
 					this.hideThinkingBlock,
-					this.getMarkdownThemeWithSettings(),
+					this.getAssistantMarkdownTheme(),
 					this.hiddenThinkingLabel,
 					this.outputPad,
 					this.getMarkdownTransformers(),
@@ -4757,7 +4796,7 @@ export class InteractiveMode {
 		const note = release.note?.trim();
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.chatContainer.addChild(this.newBorder((text) => theme.fg("warning", text)));
 		this.chatContainer.addChild(
 			new ThemedText(() => `${theme.bold(theme.fg("warning", "Update Available"))}\n${updateInstruction()}`, 1, 0),
 		);
@@ -4771,7 +4810,7 @@ export class InteractiveMode {
 			this.chatContainer.addChild(new Spacer(1));
 		}
 		this.chatContainer.addChild(new ThemedText(changelogLine, 1, 0));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.chatContainer.addChild(this.newBorder((text) => theme.fg("warning", text)));
 		this.ui.requestRender();
 	}
 
@@ -4782,7 +4821,7 @@ export class InteractiveMode {
 		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.chatContainer.addChild(this.newBorder((text) => theme.fg("warning", text)));
 		this.chatContainer.addChild(
 			new ThemedText(
 				() =>
@@ -4791,7 +4830,7 @@ export class InteractiveMode {
 				0,
 			),
 		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.chatContainer.addChild(this.newBorder((text) => theme.fg("warning", text)));
 		this.ui.requestRender();
 	}
 
@@ -5803,6 +5842,7 @@ export class InteractiveMode {
 				},
 				initialSelectedId,
 				initialFilterMode,
+				this.ccTui.clock,
 			);
 			selector.onCopy = async (text) => {
 				if (!text) {
@@ -6556,7 +6596,7 @@ export class InteractiveMode {
 
 		const reloadBox = new Container();
 		const borderColor = (s: string) => theme.fg("border", s);
-		reloadBox.addChild(new DynamicBorder(borderColor));
+		reloadBox.addChild(this.newBorder(borderColor));
 		reloadBox.addChild(new Spacer(1));
 		reloadBox.addChild(
 			new ThemedText(
@@ -6566,7 +6606,7 @@ export class InteractiveMode {
 			),
 		);
 		reloadBox.addChild(new Spacer(1));
-		reloadBox.addChild(new DynamicBorder(borderColor));
+		reloadBox.addChild(this.newBorder(borderColor));
 
 		const previousEditor = this.editor;
 		this.editorContainer.clear();
@@ -6899,11 +6939,11 @@ export class InteractiveMode {
 				: "No changelog entries found.";
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(this.newBorder());
 		this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "What's New")), 1, 0));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Markdown(changelogMarkdown, 1, 1, this.getMarkdownThemeWithSettings()));
-		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(this.newBorder());
 		this.ui.requestRender();
 	}
 
@@ -7030,11 +7070,11 @@ export class InteractiveMode {
 		}
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(this.newBorder());
 		this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "Keyboard Shortcuts")), 1, 0));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Markdown(hotkeys.trim(), 1, 1, this.getMarkdownThemeWithSettings()));
-		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(this.newBorder());
 		this.ui.requestRender();
 	}
 

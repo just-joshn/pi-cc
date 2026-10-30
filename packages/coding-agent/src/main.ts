@@ -88,6 +88,7 @@ import {
 	type CcSettleResult,
 	openCcRunSettings,
 } from "./core/settings/cc/run.ts";
+import { resolveCcTuiSettings } from "./core/settings/cc/tui.ts";
 import type { CcSettings } from "./core/settings/cc/types.ts";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
@@ -1206,6 +1207,11 @@ export async function main(args: string[], options?: MainOptions) {
 			verbose: parsed.verbose,
 			tuiMode: parsed.tuiMode,
 			initialThemeSetting: parsed.useTheme,
+			ccTui: () =>
+				resolveCcTuiSettings(ccRunSettings(ccAdmission.run.settings, parsed), {
+					axScreenReaderFlag: parsed.axScreenReader === true,
+					env: process.env,
+				}),
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();

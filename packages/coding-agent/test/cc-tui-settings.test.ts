@@ -61,7 +61,7 @@ describe("validation of the terminal keys", () => {
 			editorMode: "vim",
 			vimInsertModeRemaps: { jj: "<Esc>" },
 		});
-		for (const width of ["\"50\"", "40.5", "null"]) {
+		for (const width of ['"50"', "40.5", "null"]) {
 			const dropped = parseCcSettingsText(`{"maxProseWidth":${width}}`, "user");
 			expect(dropped.kind === "document" && dropped.values).toEqual({});
 		}
