@@ -352,7 +352,10 @@ function runSandboxed(
 			stdinAbort.abort();
 			await stdinDone;
 			clearTimeout(timer);
-			const reaped = child.pid === undefined ? { survived: false, converged: true } : await reap(roots.root);
+			const reaped =
+				child.pid === undefined
+					? { survived: false, converged: true }
+					: await reap(roots.root, { group: child.pid });
 			if (stdinFailure !== undefined) {
 				reject(stdinFailure);
 				return;
