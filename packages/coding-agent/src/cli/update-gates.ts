@@ -7,6 +7,7 @@
 import { homedir } from "node:os";
 import { gt, lt, valid } from "semver";
 import { loadCcSettings } from "../core/settings/cc/load.ts";
+import { nonessentialTrafficDisabled } from "../core/telemetry/gates.ts";
 
 /** The environment variable naming the operator's own release feed. */
 export const UPDATE_FEED_ENV = "PI_CC_UPDATE_FEED_URL";
@@ -43,7 +44,7 @@ export function autoUpdateState(env: Env): AutoUpdateState {
 	if (isTruthy(env.DISABLE_AUTOUPDATER)) {
 		return { kind: "disabled", envVar: "DISABLE_AUTOUPDATER" };
 	}
-	if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
+	if (nonessentialTrafficDisabled(env)) {
 		return { kind: "disabled", envVar: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" };
 	}
 	return { kind: "enabled" };

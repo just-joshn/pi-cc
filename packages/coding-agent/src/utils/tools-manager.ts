@@ -5,6 +5,7 @@ import { join } from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { getBinDir, VERSION } from "../config.ts";
+import { upstreamNetworkAllowed } from "../core/telemetry/gates.ts";
 import { startupEnv } from "./internal-env.ts";
 import { fetchWithRetry } from "./management-http.ts";
 import { getPiUserAgent } from "./pi-user-agent.ts";
@@ -330,6 +331,16 @@ export interface ToolStatus {
 	message: string;
 }
 
+/** Why `ensureTool` returned nothing, as the error a tool shows the model and the user. */
+export function toolUnavailableMessage(tool: "fd" | "rg"): string {
+	const label = tool === "rg" ? "ripgrep (rg)" : "fd";
+	if (isOfflineModeEnabled()) return `${label} is not installed and offline mode is on, so it was not downloaded.`;
+	if (!upstreamNetworkAllowed()) {
+		return `${label} is not installed and downloads are off. Install ${tool} with your package manager, or set PI_CC_ALLOW_UPSTREAM_NETWORK=1 to let pi-cc download it from GitHub.`;
+	}
+	return `${label} is not available and could not be downloaded`;
+}
+
 /**
  * Ensure a tool is available, downloading if necessary.
  * Reports progress through `onStatus`; status messages are otherwise silent.
@@ -349,6 +360,13 @@ export async function ensureTool(
 
 	if (isOfflineModeEnabled()) {
 		onStatus?.({ type: "warning", message: `${config.name} not found. Offline mode enabled, skipping download.` });
+		return undefined;
+	}
+	if (!upstreamNetworkAllowed()) {
+		onStatus?.({
+			type: "warning",
+			message: `${config.name} not found. Downloads are off; install ${config.name} with your system package manager.`,
+		});
 		return undefined;
 	}
 

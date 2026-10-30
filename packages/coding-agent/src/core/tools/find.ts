@@ -3,7 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";
-import { ensureTool } from "../../utils/tools-manager.ts";
+import { ensureTool, toolUnavailableMessage } from "../../utils/tools-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { findRenderers } from "./renderers/find.ts";
@@ -175,7 +175,7 @@ export function createFindToolDefinition(
 							return;
 						}
 						if (!fdPath) {
-							settle(() => reject(new Error("fd is not available and could not be downloaded")));
+							settle(() => reject(new Error(toolUnavailableMessage("fd"))));
 							return;
 						}
 

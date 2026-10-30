@@ -1,0 +1,65 @@
+{
+ "id": "telemetry/otel-opt-in-per-content-class-tool-content",
+ "area": "telemetry",
+ "argv": [
+  "-p",
+  "Say the secret word please",
+  "--output-format",
+  "json",
+  "--permission-mode",
+  "acceptEdits"
+ ],
+ "env": {
+  "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+  "OTEL_METRICS_EXPORTER": "otlp",
+  "OTEL_LOGS_EXPORTER": "otlp",
+  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+  "OTEL_EXPORTER_OTLP_ENDPOINT": "$MOCK_URL",
+  "OTEL_LOG_TOOL_CONTENT": "1"
+ },
+ "stdin": null,
+ "files": {},
+ "model": {
+  "turns": [
+   {
+    "tool_use": {
+     "name": "Bash",
+     "input": {
+      "command": "echo tool-secret-command",
+      "description": "say hi"
+     }
+    }
+   },
+   {
+    "text": "ZEBRA_RESPONSE_42"
+   }
+  ]
+ },
+ "timeout_ms": 60000,
+ "compare": {
+  "exit": 0,
+  "requests": [
+   {
+    "pathStartsWith": "/v1/messages",
+    "count": 2
+   },
+   {
+    "pathStartsWith": "/v1/logs",
+    "method": "POST",
+    "count": 1,
+    "bodyIncludes": [
+     "claude_code.tool_result"
+    ],
+    "bodyExcludes": [
+     "\"key\":\"tool_input\"",
+     "\"key\":\"tool_parameters\"",
+     "tool-secret-command"
+    ]
+   }
+  ]
+ },
+ "skip": [],
+ "not_applicable": {
+  "pi-cc": "pi-cc registers its tools under pi names until the tools PR (#7) lands, so a Bash call from the mock is an unknown tool. The same events are pinned by unit test."
+ }
+}

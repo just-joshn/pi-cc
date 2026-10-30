@@ -1,0 +1,50 @@
+{
+ "id": "telemetry/otel-opt-in-per-content-class-responses",
+ "area": "telemetry",
+ "argv": [
+  "-p",
+  "Say the secret word please",
+  "--output-format",
+  "json"
+ ],
+ "env": {
+  "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+  "OTEL_METRICS_EXPORTER": "otlp",
+  "OTEL_LOGS_EXPORTER": "otlp",
+  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+  "OTEL_EXPORTER_OTLP_ENDPOINT": "$MOCK_URL",
+  "OTEL_LOG_ASSISTANT_RESPONSES": "1"
+ },
+ "stdin": null,
+ "files": {},
+ "model": {
+  "turns": [
+   {
+    "text": "ZEBRA_RESPONSE_42"
+   }
+  ]
+ },
+ "timeout_ms": 60000,
+ "compare": {
+  "exit": 0,
+  "requests": [
+   {
+    "pathStartsWith": "/v1/messages",
+    "count": 1,
+    "method": "POST"
+   },
+   {
+    "pathStartsWith": "/v1/logs",
+    "method": "POST",
+    "count": 1,
+    "bodyIncludes": [
+     "ZEBRA_RESPONSE_42"
+    ],
+    "bodyExcludes": [
+     "Say the secret word please"
+    ]
+   }
+  ]
+ },
+ "skip": []
+}

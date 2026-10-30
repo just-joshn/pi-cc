@@ -1,0 +1,51 @@
+{
+ "id": "telemetry/otlp-metrics-include-flags",
+ "area": "telemetry",
+ "argv": [
+  "-p",
+  "Say the secret word please",
+  "--output-format",
+  "json"
+ ],
+ "env": {
+  "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+  "OTEL_METRICS_EXPORTER": "otlp",
+  "OTEL_LOGS_EXPORTER": "otlp",
+  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+  "OTEL_EXPORTER_OTLP_ENDPOINT": "$MOCK_URL",
+  "OTEL_METRICS_INCLUDE_SESSION_ID": "false",
+  "OTEL_METRICS_INCLUDE_VERSION": "true"
+ },
+ "stdin": null,
+ "files": {},
+ "model": {
+  "turns": [
+   {
+    "text": "ZEBRA_RESPONSE_42"
+   }
+  ]
+ },
+ "timeout_ms": 60000,
+ "compare": {
+  "exit": 0,
+  "requests": [
+   {
+    "pathStartsWith": "/v1/messages",
+    "count": 1,
+    "method": "POST"
+   },
+   {
+    "pathStartsWith": "/v1/metrics",
+    "method": "POST",
+    "count": 1,
+    "bodyIncludes": [
+     "\"key\":\"app.version\""
+    ],
+    "bodyExcludes": [
+     "\"key\":\"session.id\""
+    ]
+   }
+  ]
+ },
+ "skip": []
+}

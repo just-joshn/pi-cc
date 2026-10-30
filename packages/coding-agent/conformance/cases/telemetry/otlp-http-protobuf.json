@@ -1,0 +1,69 @@
+{
+ "id": "telemetry/otlp-http-protobuf",
+ "area": "telemetry",
+ "argv": [
+  "-p",
+  "Say the secret word please",
+  "--output-format",
+  "json"
+ ],
+ "env": {
+  "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+  "OTEL_METRICS_EXPORTER": "otlp",
+  "OTEL_LOGS_EXPORTER": "otlp",
+  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+  "OTEL_EXPORTER_OTLP_ENDPOINT": "$MOCK_URL",
+  "OTEL_EXPORTER_OTLP_HEADERS": "x-probe=abc,x-two=2"
+ },
+ "stdin": null,
+ "files": {},
+ "model": {
+  "turns": [
+   {
+    "text": "ZEBRA_RESPONSE_42"
+   }
+  ]
+ },
+ "timeout_ms": 60000,
+ "compare": {
+  "exit": 0,
+  "requests": [
+   {
+    "pathStartsWith": "/v1/messages",
+    "count": 1,
+    "method": "POST"
+   },
+   {
+    "pathStartsWith": "/v1/logs",
+    "method": "POST",
+    "count": 1,
+    "headers": {
+     "content-type": "application/x-protobuf",
+     "x-probe": "abc",
+     "x-two": "2"
+    },
+    "bodyIncludes": [
+     "claude_code.user_prompt",
+     "claude_code.api_request",
+     "claude_code.assistant_response"
+    ]
+   },
+   {
+    "pathStartsWith": "/v1/metrics",
+    "method": "POST",
+    "count": 1,
+    "headers": {
+     "content-type": "application/x-protobuf",
+     "x-probe": "abc"
+    },
+    "bodyIncludes": [
+     "claude_code.session.count",
+     "claude_code.token.usage",
+     "claude_code.cost.usage",
+     "claude_code.active_time.total"
+    ]
+   }
+  ]
+ },
+ "skip": []
+}

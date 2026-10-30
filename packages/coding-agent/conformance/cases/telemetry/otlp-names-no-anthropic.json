@@ -1,0 +1,59 @@
+{
+ "id": "telemetry/otlp-names-no-anthropic",
+ "area": "telemetry",
+ "argv": [
+  "-p",
+  "Say the secret word please",
+  "--output-format",
+  "json"
+ ],
+ "env": {
+  "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+  "OTEL_METRICS_EXPORTER": "otlp",
+  "OTEL_LOGS_EXPORTER": "otlp",
+  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+  "OTEL_EXPORTER_OTLP_ENDPOINT": "$MOCK_URL"
+ },
+ "stdin": null,
+ "files": {},
+ "model": {
+  "turns": [
+   {
+    "text": "ZEBRA_RESPONSE_42"
+   }
+  ]
+ },
+ "timeout_ms": 60000,
+ "compare": {
+  "exit": 0,
+  "requests": [
+   {
+    "pathStartsWith": "/v1/messages",
+    "count": 1,
+    "method": "POST"
+   },
+   {
+    "pathStartsWith": "/v1/logs",
+    "method": "POST",
+    "count": 1,
+    "bodyExcludes": [
+     "anthropic",
+     "Anthropic"
+    ]
+   },
+   {
+    "pathStartsWith": "/v1/metrics",
+    "method": "POST",
+    "count": 1,
+    "bodyExcludes": [
+     "anthropic",
+     "Anthropic"
+    ]
+   }
+  ]
+ },
+ "skip": [],
+ "not_applicable": {
+  "claude": "Claude Code names its instrumentation scope com.anthropic.claude_code. pi-cc drops the Anthropic-identifying name on purpose."
+ }
+}

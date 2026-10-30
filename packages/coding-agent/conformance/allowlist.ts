@@ -84,6 +84,7 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"project",
 		// the model id PR #5's `--model` case writes
 		"claude-haiku-4-5",
+		"acceptEdits",
 	],
 };
 
@@ -125,6 +126,25 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
 	// P39: the administrator switch `update` honors, which only a pi-cc-only case sets.
 	"DISABLE_UPDATES",
+	// P38 (`cc/p38-telemetry`): the operator-owned OpenTelemetry export, aimed at the mock with `$MOCK_URL`.
+	"CLAUDE_CODE_ENABLE_TELEMETRY",
+	"OTEL_METRICS_EXPORTER",
+	"OTEL_LOGS_EXPORTER",
+	"OTEL_EXPORTER_OTLP_PROTOCOL",
+	"OTEL_EXPORTER_OTLP_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_HEADERS",
+	"OTEL_METRIC_EXPORT_INTERVAL",
+	"OTEL_LOGS_EXPORT_INTERVAL",
+	"OTEL_RESOURCE_ATTRIBUTES",
+	"OTEL_LOG_USER_PROMPTS",
+	"OTEL_LOG_ASSISTANT_RESPONSES",
+	"OTEL_LOG_TOOL_CONTENT",
+	"OTEL_LOG_TOOL_DETAILS",
+	"OTEL_METRICS_INCLUDE_SESSION_ID",
+	"OTEL_METRICS_INCLUDE_VERSION",
+	"OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
+	"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+	"DO_NOT_TRACK",
 ];
 
 /**

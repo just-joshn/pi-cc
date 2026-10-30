@@ -2,8 +2,8 @@ import type * as ChildProcess from "node:child_process";
 import type * as Fs from "node:fs";
 import type * as Os from "node:os";
 import { arch, platform } from "os";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureTool, getLatestVersion, type ToolStatus } from "../src/utils/tools-manager.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ensureTool, getLatestVersion, type ToolStatus, toolUnavailableMessage } from "../src/utils/tools-manager.ts";
 
 const originalOffline = process.env.PI_OFFLINE;
 
@@ -112,6 +112,8 @@ describe("getLatestVersion", () => {
 });
 
 describe("ensureTool", () => {
+	beforeEach(() => vi.stubEnv("PI_CC_ALLOW_UPSTREAM_NETWORK", "1"));
+
 	it("reports status through a callback without writing to the console", async () => {
 		process.env.PI_OFFLINE = "1";
 		const statuses: ToolStatus[] = [];
@@ -171,5 +173,30 @@ describe("ensureTool", () => {
 				message: `ripgrep not found. Automatic download is not supported on linux/${architecture}. Install ripgrep with your system package manager.`,
 			},
 		]);
+	});
+});
+
+describe("toolUnavailableMessage", () => {
+	it("says downloads are off and how to install or opt in by default", () => {
+		delete process.env.PI_OFFLINE;
+		vi.stubEnv("PI_CC_ALLOW_UPSTREAM_NETWORK", "");
+		const message = toolUnavailableMessage("rg");
+		expect(message).toContain("downloads are off");
+		expect(message).toContain("package manager");
+		expect(message).toContain("PI_CC_ALLOW_UPSTREAM_NETWORK=1");
+		expect(message).not.toContain("could not be downloaded");
+		vi.unstubAllEnvs();
+	});
+
+	it("keeps the download failure wording once downloads are allowed", () => {
+		delete process.env.PI_OFFLINE;
+		vi.stubEnv("PI_CC_ALLOW_UPSTREAM_NETWORK", "1");
+		expect(toolUnavailableMessage("fd")).toBe("fd is not available and could not be downloaded");
+		vi.unstubAllEnvs();
+	});
+
+	it("names offline mode when it is on", () => {
+		process.env.PI_OFFLINE = "1";
+		expect(toolUnavailableMessage("fd")).toContain("offline mode");
 	});
 });
