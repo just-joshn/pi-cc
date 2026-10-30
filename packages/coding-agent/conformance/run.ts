@@ -24,6 +24,7 @@ import {
 } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
+import { takeBaseline } from "./processes.ts";
 import type { ReapResult } from "./reap.ts";
 import { killGroup, reap, WARNINGS } from "./reap.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
@@ -226,7 +227,7 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		mkdirSync(cwd, { recursive: true });
 		const workspaceBefore = hashTree(roots.workspace);
 		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
-		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase));
+		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase), await takeBaseline());
 		const violations: Violation[] = [...workspaceAfter.violations];
 		if (result.reaped.survived) violations.push({ kind: "survivor", path: null });
 		if (!result.reaped.converged && !violations.some((violation) => violation.kind === "unreaped")) {

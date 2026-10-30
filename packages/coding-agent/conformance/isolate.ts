@@ -29,6 +29,7 @@ import {
 import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Baseline } from "./processes.ts";
 import { reap } from "./reap.ts";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
@@ -280,7 +281,11 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
  * A workspace the side removed is scanned in place and reports as unreadable. Any other failed move
  * reports `workspace-unmovable` and reads nothing, because the tree is still inside the side's reach.
  */
-export async function scanWorkspace(roots: Roots, wanted: readonly string[]): Promise<TreeScan> {
+export async function scanWorkspace(
+	roots: Roots,
+	wanted: readonly string[],
+	_baseline: Baseline | null,
+): Promise<TreeScan> {
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
 	try {
 		renameSync(roots.workspace, snapshot);

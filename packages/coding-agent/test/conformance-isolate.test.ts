@@ -9,6 +9,7 @@ import {
 	mkdtempSync,
 	openSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	symlinkSync,
@@ -27,10 +28,13 @@ import {
 	scanWorkspace,
 	seedFiles,
 } from "../conformance/isolate.ts";
+import { takeBaseline } from "../conformance/processes.ts";
 
 const darwin = process.platform === "darwin";
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 const tempDirs: string[] = [];
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const strayPids: number[] = [];
 
@@ -359,7 +363,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 	test("a workspace that moves is scanned where it landed", async () => {
 		const roots = sideRoots();
 
-		const scan = await scanWorkspace(roots, ["result.txt"]);
+		const scan = await scanWorkspace(roots, ["result.txt"], await takeBaseline());
 
 		expect(scan.violations).toEqual([]);
 		expect(scan.text.get("result.txt")).toBe("result\n");
@@ -372,7 +376,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		mkdirSync(join(taken, "occupied"), { recursive: true });
 		tempDirs.push(taken);
 
-		const scan = await scanWorkspace(roots, ["result.txt"]);
+		const scan = await scanWorkspace(roots, ["result.txt"], await takeBaseline());
 
 		expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
 		expect(scan.entries.size).toBe(0);
@@ -383,7 +387,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		const roots = sideRoots();
 		chmodSync(roots.root, 0o000);
 		try {
-			const scan = await scanWorkspace(roots, []);
+			const scan = await scanWorkspace(roots, [], await takeBaseline());
 
 			expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
 		} finally {
@@ -395,7 +399,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		const roots = sideRoots();
 		rmSync(roots.workspace, { recursive: true });
 
-		const scan = await scanWorkspace(roots, []);
+		const scan = await scanWorkspace(roots, [], await takeBaseline());
 
 		expect(scan.violations).toEqual([{ kind: "unreadable", path: null }]);
 	});
@@ -412,39 +416,16 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		return holder.pid ?? 0;
 	}
 
-	const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 	test("a process still holding a workspace file after the move is killed and reported", async () => {
 		const roots = sideRoots();
 		const pid = startFileHolder(roots, "exec /bin/sleep 60");
 		await delay(300);
 		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).toBe(0);
 
-		const scan = await scanWorkspace(roots, []);
+		const scan = await scanWorkspace(roots, [], await takeBaseline());
 
 		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
 		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).not.toBe(0);
-	});
-
-	test("a chain that left the root and holds nothing there is reported, not passed in silence", async () => {
-		const roots = sideRoots();
-		const hop = join(roots.tmp, "hop.sh");
-		const log = join(roots.tmp, "gen.log");
-		writeFileSync(
-			hop,
-			`cd /\n[ -e ${join(roots.root, "stop")} ] && exit 0\necho x >> ${log}\n/bin/sh ${hop} &\nexit 0\n`,
-		);
-		const chain = spawn("/bin/sh", [hop], { cwd: roots.workspace, detached: true, stdio: "ignore" });
-		chain.unref();
-		strayPids.push(chain.pid ?? 0);
-		await delay(200);
-
-		const scan = await scanWorkspace(roots, []);
-		const afterScan = readFileSync(log, "utf8").length;
-		await delay(300);
-
-		const stillRunning = readFileSync(log, "utf8").length !== afterScan;
-		expect(stillRunning && !scan.violations.some((violation) => violation.kind === "unreaped")).toBe(false);
 	});
 
 	test("the tree is hashed only after nothing holds it, so a writer cannot change the digest", async () => {
@@ -452,13 +433,82 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		startFileHolder(roots, "while :; do echo x >&3; /bin/sleep 0.02; done");
 		await delay(300);
 
-		const scan = await scanWorkspace(roots, ["held.log"]);
+		const scan = await scanWorkspace(roots, ["held.log"], await takeBaseline());
 		const hashed = scan.entries.get("held.log");
 		await delay(300);
 
 		const snapshot = join(dirname(roots.root), "snapshot-claude", "held.log");
 		expect(createHash("sha256").update(readFileSync(snapshot)).digest("hex")).toBe(hashed);
 	});
+});
+
+describe.skipIf(!darwin)("a chain that no scan of the root can see", () => {
+	const stopDirs: string[] = [];
+
+	afterEach(async () => {
+		for (const dir of stopDirs.splice(0)) {
+			writeFileSync(join(dir, "stop"), "");
+			for (let attempt = 0; attempt < 50; attempt++) {
+				spawnSync("/usr/bin/pkill", ["-9", "-f", dir]);
+				if (spawnSync("/usr/bin/pgrep", ["-f", dir]).status !== 0) break;
+				await delay(100);
+			}
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	/**
+	 * Every generation changes to `/`, holds no file, lives outside the side's root and logs outside it, then
+	 * starts the next generation and exits. It stops when the absolute `stop` marker appears.
+	 */
+	function startHoppingChain(roots: ReturnType<typeof createRoots>, options: { pause: number; regroup: boolean }) {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-hop-")));
+		stopDirs.push(dir);
+		const hop = join(dir, "hop.sh");
+		writeFileSync(
+			hop,
+			[
+				"cd /",
+				`[ -e ${join(dir, "stop")} ] && exit 0`,
+				`echo x >> ${join(dir, "gen.log")}`,
+				`/bin/sleep ${options.pause}`,
+				options.regroup ? "set -m" : "",
+				`/bin/sh ${hop} &`,
+				"exit 0",
+				"",
+			].join("\n"),
+		);
+		const first = spawn("/bin/sh", [hop], { cwd: roots.workspace, detached: true, stdio: "ignore" });
+		first.unref();
+		return { dir, log: join(dir, "gen.log") };
+	}
+
+	function sideRoots() {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-hop-side-")), "hop", "claude");
+		tempDirs.push(roots.root);
+		writeFileSync(join(roots.workspace, "result.txt"), "result\n");
+		return roots;
+	}
+
+	test.each([
+		["a fast chain", { pause: 0, regroup: false }],
+		["a chain slower than any quiet window the harness could afford", { pause: 0.4, regroup: false }],
+		["a chain that also moves into a new process group in every generation", { pause: 0, regroup: true }],
+	])("%s is reported as unreaped and never passes in silence", async (_name, options) => {
+		const roots = sideRoots();
+		const baseline = await takeBaseline();
+		const chain = startHoppingChain(roots, options);
+		await delay(600);
+		expect(readFileSync(chain.log, "utf8").length).toBeGreaterThan(0);
+
+		const scan = await scanWorkspace(roots, ["result.txt"], baseline);
+		const afterScan = readFileSync(chain.log, "utf8").length;
+		await delay(1000);
+
+		const stillRunning = readFileSync(chain.log, "utf8").length > afterScan;
+		expect(stillRunning).toBe(true);
+		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
+	}, 60_000);
 });
 
 // /etc/claude-code does not exist here, so the rule form is proven on /private/etc/hosts, which does.
