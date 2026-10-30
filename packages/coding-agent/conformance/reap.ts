@@ -1,4 +1,5 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 
 export interface ReapResult {
 	/** Something this run started was still working inside the side's root after the side exited. */
@@ -20,6 +21,10 @@ const REAP_DEADLINE_MS = 10_000;
 const LSOF = "/usr/sbin/lsof";
 const PS = "/bin/ps";
 const MAX_LISTING_BYTES = 256 * 1024 * 1024;
+const SAMPLES_PER_SWEEP = 6;
+const SAMPLE_STAGGER_MS = 30;
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Kills every process group with a member working inside the side's root, or inside `moved` once the
@@ -50,7 +55,7 @@ export async function reap(root: string, options: ReapOptions = {}): Promise<Rea
 	const deadline = Date.now() + (options.deadlineMs ?? REAP_DEADLINE_MS);
 	while (clean < CLEAN_SWEEPS || [...killed].some(groupExists)) {
 		if (Date.now() >= deadline) return { survived, converged: false };
-		const found = observedGroups(held, tools);
+		const found = await observedGroups(held, tools);
 		if (found === null) return { survived, converged: false };
 		if (found.size === 0) {
 			clean += 1;
@@ -84,34 +89,52 @@ function groupExists(pgid: number): boolean {
 	}
 }
 
-/** The groups with a member working inside `held` right now, or null when a scan could not run. */
-function observedGroups(held: string[], tools: { lsof: string; ps: string }): Set<number> | null {
-	const files = spawnSync(tools.lsof, ["-w", "-n", "-P", "-Fpgfn"], {
-		encoding: "utf8",
-		timeout: 15_000,
-		maxBuffer: MAX_LISTING_BYTES,
-	});
-	if (files.error !== undefined || files.status !== 0 || !files.stdout) {
-		warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories and open files");
-		return null;
-	}
+/**
+ * The groups with a member working inside `held` in any of several overlapping scans, or null when a
+ * scan could not run. One `lsof` run takes longer than a fast re-forking generation lives, and it sees
+ * only the generations alive when it starts, so a single run often sees none. Runs started a few
+ * milliseconds apart see different generations, and a sweep counts as clean only if all of them are.
+ */
+async function observedGroups(held: string[], tools: { lsof: string; ps: string }): Promise<Set<number> | null> {
 	const own = ownGroup(tools.ps);
 	if (own === null) {
 		warnOnce("survivor sweep unavailable: /bin/ps could not report the harness's own process group");
 		return null;
 	}
+	const listings = await Promise.all(
+		Array.from({ length: SAMPLES_PER_SWEEP }, async (_, index) => {
+			await delay(index * SAMPLE_STAGGER_MS);
+			return listOpenFiles(tools.lsof);
+		}),
+	);
 	const groups = new Set<number>();
-	let group: number | null = null;
-	for (const line of files.stdout.split("\n")) {
-		if (line.startsWith("g")) {
-			group = Number.parseInt(line.slice(1), 10);
-		} else if (line.startsWith("n") && group !== null && held.some((path) => isInside(path, line.slice(1)))) {
-			groups.add(group);
+	for (const listing of listings) {
+		if (listing === null) return null;
+		let group: number | null = null;
+		for (const line of listing.split("\n")) {
+			if (line.startsWith("g")) {
+				group = Number.parseInt(line.slice(1), 10);
+			} else if (line.startsWith("n") && group !== null && held.some((path) => isInside(path, line.slice(1)))) {
+				groups.add(group);
+			}
 		}
 	}
 	// Group 0 and 1 are the kernel and launchd, and the harness's own group is never the side's.
 	for (const found of groups) if (found <= 1 || found === own) groups.delete(found);
 	return groups;
+}
+
+async function listOpenFiles(lsof: string): Promise<string | null> {
+	try {
+		const listed = await execFileAsync(lsof, ["-w", "-n", "-P", "-Fpgfn"], {
+			encoding: "utf8",
+			timeout: 15_000,
+			maxBuffer: MAX_LISTING_BYTES,
+		});
+		if (listed.stdout.length > 0) return listed.stdout;
+	} catch {}
+	warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories and open files");
+	return null;
 }
 
 function ownGroup(ps: string): number | null {

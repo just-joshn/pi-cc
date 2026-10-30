@@ -269,6 +269,14 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
  * there can still write through that handle, so the move is followed by a reap over the side root and
  * the moved tree. A process found there is killed and reported as `unreaped`: the reap that ran before
  * the move should have found it, so the digest is only taken once a scan finds the tree free of processes.
+ *
+ * No scan can see a process that holds nothing under those paths, or a chain that is always one
+ * generation ahead of it. Whatever such a process does to anything the harness reads is a write under
+ * the root or the moved tree, because nothing else the harness reads can change: the mock's log is under
+ * `out/`, which the profile denies the side. So the tree must also stay unchanged for a short window
+ * after the reap, and a change is reported as `unreaped` too. A writer slower than the window is not
+ * caught, and one that never writes there cannot change what a case compares.
+ *
  * A workspace the side removed is scanned in place and reports as unreadable. Any other failed move
  * reports `workspace-unmovable` and reads nothing, because the tree is still inside the side's reach.
  */
@@ -283,9 +291,46 @@ export async function scanWorkspace(roots: Roots, wanted: readonly string[]): Pr
 		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
 	}
 	const reaped = await reap(roots.root, { moved: snapshot });
+	const quiet = await staysUnchanged([roots.root, snapshot], roots.out);
 	const scan = hashTree(snapshot, wanted);
-	if (reaped.survived || !reaped.converged) scan.violations.push({ kind: "unreaped", path: null });
+	if (reaped.survived || !reaped.converged || !quiet) scan.violations.push({ kind: "unreaped", path: null });
 	return scan;
+}
+
+const QUIET_WINDOW_MS = 150;
+
+/** Whether no file under `paths` (except under `skip`) changes size, mtime or name over a short window. */
+async function staysUnchanged(paths: readonly string[], skip: string): Promise<boolean> {
+	const before = treeSignature(paths, skip);
+	await new Promise((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
+	return treeSignature(paths, skip) === before;
+}
+
+/** Every entry's name, size and mtime, read without following a link or opening a file. */
+function treeSignature(paths: readonly string[], skip: string): string {
+	const lines: string[] = [];
+	const pending = [...paths];
+	while (pending.length > 0) {
+		const directory = pending.pop();
+		if (directory === undefined || directory === skip) continue;
+		const stat = lstatOrNull(directory);
+		if (stat === null) continue;
+		lines.push(`${directory}:${stat.mtimeMs}`);
+		let names: string[];
+		try {
+			names = readdirSync(directory).sort();
+		} catch {
+			continue;
+		}
+		for (const name of names) {
+			const path = join(directory, name);
+			const entry = lstatOrNull(path);
+			if (entry === null) continue;
+			if (entry.isDirectory()) pending.push(path);
+			else lines.push(`${path}:${entry.size}:${entry.mtimeMs}`);
+		}
+	}
+	return lines.sort().join("\n");
 }
 
 /** The paths that exist, where a dangling link counts as present: the side tried to create something. */
