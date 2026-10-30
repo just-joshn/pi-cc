@@ -32,6 +32,8 @@ paths:
   canonically because `/etc` links to `/private/etc` and Seatbelt matches resolved paths), then re-allow the side's executable and its own root;
 - deny writes broadly, then allow the side root and the `/dev` character devices;
 - deny all network, then re-open loopback only for the case that needs the mock model server.
+- report every allowed `process-exec*` (`(with report)`), which the dossier profiles do not do: the kernel then
+  logs each exec by pid, and `../execlog.ts` reads that log to tell the side's descendants from other processes.
 
 The harness adds the node runtime roots the fork needs, which the dossier profiles had no reason to
 carry, and it pins paths through `realpathSync` because Seatbelt matches resolved paths.

@@ -10,6 +10,8 @@ import type { ConformanceCase, FileSpec, StdinSpec } from "./case.ts";
 import { loadCases } from "./case.ts";
 import type { Diff, Observation } from "./compare.ts";
 import { compare } from "./compare.ts";
+import type { ExecLog } from "./execlog.ts";
+import { startExecLog } from "./execlog.ts";
 import type { Roots, Side, SideName, Violation } from "./isolate.ts";
 import {
 	baseEnv,
@@ -24,7 +26,7 @@ import {
 } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
-import { takeBaseline } from "./processes.ts";
+import { beginWatch } from "./processes.ts";
 import type { ReapResult } from "./reap.ts";
 import { killGroup, reap, WARNINGS } from "./reap.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
@@ -107,6 +109,12 @@ async function main(): Promise<number> {
 		console.log("Every verdict is unverified. Pass --allow-claude-version-drift to compare anyway.\n");
 	}
 
+	const execLog = await startExecLog();
+	if (execLog === null) {
+		console.warn(
+			"exec log unavailable: /usr/bin/log did not deliver sandbox exec reports, so every case reports unreaped",
+		);
+	}
 	const results = new Map<string, CaseRun>();
 	const allowDrift = values["allow-claude-version-drift"] === true;
 	const compareClaude = claude !== null && claude.sha256 === CLAUDE_SHA256 && (claude.frozen || allowDrift);
@@ -117,7 +125,7 @@ async function main(): Promise<number> {
 		const skip = skipReason(testCase, claude === null);
 		const run: CaseRun =
 			skip === null
-				? await runCase(testCase, sides, runRoot)
+				? await runCase(testCase, sides, runRoot, execLog)
 				: { id: testCase.id, area: testCase.area, verdict: "SKIP", runs: [], skip };
 		results.set(testCase.id, run);
 		return run;
@@ -183,7 +191,12 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 	};
 }
 
-async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string): Promise<CaseRun> {
+async function runCase(
+	testCase: ConformanceCase,
+	sides: Side[],
+	runRoot: string,
+	execLog: ExecLog | null,
+): Promise<CaseRun> {
 	const runs: SideRun[] = [];
 	// The verdict is only PASS when every applicable side ran, so a claude side that was not selected reports here.
 	if (!sides.some((side) => side.name === "claude")) {
@@ -195,7 +208,7 @@ async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string
 			runs.push({ side: side.name, ran: false, diffs: [], stderr: "", notApplicable: reason });
 			continue;
 		}
-		runs.push(await runSide(testCase, side, runRoot));
+		runs.push(await runSide(testCase, side, runRoot, execLog));
 	}
 	const failed = runs.some((run) => run.diffs.length > 0);
 	const applicable = runs.filter((run) => run.notApplicable === null);
@@ -204,7 +217,12 @@ async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string
 	return { id: testCase.id, area: testCase.area, verdict, runs, skip: null };
 }
 
-async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): Promise<SideRun> {
+async function runSide(
+	testCase: ConformanceCase,
+	side: Side,
+	runRoot: string,
+	execLog: ExecLog | null,
+): Promise<SideRun> {
 	const roots = createRoots(runRoot, testCase.id, side.name);
 	const mock =
 		testCase.model === null ? null : await startMockServer({ turns: testCase.model.turns, outDir: roots.out });
@@ -226,9 +244,9 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		const cwd = testCase.cwd === undefined ? roots.workspace : join(roots.workspace, testCase.cwd);
 		mkdirSync(cwd, { recursive: true });
 		const workspaceBefore = hashTree(roots.workspace);
-		const baseline = await takeBaseline();
+		const watch = await beginWatch(execLog);
 		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
-		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase), baseline);
+		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase), watch);
 		const violations: Violation[] = [...workspaceAfter.violations];
 		if (result.reaped.survived) violations.push({ kind: "survivor", path: null });
 		if (!result.reaped.converged && !violations.some((violation) => violation.kind === "unreaped")) {

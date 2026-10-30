@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { type ExecLog, startExecLog } from "../conformance/execlog.ts";
 import {
 	baseEnv,
 	createRoots,
@@ -28,7 +29,7 @@ import {
 	scanWorkspace,
 	seedFiles,
 } from "../conformance/isolate.ts";
-import { takeBaseline } from "../conformance/processes.ts";
+import { beginWatch } from "../conformance/processes.ts";
 import {
 	acquireProcessTable,
 	PROCESS_TABLE_LOCK_TIMEOUT_MS,
@@ -37,7 +38,16 @@ import {
 
 const darwin = process.platform === "darwin";
 beforeAll(acquireProcessTable, PROCESS_TABLE_LOCK_TIMEOUT_MS);
-afterAll(releaseProcessTable);
+let execLog: ExecLog | null = null;
+
+beforeAll(async () => {
+	execLog = await startExecLog();
+}, 30_000);
+
+afterAll(() => {
+	execLog?.close();
+	releaseProcessTable();
+});
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 const tempDirs: string[] = [];
@@ -371,7 +381,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 	test("a workspace that moves is scanned where it landed", async () => {
 		const roots = sideRoots();
 
-		const scan = await scanWorkspace(roots, ["result.txt"], await takeBaseline());
+		const scan = await scanWorkspace(roots, ["result.txt"], await beginWatch(execLog));
 
 		expect(scan.violations).toEqual([]);
 		expect(scan.text.get("result.txt")).toBe("result\n");
@@ -384,7 +394,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		mkdirSync(join(taken, "occupied"), { recursive: true });
 		tempDirs.push(taken);
 
-		const scan = await scanWorkspace(roots, ["result.txt"], await takeBaseline());
+		const scan = await scanWorkspace(roots, ["result.txt"], await beginWatch(execLog));
 
 		expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
 		expect(scan.entries.size).toBe(0);
@@ -395,7 +405,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		const roots = sideRoots();
 		chmodSync(roots.root, 0o000);
 		try {
-			const scan = await scanWorkspace(roots, [], await takeBaseline());
+			const scan = await scanWorkspace(roots, [], await beginWatch(execLog));
 
 			expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
 		} finally {
@@ -407,7 +417,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		const roots = sideRoots();
 		rmSync(roots.workspace, { recursive: true });
 
-		const scan = await scanWorkspace(roots, [], await takeBaseline());
+		const scan = await scanWorkspace(roots, [], await beginWatch(execLog));
 
 		expect(scan.violations).toEqual([{ kind: "unreadable", path: null }]);
 	});
@@ -430,7 +440,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		await delay(300);
 		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).toBe(0);
 
-		const scan = await scanWorkspace(roots, [], await takeBaseline());
+		const scan = await scanWorkspace(roots, [], await beginWatch(execLog));
 
 		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
 		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).not.toBe(0);
@@ -441,7 +451,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		startFileHolder(roots, "while :; do echo x >&3; /bin/sleep 0.02; done");
 		await delay(300);
 
-		const scan = await scanWorkspace(roots, ["held.log"], await takeBaseline());
+		const scan = await scanWorkspace(roots, ["held.log"], await beginWatch(execLog));
 		const hashed = scan.entries.get("held.log");
 		await delay(300);
 
@@ -466,19 +476,21 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 	});
 
 	/**
-	 * Every generation changes to `/`, holds no file, lives outside the side's root and logs outside it, then
+	 * Started under the side's own sandbox profile. Every generation changes to `/`, holds no file open, runs
+	 * a script that lives outside the side's root, and appends to a log inside it with a short-lived open, then
 	 * starts the next generation and exits. It stops when the absolute `stop` marker appears.
 	 */
 	function startHoppingChain(roots: ReturnType<typeof createRoots>, options: { pause: number; regroup: boolean }) {
 		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-hop-")));
 		stopDirs.push(dir);
 		const hop = join(dir, "hop.sh");
+		const log = join(roots.tmp, "gen.log");
 		writeFileSync(
 			hop,
 			[
 				"cd /",
 				`[ -e ${join(dir, "stop")} ] && exit 0`,
-				`echo x >> ${join(dir, "gen.log")}`,
+				`echo x >> ${log}`,
 				`/bin/sleep ${options.pause}`,
 				options.regroup ? "set -m" : "",
 				`/bin/sh ${hop} &`,
@@ -486,9 +498,16 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 				"",
 			].join("\n"),
 		);
-		const first = spawn("/bin/sh", [hop], { cwd: roots.workspace, detached: true, stdio: "ignore" });
+		const profilePath = join(roots.out, "profile.sb");
+		writeFileSync(profilePath, renderProfile({ roots, executableRoots: ["/bin/sh", "/bin/sleep"], port: null }));
+		const first = spawn(SANDBOX_EXEC, ["-f", profilePath, "/bin/sh", hop], {
+			cwd: roots.workspace,
+			env: baseEnv(roots, null),
+			detached: true,
+			stdio: "ignore",
+		});
 		first.unref();
-		return { dir, log: join(dir, "gen.log") };
+		return { dir, log };
 	}
 
 	function sideRoots() {
@@ -500,14 +519,14 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 
 	test("a process some other actor started during the run, outside any sandbox, is not the side's and is not reported", async () => {
 		const roots = sideRoots();
-		const baseline = await takeBaseline();
+		const watch = await beginWatch(execLog);
 		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-foreign-")));
 		stopDirs.push(dir);
 		spawnSync("/bin/sh", ["-c", `/bin/sleep 45 >/dev/null 2>&1 & echo $! > ${join(dir, "pid")}`]);
 		const foreign = Number.parseInt(readFileSync(join(dir, "pid"), "utf8"), 10);
 
 		try {
-			const scan = await scanWorkspace(roots, ["result.txt"], baseline);
+			const scan = await scanWorkspace(roots, ["result.txt"], watch);
 
 			expect(scan.violations).toEqual([]);
 		} finally {
@@ -515,7 +534,7 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 		}
 	});
 
-	test("a baseline that could not be taken is reported, because nothing can be told apart from it", async () => {
+	test("a watch that could not be started is reported, because nothing can be told apart from it", async () => {
 		const roots = sideRoots();
 
 		const scan = await scanWorkspace(roots, ["result.txt"], null);
@@ -528,12 +547,12 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 		["prints nothing a process table has", "#!/bin/sh\necho nonsense\n"],
 	])("a process listing that %s after the run is reported", async (_name, script) => {
 		const roots = sideRoots();
-		const baseline = await takeBaseline();
+		const watch = await beginWatch(execLog);
 		const ps = join(mkdtempSync(join(tmpdir(), "pi-cc-fake-ps-")), "ps");
 		tempDirs.push(dirname(ps));
 		writeFileSync(ps, script, { mode: 0o755 });
 
-		const scan = await scanWorkspace(roots, ["result.txt"], baseline, { ps });
+		const scan = await scanWorkspace(roots, ["result.txt"], watch, { ps });
 
 		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
 	});
@@ -546,12 +565,12 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 		"%s is reported as unreaped and never passes in silence",
 		async (_name, options) => {
 			const roots = sideRoots();
-			const baseline = await takeBaseline();
+			const watch = await beginWatch(execLog);
 			const chain = startHoppingChain(roots, options);
 			await delay(600);
 			expect(readFileSync(chain.log, "utf8").length).toBeGreaterThan(0);
 
-			const scan = await scanWorkspace(roots, ["result.txt"], baseline);
+			const scan = await scanWorkspace(roots, ["result.txt"], watch);
 			const afterScan = readFileSync(chain.log, "utf8").length;
 			await delay(1000);
 

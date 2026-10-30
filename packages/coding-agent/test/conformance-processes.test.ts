@@ -3,12 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { type ExecLog, startExecLog } from "../conformance/execlog.ts";
 import {
-	findUnaccounted,
+	beginWatch,
+	findLeftBehind,
 	identity,
 	type ProcessRow,
 	parseProcessTable,
-	takeBaseline,
 	unaccounted,
 } from "../conformance/processes.ts";
 import {
@@ -18,17 +19,24 @@ import {
 } from "./conformance-process-table.ts";
 
 const darwin = process.platform === "darwin";
-beforeAll(acquireProcessTable, PROCESS_TABLE_LOCK_TIMEOUT_MS);
-afterAll(releaseProcessTable);
-
 const HARNESS = { pid: 100, uid: 501 };
+
+let execLog: ExecLog | null = null;
+
+beforeAll(acquireProcessTable, PROCESS_TABLE_LOCK_TIMEOUT_MS);
+beforeAll(async () => {
+	execLog = await startExecLog();
+}, 30_000);
+afterAll(() => {
+	execLog?.close();
+	releaseProcessTable();
+});
 
 function row(overrides: Partial<ProcessRow> & { pid: number }): ProcessRow {
 	return {
 		ppid: 1,
 		uid: 501,
 		zombie: false,
-		unresolved: false,
 		start: "Thu Oct 29 23:00:00 2026",
 		command: "/bin/sh",
 		...overrides,
@@ -54,21 +62,21 @@ describe("reading a process table", () => {
 				start: "Fri Oct 2 09:00:01 2026",
 				command: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 			}),
-			row({ pid: 413, ppid: 412, zombie: true, unresolved: true, command: "(sh)" }),
+			row({ pid: 413, ppid: 412, zombie: true, command: "(sh)" }),
 		]);
 	});
 });
 
-describe("which new processes are left behind", () => {
+describe("which new processes the table offers as candidates", () => {
 	const before = row({ pid: 200, ppid: 1, command: "/usr/bin/ssh-agent" });
 	const baseline = new Set([identity(before), identity(row({ pid: HARNESS.pid, command: "node" }))]);
 	const left = (...rows: ProcessRow[]) => unaccounted([before, ...rows], baseline, HARNESS).map((found) => found.pid);
 
-	test("a new orphan running a program a side could choose is left behind", () => {
+	test("a new orphan is a candidate", () => {
 		expect(left(row({ pid: 300 }))).toEqual([300]);
 	});
 
-	test("a new descendant of such an orphan is left behind too", () => {
+	test("a new descendant of such an orphan is a candidate too", () => {
 		expect(left(row({ pid: 300 }), row({ pid: 301, ppid: 300, command: "/bin/sleep" }))).toEqual([300, 301]);
 	});
 
@@ -80,38 +88,42 @@ describe("which new processes are left behind", () => {
 		["a child of the harness, like the ps it runs", row({ pid: 301, ppid: HARNESS.pid })],
 		["a grandchild of the harness", row({ pid: 302, ppid: 301 })],
 		["a child of a process that predates the side", row({ pid: 303, ppid: 200 })],
-		["a service launchd started from a system directory", row({ pid: 304, command: "/usr/libexec/cfprefsd" })],
 		["a process of another user", row({ pid: 305, uid: 0 })],
-		["a zombie", row({ pid: 306, zombie: true, unresolved: true, command: "(sh)" })],
-	])("%s is not left behind", (_name, other) => {
+		["a zombie", row({ pid: 306, zombie: true, command: "(sh)" })],
+	])("%s is not a candidate", (_name, other) => {
 		expect(left(row({ pid: 301, ppid: HARNESS.pid }), other)).not.toContain(other.pid);
 	});
 });
 
-describe.skipIf(!darwin)("the process table of this machine", () => {
+describe.skipIf(!darwin)("the process table and the exec log of this machine", () => {
 	const dirs: string[] = [];
 	const pids: number[] = [];
+	const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+	const REPORTING =
+		"(version 1)(deny default)(allow process-exec* (with report))(allow process-fork)(allow sysctl-read)(allow file-read*)";
 
 	afterEach(() => {
 		for (const pid of pids.splice(0)) spawnSync("/bin/kill", ["-9", String(pid)]);
 		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
-	/** Starts a sleep whose parent exits at once, so it is an orphan with a program path, as a side's survivor is. */
-	function startOrphan(): void {
+	/** An orphan with a program path: its parent exits at once, as a side's survivor's does. */
+	function startOrphan(options: { sandboxed: boolean }): number {
 		const dir = mkdtempSync(join(tmpdir(), "pi-cc-orphan-"));
 		dirs.push(dir);
-		spawnSync("/bin/sh", ["-c", `/bin/sleep 45 >/dev/null 2>&1 & echo $! > ${join(dir, "pid")}`]);
-		pids.push(Number.parseInt(readFileSync(join(dir, "pid"), "utf8"), 10));
+		const sleep = options.sandboxed ? `${SANDBOX_EXEC} -p '${REPORTING}' /bin/sleep 45` : "/bin/sleep 45";
+		spawnSync("/bin/sh", ["-c", `${sleep} >/dev/null 2>&1 & echo $! > ${join(dir, "pid")}`]);
+		const pid = Number.parseInt(readFileSync(join(dir, "pid"), "utf8"), 10);
+		pids.push(pid);
+		return pid;
 	}
 
-	test("an orphan started after the baseline is found, and one started before it is not", async () => {
-		startOrphan();
-		const baseline = await takeBaseline();
-		startOrphan();
-		const [older, newer] = pids;
+	test("a sandboxed orphan started after the watch is found, and one started before it is not", async () => {
+		const older = startOrphan({ sandboxed: true });
+		const watch = await beginWatch(execLog);
+		const newer = startOrphan({ sandboxed: true });
 
-		const found = await findUnaccounted(baseline);
+		const found = await findLeftBehind(watch);
 
 		expect(found.complete).toBe(true);
 		const foundPids = found.processes.map((process) => process.pid);
@@ -119,25 +131,36 @@ describe.skipIf(!darwin)("the process table of this machine", () => {
 		expect(foundPids).not.toContain(older);
 	});
 
-	test("a child of this process, which is the harness, is not found", async () => {
-		const baseline = await takeBaseline();
-		const child = spawn("/bin/sleep", ["45"], { stdio: "ignore" });
+	test("a new orphan that never ran under a sandbox profile is not found", async () => {
+		const watch = await beginWatch(execLog);
+		const foreign = startOrphan({ sandboxed: false });
+
+		const found = await findLeftBehind(watch);
+
+		expect(found.complete).toBe(true);
+		expect(found.processes.map((process) => process.pid)).not.toContain(foreign);
+	});
+
+	test("a sandboxed child of this process, which is the harness, is not found", async () => {
+		const watch = await beginWatch(execLog);
+		const child = spawn(SANDBOX_EXEC, ["-p", REPORTING, "/bin/sleep", "45"], { stdio: "ignore" });
 		pids.push(child.pid ?? 0);
 
-		const found = await findUnaccounted(baseline);
+		const found = await findLeftBehind(watch);
 
 		expect(found.complete).toBe(true);
 		expect(found.processes.map((process) => process.pid)).not.toContain(child.pid);
 	});
 
-	test("a listing that cannot be read is incomplete, not empty", async () => {
+	test("a listing that cannot be read, or a missing watch, is incomplete and not empty", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "pi-cc-fake-ps-"));
 		dirs.push(dir);
 		const ps = join(dir, "ps");
 		writeFileSync(ps, "#!/bin/sh\nexit 2\n", { mode: 0o755 });
 
-		expect(await takeBaseline(ps)).toBeNull();
-		expect(await findUnaccounted(await takeBaseline(), ps)).toEqual({ complete: false, processes: [] });
-		expect(await findUnaccounted(null)).toEqual({ complete: false, processes: [] });
+		expect(await beginWatch(execLog, ps)).toBeNull();
+		expect(await findLeftBehind(await beginWatch(execLog), ps)).toEqual({ complete: false, processes: [] });
+		expect(await findLeftBehind(null)).toEqual({ complete: false, processes: [] });
+		expect(await beginWatch(null)).toBeNull();
 	});
 });

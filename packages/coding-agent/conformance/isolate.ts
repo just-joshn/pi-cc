@@ -29,8 +29,8 @@ import {
 import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Baseline, ProcessRow, Unaccounted } from "./processes.ts";
-import { findUnaccounted } from "./processes.ts";
+import type { LeftBehind, ProcessRow, RunWatch } from "./processes.ts";
+import { findLeftBehind } from "./processes.ts";
 import { reap } from "./reap.ts";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
@@ -220,7 +220,7 @@ export interface TreeScan {
 	/** The text of the wanted paths, read in the same pass that hashed them. */
 	text: Map<string, string>;
 	violations: Violation[];
-	/** New processes the process table showed after the run, reported and never signalled. */
+	/** New processes of the side's sandbox that the process table showed after the run, reported and never signalled. */
 	leftBehind: ProcessRow[];
 }
 
@@ -276,10 +276,11 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
  *
  * No scan of what a process holds can see one that holds nothing under those paths, or a chain that is
  * always one generation ahead of it. So the reap is followed by a comparison of the process table with
- * `baseline`, taken before the side started: a new live process that is not provably someone else's is
- * reported as `unreaped` and left running, because the harness cannot prove it is the side's. A missing
- * baseline or an unreadable listing is reported the same way, so nothing passes on a check that did not run.
- * Quiet time after the reap would prove nothing about such a process and is not used.
+ * what `watch` recorded before the side started, narrowed to processes the side's sandbox ran (see
+ * `processes.ts`): a new live one is reported as `unreaped` and left running, because the harness cannot
+ * prove it is the side's and not a concurrent run's. A missing watch, an unreadable listing, or an exec
+ * log that cannot be confirmed current is reported the same way, so nothing passes on a check that did
+ * not run. Quiet time after the reap would prove nothing about such a process and is not used.
  *
  * A workspace the side removed is scanned in place and reports as unreadable. Any other failed move
  * reports `workspace-unmovable` and reads nothing, because the tree is still inside the side's reach.
@@ -287,7 +288,7 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
 export async function scanWorkspace(
 	roots: Roots,
 	wanted: readonly string[],
-	baseline: Baseline | null,
+	watch: RunWatch | null,
 	options: { ps?: string } = {},
 ): Promise<TreeScan> {
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
@@ -304,15 +305,15 @@ export async function scanWorkspace(
 				leftBehind: [],
 			};
 		}
-		const left = await findUnaccounted(baseline, options.ps);
+		const left = await findLeftBehind(watch, options.ps);
 		return withProcessFindings(hashTree(roots.workspace, wanted), left, false);
 	}
 	const reaped = await reap(roots.root, { moved: snapshot, cleanSweeps: 1 });
-	const left = await findUnaccounted(baseline, options.ps);
+	const left = await findLeftBehind(watch, options.ps);
 	return withProcessFindings(hashTree(snapshot, wanted), left, reaped.survived || !reaped.converged);
 }
 
-function withProcessFindings(scan: TreeScan, left: Unaccounted, reapFailed: boolean): TreeScan {
+function withProcessFindings(scan: TreeScan, left: LeftBehind, reapFailed: boolean): TreeScan {
 	scan.leftBehind = left.processes;
 	if (reapFailed || !left.complete || left.processes.length > 0)
 		scan.violations.push({ kind: "unreaped", path: null });
@@ -474,7 +475,7 @@ export function renderProfile(options: ProfileOptions): string {
 	const rules = [
 		"(version 1)",
 		"(deny default)",
-		"(allow process-exec*)",
+		"(allow process-exec* (with report))",
 		"(allow process-fork)",
 		"(allow signal (target self))",
 		"(allow signal (target children))",
