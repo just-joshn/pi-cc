@@ -67,6 +67,7 @@ function checkShell(call: PermissionCall, ctx: PermissionContext): CheckResult {
 		acceptEdits: ctx.mode === "acceptEdits",
 		directories: ctx.directories,
 		cwd: ctx.cwd,
+		home: ctx.home,
 	});
 	const verdict = shellVerdict(call, result);
 	if (ctx.mode !== "plan" || !ctx.autoModeDuringPlan || verdict.behavior === "deny") return verdict;
