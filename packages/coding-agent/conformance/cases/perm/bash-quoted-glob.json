@@ -1,0 +1,86 @@
+{
+	"id": "perm/bash-quoted-glob",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n",
+		"sub/inner.txt": "INNER\n",
+		"sub/deep/x.txt": "X\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "ls \"*.txt\""
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cat \"*.txt\""
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name \"*.txt\""
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name '*.txt'"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 5,
+				"bodyMatch": [
+					"ls: \\*\\.txt: No such file or directory",
+					"cat: \\*\\.txt: No such file or directory"
+				],
+				"bodyNotMatch": [
+					"requires approval"
+				]
+			}
+		],
+		"files": []
+	},
+	"skip": []
+}
