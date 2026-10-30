@@ -20,7 +20,6 @@ import {
 	parseAnthropicModelEnv,
 	stripContextMarkers,
 } from "./anthropic-model-env.ts";
-import { unknownModelMaxTokens } from "./cc-policy.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
@@ -316,7 +315,6 @@ function buildFallbackModel(providerModels: [Model<Api>, ...Model<Api>[]], model
 		...baseModel,
 		id: modelId,
 		name: modelId,
-		...(baseModel.provider === "anthropic" ? { maxTokens: unknownModelMaxTokens(baseModel) } : {}),
 	};
 }
 

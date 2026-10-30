@@ -14,6 +14,13 @@ export const CC_PARITY_VERSION = "2.1.312";
 /** `max_tokens` Claude Code sends for a model id its catalog does not carry. */
 export const CC_UNKNOWN_MODEL_MAX_TOKENS = 32_000;
 
+/** Output caps Claude Code sends where they differ from the pi catalog, keyed like the effort table. */
+const MAX_TOKENS: Readonly<Record<string, number>> = {
+	"claude-opus-5-5": 128_000,
+	"claude-fable-5-1": 64_000,
+	"claude-haiku-4-5": 32_000,
+};
+
 export const CC_AUTOCOMPACT_MIN_TOKENS = 100_000;
 export const CC_AUTOCOMPACT_MAX_TOKENS = 1_000_000;
 
@@ -154,18 +161,26 @@ export function billingHeader(entrypoint: CcEntrypoint): string {
  * The wire profile of one request, or undefined when the model is not on the Anthropic transport.
  * `known` is whether the model catalog carries the id.
  */
-export function ccWireProfile(policy: CcPolicy, model: Model<Api>, known: boolean): CcWireProfile | undefined {
+export function ccWireProfile(
+	policy: CcPolicy,
+	model: Model<Api>,
+	known: boolean,
+	/** `CLAUDE_CODE_MAX_OUTPUT_TOKENS` already set the model's cap, which then stands. */
+	capOverridden: boolean,
+): CcWireProfile | undefined {
 	if (model.api !== "anthropic-messages") return undefined;
 	return {
+		maxTokens: capOverridden ? undefined : ccMaxTokens(model, known),
 		billingHeader: billingHeader(policy.entrypoint),
 		effort: resolveEffort(policy.effort, model as Model<"anthropic-messages">, known),
 		extraBetas: [...CC_AUTO_BETAS, ...policy.extraBetas],
 	};
 }
 
-/** The output cap of a model Claude Code does not know: its own limit instead of the base model's. */
-export function unknownModelMaxTokens(model: Model<Api>): number {
-	return Math.min(model.maxTokens, CC_UNKNOWN_MODEL_MAX_TOKENS);
+/** The `max_tokens` Claude Code sends: its own cap for a listed model, 32000 for an unknown id, else the catalog's. */
+function ccMaxTokens(model: Model<Api>, known: boolean): number | undefined {
+	if (!known) return Math.min(model.maxTokens, CC_UNKNOWN_MODEL_MAX_TOKENS);
+	return MAX_TOKENS[catalogKey(model.id)];
 }
 
 /** The compaction window of a model under the policy. */

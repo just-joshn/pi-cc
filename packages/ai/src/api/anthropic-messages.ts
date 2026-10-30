@@ -946,6 +946,7 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	if (!options?.reasoning) {
 		return stream(model, context, {
 			...base,
+			...(base.ccWire?.maxTokens === undefined ? {} : { maxTokens: base.ccWire.maxTokens }),
 			thinkingEnabled: false,
 		} satisfies AnthropicOptions);
 	}
@@ -958,7 +959,22 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 			...base,
 			thinkingEnabled: true,
 			effort: base.ccWire?.effort ?? effort,
-			...(base.ccWire ? { thinkingDisplay: "omitted" } : {}),
+			...(base.ccWire ? { thinkingDisplay: "omitted", maxTokens: base.ccWire.maxTokens ?? base.maxTokens } : {}),
+		} satisfies AnthropicOptions);
+	}
+
+	if (base.ccWire) {
+		const maxTokens = clampMaxTokensToContext(
+			model,
+			context,
+			base.ccWire.maxTokens ?? base.maxTokens ?? model.maxTokens,
+		);
+		return stream(model, context, {
+			...base,
+			maxTokens,
+			thinkingEnabled: true,
+			thinkingBudgetTokens: maxTokens - 1,
+			thinkingDisplay: "omitted",
 		} satisfies AnthropicOptions);
 	}
 

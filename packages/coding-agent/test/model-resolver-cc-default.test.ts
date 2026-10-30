@@ -64,14 +64,10 @@ describe("default Anthropic model", () => {
 		expect(result.model?.id).toBe("claude-opus-5-5");
 	});
 
-	test("a model id outside the catalog is sent as written with Claude Code's 32000 output cap", () => {
+	test("a model id outside the catalog is sent as written", () => {
 		const model = anthropicCcModel(runtime(), "claude-probe-alias-x", {});
 
+		expect(model?.provider).toBe("anthropic");
 		expect(model?.id).toBe("claude-probe-alias-x");
-		expect(model?.maxTokens).toBe(32_000);
-	});
-
-	test("a model id in the catalog keeps its own output cap", () => {
-		expect(anthropicCcModel(runtime(), "claude-opus-5-5", {})?.maxTokens).toBe(opus55.maxTokens);
 	});
 });

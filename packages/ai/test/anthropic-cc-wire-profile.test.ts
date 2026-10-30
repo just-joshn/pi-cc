@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type AnthropicOptions, stream } from "../src/api/anthropic-messages.ts";
+import { type AnthropicOptions, stream, streamSimple } from "../src/api/anthropic-messages.ts";
 import { normalizeContext } from "../src/compat.ts";
 import type { CcWireProfile, Context, Model, SystemMessage } from "../src/types.ts";
 
@@ -132,5 +132,42 @@ describe("Claude Code wire profile", () => {
 
 		expect(payload.system?.[2].text).toBe("WORKING\n\nMACHINE CONTEXT");
 		expect(payload.messages.map((message) => message.role)).toEqual(["user"]);
+	});
+
+	describe("through streamSimple", () => {
+		async function captureSimple(
+			target: Model<"anthropic-messages">,
+			profile: CcWireProfile,
+		): Promise<Captured & { max_tokens: number }> {
+			let payload: (Captured & { max_tokens: number }) | undefined;
+			await streamSimple(target, normalizeContext({ messages: [head, firstUser] }), {
+				apiKey: "test-key",
+				reasoning: "medium",
+				ccWire: profile,
+				onPayload: (value) => {
+					payload = value as Captured & { max_tokens: number };
+					throw new Error("payload captured");
+				},
+			}).result();
+			if (!payload) throw new Error("Expected payload capture");
+			return payload;
+		}
+
+		it("sends the profile's effort and output cap on an adaptive model", async () => {
+			const payload = await captureSimple(model, { ...ccWire, effort: "xhigh", maxTokens: 64000 });
+
+			expect(payload.output_config).toEqual({ effort: "xhigh" });
+			expect(payload.max_tokens).toBe(64000);
+			expect(payload.thinking?.display).toBe("omitted");
+		});
+
+		it("gives a model without adaptive thinking a budget of one token under the cap and no effort", async () => {
+			const legacy: Model<"anthropic-messages"> = { ...model, compat: {}, maxTokens: 64000 };
+			const payload = await captureSimple(legacy, { ...ccWire, maxTokens: 32000 });
+
+			expect(payload.max_tokens).toBe(32000);
+			expect(payload.thinking).toEqual({ type: "enabled", budget_tokens: 31999, display: "omitted" });
+			expect(payload.output_config).toBeUndefined();
+		});
 	});
 });

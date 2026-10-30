@@ -457,7 +457,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				const sessionRequest = options?.sessionId === sessionManager.getSessionId();
 				const ccWire =
 					ccPolicy && sessionRequest
-						? ccWireProfile(ccPolicy, model, modelRuntime.getModel(model.provider, model.id) !== undefined)
+						? ccWireProfile(
+								ccPolicy,
+								model,
+								modelRuntime.getModel(model.provider, model.id) !== undefined,
+								maxOutputTokens !== undefined,
+							)
 						: undefined;
 				const requestOptions = { ...buildRequestOptions(options), ...(ccWire ? { ccWire } : {}) };
 				// Compaction and summaries use their own routing ids; only session requests

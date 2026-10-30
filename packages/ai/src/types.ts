@@ -232,6 +232,8 @@ export interface CcWireProfile {
 	effort?: "low" | "medium" | "high" | "xhigh" | "max";
 	/** Beta names added to the automatic list. */
 	extraBetas: readonly string[];
+	/** Output cap of the request, replacing the model's own. */
+	maxTokens?: number;
 }
 
 export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {

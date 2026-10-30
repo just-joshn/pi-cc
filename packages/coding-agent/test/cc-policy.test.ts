@@ -10,7 +10,6 @@ import {
 	parseAutocompact,
 	parseFallbackModels,
 	resolveEffort,
-	unknownModelMaxTokens,
 } from "../src/core/cc-policy.ts";
 
 const model = (id: string) => getModel("anthropic", id as never) as Model<"anthropic-messages">;
@@ -50,12 +49,25 @@ describe("effort resolution", () => {
 });
 
 describe("maximum output tokens", () => {
+	const profile = (id: string, known: boolean, capOverridden = false) =>
+		ccWireProfile(buildCcPolicy(noFlags), { ...model("claude-opus-5-5"), id }, known, capOverridden)?.maxTokens;
+
 	test("an unknown id caps at 32000", () => {
-		expect(unknownModelMaxTokens(model("claude-opus-5-5"))).toBe(32_000);
+		expect(profile("claude-probe-alias-x", false)).toBe(32_000);
 	});
 
-	test("a base model with a lower cap keeps it", () => {
-		expect(unknownModelMaxTokens({ ...model("claude-opus-5-5"), maxTokens: 8192 })).toBe(8192);
+	test("a listed model sends Claude Code's own cap", () => {
+		expect(profile("claude-opus-5-5", true)).toBe(128_000);
+		expect(profile("claude-fable-5-1", true)).toBe(64_000);
+		expect(profile("claude-haiku-4-5", true)).toBe(32_000);
+	});
+
+	test("an unlisted catalog model keeps its catalog cap", () => {
+		expect(profile("claude-sonnet-4-5", true)).toBeUndefined();
+	});
+
+	test("CLAUDE_CODE_MAX_OUTPUT_TOKENS leaves the cap alone", () => {
+		expect(profile("claude-probe-alias-x", false, true)).toBeUndefined();
 	});
 });
 
@@ -106,7 +118,7 @@ describe("wire profile", () => {
 
 	test("carries the automatic betas first and --betas after them", () => {
 		const policy = buildCcPolicy({ ...noFlags, flags: { betas: ["probe-beta"] } });
-		const profile = ccWireProfile(policy, model("claude-opus-5-5"), true);
+		const profile = ccWireProfile(policy, model("claude-opus-5-5"), true, false);
 
 		expect(profile?.extraBetas).toEqual([...CC_AUTO_BETAS, "probe-beta"]);
 		expect(profile?.effort).toBe("medium");
@@ -115,7 +127,7 @@ describe("wire profile", () => {
 	test("is absent for a model off the Anthropic transport", () => {
 		const other = getModel("openai", "gpt-4.1")!;
 
-		expect(ccWireProfile(buildCcPolicy(noFlags), other, true)).toBeUndefined();
+		expect(ccWireProfile(buildCcPolicy(noFlags), other, true, false)).toBeUndefined();
 	});
 });
 
