@@ -11,12 +11,19 @@ import { allowNetwork } from "./test-network-env.ts";
 
 const originalSkipVersionCheck = process.env.PI_SKIP_VERSION_CHECK;
 
+const FEED = "https://releases.example.test/latest";
+
 beforeEach(() => {
 	allowNetwork();
+	vi.stubEnv("PI_CC_UPDATE_FEED_URL", FEED);
+	vi.stubEnv("DISABLE_UPDATES", undefined);
+	vi.stubEnv("DISABLE_AUTOUPDATER", undefined);
+	vi.stubEnv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", undefined);
 });
 
 afterEach(() => {
 	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
 	if (originalSkipVersionCheck === undefined) {
 		delete process.env.PI_SKIP_VERSION_CHECK;
 	} else {
@@ -42,13 +49,13 @@ describe("version checks", () => {
 		await expect(checkForNewPiVersion("1.2.2")).resolves.toEqual({ version: "1.2.3" });
 	});
 
-	it("uses the pi.dev version check api with a pi user agent", async () => {
+	it("reads the configured feed with a pi user agent", async () => {
 		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
+		await expect(getLatestPiVersion("1.2.3", FEED)).resolves.toBe("1.2.4");
 		expect(fetchMock).toHaveBeenCalledWith(
-			"https://pi.dev/api/latest-version",
+			FEED,
 			expect.objectContaining({
 				headers: expect.objectContaining({
 					"User-Agent": expect.stringMatching(/^pi\/1\.2\.3 /),
@@ -66,7 +73,7 @@ describe("version checks", () => {
 			.mockResolvedValueOnce(Response.json({ version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiRelease("1.2.3", { retry: true })).resolves.toEqual({ version: "1.2.4" });
+		await expect(getLatestPiRelease("1.2.3", FEED, { retry: true })).resolves.toEqual({ version: "1.2.4" });
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 
@@ -98,7 +105,7 @@ describe("version checks", () => {
 		);
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({
+		await expect(getLatestPiRelease("1.2.3", FEED)).resolves.toEqual({
 			packageName: "@new-scope/pi",
 			version: "1.2.4",
 		});
@@ -108,7 +115,7 @@ describe("version checks", () => {
 		const fetchMock = vi.fn(async () => Response.json({ note: " **Read this** ", version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({ note: "**Read this**", version: "1.2.4" });
+		await expect(getLatestPiRelease("1.2.3", FEED)).resolves.toEqual({ note: "**Read this**", version: "1.2.4" });
 	});
 
 	it("skips automatic api calls when version checks are disabled", async () => {
@@ -125,7 +132,30 @@ describe("version checks", () => {
 		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
+		await expect(getLatestPiVersion("1.2.3", FEED)).resolves.toBe("1.2.4");
 		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("never fetches without a feed", async () => {
+		vi.stubEnv("PI_CC_UPDATE_FEED_URL", undefined);
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(checkForNewPiVersion("1.2.2")).resolves.toBeUndefined();
+		await expect(getLatestPiRelease("1.2.2", undefined)).resolves.toBeUndefined();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["DISABLE_AUTOUPDATER", "1"],
+		["DISABLE_UPDATES", "1"],
+		["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"],
+	])("skips the startup check when %s is set", async (name, value) => {
+		vi.stubEnv(name, value);
+		const fetchMock = vi.fn(async () => Response.json({ version: "9.9.9" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(checkForNewPiVersion("1.2.2")).resolves.toBeUndefined();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

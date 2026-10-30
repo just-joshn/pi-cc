@@ -14,6 +14,7 @@ import chalk from "chalk";
 import lockfile from "proper-lockfile";
 import { selectConfig } from "./cli/config-selector.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
+import { readUpdateVersionBand, selfUpdateSource, UPDATE_FEED_ENV, updateTargetRefusal } from "./cli/update-gates.ts";
 import {
 	APP_NAME,
 	CONFIG_DIR_NAME,
@@ -49,7 +50,6 @@ export type PackageCommand = "install" | "remove" | "update" | "list";
 
 type UpdateTarget = { type: "all" } | { type: "self" } | { type: "extensions"; source?: string } | { type: "models" };
 
-const DEFAULT_INSTALLER_API_BASE = "https://pi.dev/api/installer/releases";
 const MANAGED_INSTALL_MARKER = "managed-install.json";
 const MANAGED_RELEASE_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -212,10 +212,11 @@ async function runManagedSelfUpdate(managedRoot: string, version: string): Promi
 	let stageDir: string | undefined;
 	try {
 		cleanupManagedStaging(managedRoot);
-		const installerApiBase = (process.env.PI_INSTALLER_API_BASE?.trim() || DEFAULT_INSTALLER_API_BASE).replace(
-			/\/+$/,
-			"",
-		);
+		const configuredInstallerBase = process.env.PI_INSTALLER_API_BASE?.trim();
+		if (!configuredInstallerBase) {
+			throw new Error("A managed installation updates from PI_INSTALLER_API_BASE, which is not set.");
+		}
+		const installerApiBase = configuredInstallerBase.replace(/\/+$/, "");
 		const releaseUrl = `${installerApiBase}/${encodeURIComponent(version)}`;
 		const stagingRoot = join(managedRoot, "staging");
 		const releasesRoot = join(managedRoot, "releases");
@@ -365,7 +366,7 @@ Examples:
 			console.log(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage("update")}
 
-Update pi, installed packages, or model catalogs.
+Update pi, installed packages, or model catalogs. Alias: upgrade.
 
 Options:
   --self                  Update pi only (default when no target is given)
@@ -405,6 +406,8 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 	let command: PackageCommand | undefined;
 	if (rawCommand === "uninstall") {
 		command = "remove";
+	} else if (rawCommand === "upgrade") {
+		command = "update";
 	} else if (rawCommand === "install" || rawCommand === "remove" || rawCommand === "update" || rawCommand === "list") {
 		command = rawCommand;
 	}
@@ -687,10 +690,10 @@ interface SelfUpdatePlan {
 	note?: string;
 }
 
-async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
+async function getSelfUpdatePlan(feedUrl: string, force: boolean): Promise<SelfUpdatePlan> {
 	let latestRelease: Awaited<ReturnType<typeof getLatestPiRelease>>;
 	try {
-		latestRelease = await getLatestPiRelease(VERSION, { retry: true });
+		latestRelease = await getLatestPiRelease(VERSION, feedUrl, { retry: true });
 	} catch (error: unknown) {
 		throw new Error(`Could not determine latest ${APP_NAME} version: ${formatVersionCheckError(error)}`, {
 			cause: error,
@@ -1060,6 +1063,23 @@ export async function handlePackageCommand(
 					}
 				}
 				if (updateTargetIncludesSelf(target)) {
+					const source = selfUpdateSource(process.env);
+					if (source.kind === "admin-disabled") {
+						console.log(
+							"Updates are disabled by your administrator. Contact your IT team to get the latest version.",
+						);
+						return true;
+					}
+					if (source.kind === "no-feed") {
+						console.log(`Current version: ${VERSION}`);
+						console.error(
+							chalk.red(
+								`Cannot update ${APP_NAME}: it has no release feed. Rebuild it from its source checkout, or set ${UPDATE_FEED_ENV} to your own release feed.`,
+							),
+						);
+						process.exitCode = 1;
+						return true;
+					}
 					const managedInstallRoot = getActiveManagedInstallRoot();
 					if (managedInstallRoot && options.force) {
 						console.error(
@@ -1070,8 +1090,20 @@ export async function handlePackageCommand(
 						process.exitCode = 1;
 						return true;
 					}
-					const selfUpdatePlan = await getSelfUpdatePlan(options.force);
+					const selfUpdatePlan = await getSelfUpdatePlan(source.url, options.force);
 					if (!selfUpdatePlan.shouldRun) {
+						return true;
+					}
+					const targetRefusal = updateTargetRefusal(
+						selfUpdatePlan.version,
+						readUpdateVersionBand(process.cwd(), process.env, VERSION),
+					);
+					if (targetRefusal !== undefined) {
+						console.log(
+							chalk.yellow(
+								`The release feed is at ${selfUpdatePlan.version}, which is ${targetRefusal}. Staying on ${VERSION}.`,
+							),
+						);
 						return true;
 					}
 					if (managedInstallRoot) {
@@ -1129,19 +1161,6 @@ export async function handlePackageCommand(
 						return true;
 					}
 					console.log(chalk.green(`Updated ${APP_NAME} from ${VERSION} to ${selfUpdatePlan.version}`));
-					// The pi.dev installer migrates global npm installs to a managed install
-					// that pins all dependencies. It does not migrate pnpm, yarn, or bun installs.
-					if (installMethod === "npm") {
-						const installerCommand =
-							process.platform === "win32"
-								? 'powershell -c "irm https://pi.dev/install.ps1 | iex"'
-								: "curl -fsSL https://pi.dev/install.sh | sh";
-						console.log();
-						console.log(chalk.yellow(`This npm installation of ${APP_NAME} does not pin its dependencies.`));
-						console.log(chalk.yellow("Run the installer to migrate to a managed installation that does:"));
-						console.log();
-						console.log(`  ${chalk.bold(installerCommand)}`);
-					}
 				}
 				return true;
 			}
