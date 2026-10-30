@@ -265,8 +265,9 @@ export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
 	try {
 		renameSync(roots.workspace, snapshot);
-	} catch (error) {
-		if (errorCode(error) === "ENOENT") return hashTree(roots.workspace, wanted);
+	} catch {
+		// The rename can also fail with ENOENT for a missing destination parent, so the source decides.
+		if (lstatOrNull(roots.workspace) === null) return hashTree(roots.workspace, wanted);
 		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
 	}
 	return hashTree(snapshot, wanted);
