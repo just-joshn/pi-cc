@@ -127,12 +127,10 @@ describe("resolveCcTuiSettings", () => {
 				.screenReader,
 		).toBe(true);
 		expect(
-			resolveCcTuiSettings(off, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "0" } })
-				.screenReader,
+			resolveCcTuiSettings(off, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "0" } }).screenReader,
 		).toBe(true);
 		expect(
-			resolveCcTuiSettings(on, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "" } })
-				.screenReader,
+			resolveCcTuiSettings(on, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "" } }).screenReader,
 		).toBe(false);
 		expect(
 			resolveCcTuiSettings(off, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "true" } })

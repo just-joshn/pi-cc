@@ -2100,7 +2100,7 @@ export class Editor implements Component, Focusable {
 			const key = parseKey(data);
 			// Claude Code hands Enter to the editor before its state machine sees it, with any command pending.
 			if (key === "enter") return false;
-			const routed = this.vimSpecialKey(vim, data, key);
+			const routed = this.vimSpecialKey(vim, data);
 			return routed === undefined ? false : this.applyVimInput(vim, routed);
 		}
 		// A read that carries several characters is typed one at a time.
@@ -2119,7 +2119,7 @@ export class Editor implements Component, Focusable {
 
 	/** Claude Code routes Backspace and Delete into its machine only from idle, a count or an operator; every other
 	 * pending state keeps itself and the editor acts on the key (chunk-hz2c9q6k.js:1637-1654). */
-	private vimSpecialKey(vim: VimRuntime, data: string, key: string | undefined): VimInput | undefined {
+	private vimSpecialKey(vim: VimRuntime, data: string): VimInput | undefined {
 		const kb = getKeybindings();
 		const idle = vim.state.pending === "";
 		const pending = this.pendingKeyClass(vim.state.pending);
