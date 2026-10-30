@@ -51,6 +51,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "./core/agent-session-services.ts";
+import { ccSettingsModelMigration } from "./core/anthropic-model-env.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
@@ -579,7 +580,9 @@ export async function createSessionManager(
 function ccSessionModel(settingsModel: string | undefined): { name: string; source: string } | undefined {
 	const envModel = process.env.ANTHROPIC_MODEL?.trim();
 	if (envModel) return { name: envModel, source: "ANTHROPIC_MODEL" };
-	return settingsModel === undefined ? undefined : { name: settingsModel, source: "Claude Code settings" };
+	const name = settingsModel?.trim();
+	if (!name) return undefined;
+	return { name: ccSettingsModelMigration(name), source: "Claude Code settings" };
 }
 
 function buildSessionOptions(

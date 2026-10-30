@@ -13,7 +13,13 @@ import {
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
-import { ccModelAlias, hasModelEnvironment, isModelAlias, parseAnthropicModelEnv } from "./anthropic-model-env.ts";
+import {
+	ccModelAlias,
+	hasModelEnvironment,
+	isModelAlias,
+	parseAnthropicModelEnv,
+	stripContextMarkers,
+} from "./anthropic-model-env.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
@@ -488,6 +494,14 @@ export function resolveCliModel(options: {
 
 	const aliasApplies = hasModelEnvironment(modelEnvironment) && (provider === undefined || provider === "anthropic");
 
+	// With a base URL and an Anthropic credential the operator runs Claude Code compat: an unprefixed
+	// --model names the Anthropic session model, aliases and unknown ids alike, because Claude Code sends
+	// every such name to its endpoint instead of searching other providers.
+	if (!provider && anthropicGatewayActive(modelRuntime)) {
+		const gatewayModel = anthropicCcModel(modelRuntime, cliModel);
+		if (gatewayModel) return { model: gatewayModel, warning: undefined, error: undefined };
+	}
+
 	const result = resolveModelReference(
 		{
 			// A bare `haiku` and friends are Claude Code aliases once its model variables are in play, and an
@@ -553,7 +567,8 @@ export interface InitialModelResult {
 
 /**
  * The Anthropic model a Claude Code model name selects. An id the catalog does not carry becomes a
- * custom model on the Anthropic provider, because Claude Code sends the name as written.
+ * custom model on the Anthropic provider, because Claude Code sends the name as written; a `[1m]`
+ * context marker is consumed, because Claude Code never sends one.
  */
 export function anthropicCcModel(
 	modelRuntime: ModelRuntime,
@@ -561,11 +576,17 @@ export function anthropicCcModel(
 	env: Record<string, string | undefined> = process.env,
 ): Model<Api> | undefined {
 	if (!modelRuntime.hasConfiguredAuth("anthropic")) return undefined;
-	const modelId = ccModelAlias(name.trim(), parseAnthropicModelEnv(env));
+	const modelId = stripContextMarkers(ccModelAlias(name, parseAnthropicModelEnv(env)));
 	const known = modelRuntime.getModel("anthropic", modelId);
 	if (known) return known;
 	const [first, ...rest] = modelRuntime.getModels("anthropic");
 	return first === undefined ? undefined : buildFallbackModel([first, ...rest], modelId);
+}
+
+/** Whether an unprefixed `--model` routes to the Anthropic provider: a base URL plus its credential. */
+function anthropicGatewayActive(modelRuntime: ModelRuntime): boolean {
+	const baseUrl = process.env.ANTHROPIC_BASE_URL?.trim();
+	return baseUrl !== undefined && baseUrl !== "" && modelRuntime.hasConfiguredAuth("anthropic");
 }
 
 /** The model `ANTHROPIC_MODEL` selects. */

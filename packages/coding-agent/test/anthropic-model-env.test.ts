@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	ccModelAlias,
+	ccSettingsModelMigration,
 	hasModelEnvironment,
 	isModelAlias,
 	parseAnthropicModelEnv,
+	stripContextMarkers,
 } from "../src/core/anthropic-model-env.ts";
 
 describe("parseAnthropicModelEnv", () => {
@@ -19,6 +21,7 @@ describe("parseAnthropicModelEnv", () => {
 		expect(env).toEqual({
 			model: "haiku",
 			family: { opus: "opus-id", sonnet: "sonnet-id", haiku: "haiku-id", fable: "fable-id" },
+			legacyRemapDisabled: false,
 		});
 	});
 
@@ -26,6 +29,7 @@ describe("parseAnthropicModelEnv", () => {
 		expect(parseAnthropicModelEnv({ ANTHROPIC_MODEL: "  haiku  ", ANTHROPIC_DEFAULT_HAIKU_MODEL: "   " })).toEqual({
 			model: "haiku",
 			family: {},
+			legacyRemapDisabled: false,
 		});
 	});
 
@@ -70,6 +74,76 @@ describe("ccModelAlias", () => {
 		expect(ccModelAlias("sonnet", bare)).toBe("claude-sonnet-5-5");
 		expect(ccModelAlias("haiku", bare)).toBe("claude-haiku-5-5");
 		expect(ccModelAlias("fable", bare)).toBe("claude-fable-5-1");
+	});
+
+	it("resolves opusplan to the Sonnet default, which its variable redefines", () => {
+		const bare = parseAnthropicModelEnv({});
+		const pinned = parseAnthropicModelEnv({ ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-4.6" });
+
+		expect(ccModelAlias("opusplan", bare)).toBe("claude-sonnet-5-5");
+		expect(ccModelAlias("opusplan", pinned)).toBe("glm-4.6");
+	});
+
+	it("resolves best to the Fable default, which its variable redefines", () => {
+		const bare = parseAnthropicModelEnv({});
+		const pinned = parseAnthropicModelEnv({ ANTHROPIC_DEFAULT_FABLE_MODEL: "glm-4.6" });
+
+		expect(ccModelAlias("best", bare)).toBe("claude-fable-5-1");
+		expect(ccModelAlias("best", pinned)).toBe("glm-4.6");
+	});
+
+	it("carries a [1m] marker from an alias through to the resolved id", () => {
+		const bare = parseAnthropicModelEnv({});
+
+		expect(ccModelAlias("opus[1m]", bare)).toBe("claude-opus-5-5[1m]");
+		expect(ccModelAlias("OPUS[1M]", bare)).toBe("claude-opus-5-5[1m]");
+		expect(ccModelAlias("opusplan[1m]", bare)).toBe("claude-sonnet-5-5[1m]");
+		expect(ccModelAlias("best[1m]", bare)).toBe("claude-fable-5-1[1m]");
+		// A doubled marker is not an alias form; it collapses like any other name's trailing run.
+		expect(ccModelAlias("opus[1m][1m]", bare)).toBe("opus[1m]");
+	});
+
+	it("collapses a trailing [1m] run on a non-alias name and leaves anything else as written", () => {
+		const bare = parseAnthropicModelEnv({});
+
+		expect(ccModelAlias("claude-sonnet-5-5[1m]", bare)).toBe("claude-sonnet-5-5[1m]");
+		expect(ccModelAlias("pi-unknown[1m]", bare)).toBe("pi-unknown[1m]");
+		expect(ccModelAlias("default", bare)).toBe("default");
+		expect(ccModelAlias("pi-unknown", bare)).toBe("pi-unknown");
+	});
+
+	it("remaps a retired Opus id to the Opus default", () => {
+		const bare = parseAnthropicModelEnv({});
+
+		expect(ccModelAlias("claude-opus-4-0", bare)).toBe("claude-opus-5-5");
+		expect(ccModelAlias("claude-opus-4-1", bare)).toBe("claude-opus-5-5");
+		expect(ccModelAlias("claude-opus-4-1-20250805", bare)).toBe("claude-opus-5-5");
+		expect(ccModelAlias("claude-opus-4-0[1m]", bare)).toBe("claude-opus-5-5[1m]");
+	});
+
+	it("keeps a retired id as written when the legacy remap is disabled", () => {
+		const disabled = parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: "1" });
+
+		expect(ccModelAlias("claude-opus-4-0", disabled)).toBe("claude-opus-4-0");
+		expect(parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: "" }).legacyRemapDisabled).toBe(false);
+	});
+});
+
+describe("ccSettingsModelMigration", () => {
+	it("rewrites exactly sonnet[1m] to the dated Sonnet 4.5 id", () => {
+		expect(ccSettingsModelMigration("sonnet[1m]")).toBe("sonnet-4-5-20250929[1m]");
+		expect(ccSettingsModelMigration("sonnet")).toBe("sonnet");
+		expect(ccSettingsModelMigration("SONNET[1M]")).toBe("SONNET[1M]");
+		expect(ccSettingsModelMigration("sonnet-4-5-20250929[1m]")).toBe("sonnet-4-5-20250929[1m]");
+	});
+});
+
+describe("stripContextMarkers", () => {
+	it("strips every [1m]/[2m] marker wherever it appears", () => {
+		expect(stripContextMarkers("pi-unknown[1m]")).toBe("pi-unknown");
+		expect(stripContextMarkers("claude-sonnet-5-5[1m]")).toBe("claude-sonnet-5-5");
+		expect(stripContextMarkers("weird[1m]id[2m]")).toBe("weirdid");
+		expect(stripContextMarkers("glm-4.6")).toBe("glm-4.6");
 	});
 });
 

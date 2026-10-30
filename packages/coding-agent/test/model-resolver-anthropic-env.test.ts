@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import { findInitialModel, resolveCliModel } from "../src/core/model-resolver.ts";
+import { anthropicCcModel, findInitialModel, resolveCliModel } from "../src/core/model-resolver.ts";
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 
 const haiku = getModel("anthropic", "claude-haiku-4-5")!;
@@ -126,6 +126,52 @@ describe("ANTHROPIC_MODEL in initial model selection", () => {
 
 		expect(result.model?.id).toBe(sonnet.id);
 		vi.unstubAllEnvs();
+	});
+});
+
+describe("context markers and the Anthropic gateway", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test("a known id with a [1m] marker resolves to the catalog model without the marker", () => {
+		expect(anthropicCcModel(anthropicRuntime(), "claude-haiku-4-5[1m]")?.id).toBe(haiku.id);
+	});
+
+	test("an unknown id loses its marker, which Claude Code never sends", () => {
+		const model = anthropicCcModel(anthropicRuntime(), "pi-unknown[1m]");
+
+		expect(model?.provider).toBe("anthropic");
+		expect(model?.id).toBe("pi-unknown");
+	});
+
+	test("an unprefixed --model routes to Anthropic when a base URL and its credential are set", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+
+		const unknown = resolveCliModel({ cliModel: "glm-4.6", modelRuntime: anthropicRuntime() });
+		const alias = resolveCliModel({ cliModel: "opusplan", modelRuntime: anthropicRuntime() });
+
+		expect(unknown.model?.provider).toBe("anthropic");
+		expect(unknown.model?.id).toBe("glm-4.6");
+		expect(alias.model?.id).toBe("claude-sonnet-5-5");
+	});
+
+	test("an explicit provider keeps pi's search under a base URL", () => {
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+
+		const result = resolveCliModel({
+			cliProvider: "vercel-ai-gateway",
+			cliModel: "glm-4.6",
+			modelRuntime: gatewayRuntime(),
+		});
+
+		expect(result.model?.provider).toBe("vercel-ai-gateway");
+	});
+
+	test("without a base URL an unprefixed model keeps pi's search", () => {
+		const result = resolveCliModel({ cliModel: "glm-4.6", modelRuntime: gatewayRuntime() });
+
+		expect(result.model?.provider).toBe("vercel-ai-gateway");
 	});
 });
 
