@@ -146,6 +146,7 @@ import {
 	normalizeBuildSystemPromptOptions,
 } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+import { isCcLegacyMutationModel } from "./tools/cc-model-family.ts";
 import { piToolNames } from "./tools/cc-surface.ts";
 import { createAllToolDefinitions, createReadState, type ReadState } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -364,19 +365,6 @@ interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
 }
-
-const READ_BEFORE_MUTATION_MODELS = new Set([
-	"claude-opus-4-6",
-	"claude-haiku-4-5",
-	"claude-opus-4-5",
-	"claude-opus-4-1",
-	"claude-opus-4-0",
-	"claude-sonnet-4-5",
-	"claude-sonnet-4-0",
-	"claude-3-7-sonnet",
-	"claude-3-5-sonnet",
-	"claude-3-5-haiku",
-]);
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
@@ -3692,7 +3680,7 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
-		const isReadGated = () => READ_BEFORE_MUTATION_MODELS.has(this.model?.id.replace(/\[1m\]$/i, "") ?? "");
+		const isReadGated = () => isCcLegacyMutationModel(this.model?.id ?? "");
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
