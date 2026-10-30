@@ -1,0 +1,194 @@
+{
+	"id": "prompt/fallback-chain",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--fallback-model",
+		"claude-probe-fb-one,claude-probe-fb-two"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/settings.json": "{\"retry\": {\"enabled\": true, \"maxRetries\": 3, \"baseDelayMs\": 20, \"maxAgentDelayMs\": 100}}"
+	},
+	"model": {
+		"turns": [
+			{
+				"error": {
+					"status": 529,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "overloaded_error",
+							"message": "Overloaded"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 529,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "overloaded_error",
+							"message": "Overloaded"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 529,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "overloaded_error",
+							"message": "Overloaded"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 529,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "overloaded_error",
+							"message": "Overloaded"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 529,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "overloaded_error",
+							"message": "Overloaded"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 529,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "overloaded_error",
+							"message": "Overloaded"
+						}
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 170000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"equals": "PROBE_OK"
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 7
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 0,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-opus-5-5$"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 1,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-opus-5-5$"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 2,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-opus-5-5$"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 3,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-probe-fb-one$"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 4,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-probe-fb-one$"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 5,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-probe-fb-one$"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"index": 6,
+				"bodyAt": {
+					"model": {
+						"match": [
+							"^claude-probe-fb-two$"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,117 @@
+{
+	"id": "prompt/snapshot-regenerated-after-compact",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"one\"}}",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"/compact\"}}",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"three\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "A"
+			},
+			{
+				"text": "SUMMARY"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			},
+			{
+				"text": "C"
+			}
+		]
+	},
+	"timeout_ms": 170000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyLength": {
+					"system.2.text": {
+						"around": 5896
+					},
+					"messages.1.content.0.text": {
+						"around": 9215
+					}
+				}
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"pi-cc": "the stream-json host does not dispatch /compact as a command yet, and the mock cannot cross an auto-compaction threshold; the compaction entry's prompt record is covered by unit tests"
+	}
+}
