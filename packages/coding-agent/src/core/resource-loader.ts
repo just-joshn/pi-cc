@@ -712,7 +712,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
 
 		const memorySettings = this.memorySettings();
-		this.memory = discoverMemory(
+		const memory = discoverMemory(
 			resolveMemoryLocation({
 				cwd: this.cwd,
 				home: homedir(),
@@ -725,6 +725,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 				disabled: this.noContextFiles || this.noMemory,
 			}),
 		);
+		// A context file the system prompt already carries is not sent again as memory.
+		const inSystemPrompt = new Set(this.agentsFiles.map((file) => canonicalizePath(file.path)));
+		this.memory = {
+			...memory,
+			files: memory.files.filter((file) => !inSystemPrompt.has(canonicalizePath(file.path))),
+		};
 
 		const systemPromptSource = this.systemPromptSource ?? this.discoverSystemPromptFile();
 		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
