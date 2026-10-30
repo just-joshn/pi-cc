@@ -688,7 +688,6 @@ function appendToResult(message: ToolResultMessage, text: string): ToolResultMes
 	return { ...message, content };
 }
 
-/** A tool result without the nested memory reminders its content carries, and those reminders in order. */
 function takeNestedReminders(message: ToolResultMessage): { result: ToolResultMessage; reminders: string[] } {
 	const reminders: string[] = [];
 	const content = message.content.filter((block) => {
@@ -699,12 +698,6 @@ function takeNestedReminders(message: ToolResultMessage): { result: ToolResultMe
 	return { result: reminders.length === 0 ? message : { ...message, content }, reminders };
 }
 
-/**
- * Where Claude Code puts the nested memory a run of tool results brought in. A model that takes
- * mid-conversation system messages gets one text block per reminder in the user message that
- * carries the results, and the AGENTS.md reminders as one system message. Any other model gets
- * them after the last result's own text.
- */
 function placeNestedReminders(out: Message[], reminders: string[], foldIntoResult: boolean): Message[] {
 	const [result, ...rest] = out as [ToolResultMessage, ...Message[]];
 	if (foldIntoResult) return [appendToResult(result, reminders.join("\n\n")), ...rest];

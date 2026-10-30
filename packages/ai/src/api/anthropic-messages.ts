@@ -1325,7 +1325,6 @@ function convertMessages(
 	// also mirrors where the managed-effort system messages are inserted. As a result an
 	// update placed before a user message in the transcript lands after it on the wire.
 	const pendingSystemMessages: AnthropicMessageParam[] = [];
-	// A user message right after tool results joins their message, as Claude Code sends it.
 	let toolResultMessage: AnthropicMessageParam | undefined;
 	const flushPendingSystemMessages = (): void => {
 		params.push(...pendingSystemMessages);
