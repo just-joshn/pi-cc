@@ -34,6 +34,24 @@ export function nestedReminderPath(text: string): string | undefined {
 	return end === -1 ? undefined : text.slice(NESTED_PREFIX.length, end);
 }
 
+/**
+ * Tool result details that name which content blocks `renderNestedReminder` made. The session
+ * records it when it injects a reminder, so a block is a reminder because of where it came from,
+ * never because its text looks like one.
+ */
+export function withInjectedReminders(details: unknown, indexes: readonly number[]): unknown {
+	if (indexes.length === 0) return details;
+	if (details === undefined || details === null) return { ccMemoryReminders: indexes };
+	if (typeof details !== "object" || Array.isArray(details)) return details;
+	return { ...details, ccMemoryReminders: indexes };
+}
+
+/** The content block indexes of a tool result's injected reminders, as {@link withInjectedReminders} recorded them. */
+export function injectedReminderIndexes(details: unknown): ReadonlySet<number> {
+	const indexes = (details as { ccMemoryReminders?: unknown } | null | undefined)?.ccMemoryReminders;
+	return new Set(Array.isArray(indexes) ? indexes.filter((index) => Number.isInteger(index)) : []);
+}
+
 /** Whether a reminder made by `renderNestedReminder` is for an AGENTS.md file. */
 export function isAgentsReminder(text: string): boolean {
 	const path = nestedReminderPath(text);

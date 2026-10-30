@@ -121,6 +121,7 @@ import {
 	nestedReminderPath,
 	renderMemoryReminder,
 	renderNestedReminder,
+	withInjectedReminders,
 } from "./memory/wrapper.ts";
 import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -731,9 +732,10 @@ export class AgentSession {
 		}
 
 		// The hook result already dropped structured content that replaced content no longer matches.
+		const injected = memoryBlocks.map((_, i) => normalizedContent.length + i);
 		return {
 			content: [...normalizedContent, ...memoryBlocks],
-			details: hookResult?.details,
+			details: withInjectedReminders(hookResult?.details ?? result.details, injected),
 			structuredContent: hookResult ? hookResult.structuredContent : result.structuredContent,
 			isError: hookResult?.isError ?? isError,
 			usage: hookResult?.usage,

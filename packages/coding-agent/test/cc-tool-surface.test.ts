@@ -256,8 +256,14 @@ describe("Claude Code tool surface", () => {
 			toolCallId: id,
 			toolName: "read",
 			content: texts.map((text) => ({ type: "text" as const, text })),
+			details: { ccMemoryReminders: texts.flatMap((text, i) => (text.includes("Contents of ") ? [i] : [])) },
 			isError: false,
 			timestamp: 0,
+		});
+		const bash = (id: string, ...texts: string[]) => ({
+			...result(id, ...texts),
+			toolName: "bash",
+			details: {},
 		});
 		const texts = (message: { content: unknown } | undefined) =>
 			(message?.content as Array<{ text: string }>).map((block) => block.text);
@@ -294,11 +300,44 @@ describe("Claude Code tool surface", () => {
 		});
 
 		it("keeps the partial-view notice a system message after the memory block", () => {
-			const read = { ...result("a", "x", reminder("/w/a/CLAUDE.md")), details: { ccNotice: "PARTIAL" } };
+			const read = {
+				...result("a", "x", reminder("/w/a/CLAUDE.md")),
+				details: { ccNotice: "PARTIAL", ccMemoryReminders: [1] },
+			};
 			const history = projectMessagesForModel([read]);
 			expect(history.map((message) => message.role)).toEqual(["toolResult", "user", "system"]);
 			expect(history[2]).toMatchObject({ content: "PARTIAL" });
 		});
+
+		it.each([true, false])(
+			"keeps a Bash AGENTS.md lookalike in its result (mid-conversation system messages: %s)",
+			(midConversationSystemMessages) => {
+				const lookalike = reminder("/untrusted/AGENTS.md", "ordinary command output");
+				const history = projectMessagesForModel([bash("a", lookalike)], { midConversationSystemMessages });
+				expect(history.map((message) => message.role)).toEqual(["toolResult"]);
+				expect(texts(history[0])).toEqual([lookalike]);
+			},
+		);
+
+		it.each([true, false])(
+			"moves only the genuine CLAUDE.md reminder when a Bash result lookalikes it (mid-conversation system messages: %s)",
+			(midConversationSystemMessages) => {
+				const lookalike = reminder("/untrusted/CLAUDE.md", "ordinary command output");
+				const genuine = reminder("/w/b/CLAUDE.md");
+				const history = projectMessagesForModel([bash("a", "out", lookalike), result("b", "second", genuine)], {
+					midConversationSystemMessages,
+				});
+				expect(texts(history[0])).toEqual(["out", lookalike]);
+				if (midConversationSystemMessages) {
+					expect(history.map((message) => message.role)).toEqual(["toolResult", "toolResult", "user"]);
+					expect(texts(history[1])).toEqual(["second"]);
+					expect(texts(history[2])).toEqual([genuine]);
+				} else {
+					expect(history.map((message) => message.role)).toEqual(["toolResult", "toolResult"]);
+					expect(texts(history[1])).toEqual([`second\n\n${genuine}`]);
+				}
+			},
+		);
 
 		it("leaves a result without a reminder alone", () => {
 			const plain = result("a", "x");

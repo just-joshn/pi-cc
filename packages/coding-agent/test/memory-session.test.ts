@@ -105,6 +105,11 @@ describe("memory in an agent session", () => {
 			[expect.stringContaining("file body")],
 		]);
 
+		const stored = harness.session.messages.filter((message) => message.role === "toolResult");
+		expect(stored.map((message) => (message.details as { ccMemoryReminders?: number[] })?.ccMemoryReminders)).toEqual(
+			[[1], undefined],
+		);
+
 		const storedUser = harness.session.messages.find((message) => message.role === "user");
 		expect(JSON.stringify(storedUser)).not.toContain("PROJECT_MEMORY");
 	});
