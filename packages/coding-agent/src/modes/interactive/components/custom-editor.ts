@@ -34,10 +34,6 @@ export class CustomEditor extends Editor {
 	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: CustomEditorOptions) {
 		super(tui, theme, options);
 		this.keybindings = keybindings;
-		keybindings.onChordStatus((message) => {
-			this.chordStatus = message;
-			this.tui.requestRender();
-		});
 		this.embedWorkingStatus = options?.embedWorkingStatus ?? false;
 	}
 
@@ -105,7 +101,15 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		this.keybindings.dispatchInput(data, "Chat", () => this.handleBoundInput(data));
+		this.keybindings.dispatchInput(
+			data,
+			"Chat",
+			() => this.handleBoundInput(data),
+			(message) => {
+				this.chordStatus = message;
+				this.tui.requestRender();
+			},
+		);
 	}
 
 	private handleBoundInput(data: string): void {

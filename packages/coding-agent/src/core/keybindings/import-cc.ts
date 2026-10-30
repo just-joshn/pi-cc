@@ -112,35 +112,7 @@ export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<s
 }
 
 /**
- * Pi actions that mirror CC's built-in text-input handling: Return submits (`or` calls `onSubmit` directly), Up and
- * Down move the cursor or browse history (`At`/`Ot` in chunk-ybhw3dyg.js), and the editing keys run inside the
- * input. CC's dispatcher lets an unbound key fall through to them, so a CC `null` unbinding never removes these.
- */
-const INPUT_NATIVE_ACTIONS: ReadonlySet<string> = new Set([
-	"tui.input.submit",
-	"tui.input.newLine",
-	"tui.editor.cursorUp",
-	"tui.editor.cursorDown",
-	"tui.editor.cursorLeft",
-	"tui.editor.cursorRight",
-	"tui.editor.cursorWordLeft",
-	"tui.editor.cursorWordRight",
-	"tui.editor.cursorLineStart",
-	"tui.editor.cursorLineEnd",
-	"tui.editor.pageUp",
-	"tui.editor.pageDown",
-	"tui.editor.deleteCharBackward",
-	"tui.editor.deleteCharForward",
-	"tui.editor.deleteWordBackward",
-	"tui.editor.deleteWordForward",
-	"tui.editor.deleteToLineStart",
-	"tui.editor.deleteToLineEnd",
-	"tui.editor.yank",
-	"tui.editor.yankPop",
-]);
-
-/**
- * Groups pi actions the way CC partitions its surfaces: `tui.select.*` models CC's separate Autocomplete context and
+ * Pi actions split the way CC partitions its surfaces: `tui.select.*` models CC's separate Autocomplete context and
  * `tui.altScreen.*` the fullscreen viewport, so CC's Chat and Global overrides never shadow them.
  */
 function actionGroup(action: Keybinding): "select" | "altScreen" | "prompt" {
@@ -150,11 +122,23 @@ function actionGroup(action: Keybinding): "select" | "altScreen" | "prompt" {
 }
 
 /**
- * Applies later declarations to the same sequence. A binding shadows only same-sequence bindings in its action's
- * group, the way CC's dispatched action consumes the key while its Autocomplete context keeps its own, and
- * restating a pi default is a no-op. A `null` action removes bindings the import introduced and the sequence's
- * application-level pi bindings, but leaves pi's base input actions working, matching CC's fall-through on an
- * unbound key (jet returns "unbound" without consuming outside a chord).
+ * CC has two layers on one surface: dispatched app/chat actions, which may decline and fall through, and the
+ * text input's built-in handling, which pi models as `tui.editor.*` and `tui.input.*`. Shadowing stays within a
+ * layer: CC's `app:exit` returns false on a non-empty prompt (chunk-7ss0ryz6.js) and its dispatcher only consumes
+ * when the handler does not (chunk-35yzp1xe.js), so an imported dispatched action must never remove an input action.
+ */
+function actionLayer(action: Keybinding): "input" | "dispatched" {
+	return action.startsWith("tui.editor.") || action.startsWith("tui.input.") ? "input" : "dispatched";
+}
+
+/**
+ * Applies later declarations to the same sequence. Imports are dispatched declarations in CC's sense: a later one
+ * replaces earlier imports and the sequence's dispatched pi bindings, the way CC's dispatcher takes the last
+ * declaration across active contexts. Pi's built-in input actions (`tui.editor.*`/`tui.input.*`) are the layer CC's
+ * dispatched actions decline and fall through to, so an import never removes them; an identical (sequence, action)
+ * restatement collapses to one binding. A `null` action removes bindings the import introduced and the sequence's
+ * dispatched pi bindings, matching CC's fall-through on an unbound key (jet returns "unbound" without consuming
+ * outside a chord).
  */
 export function resolveBindings(
 	base: readonly Binding[],
@@ -177,14 +161,23 @@ export function resolveBindings(
 }
 
 function isShadowed(override: Binding, existing: Binding, fromImport: boolean): boolean {
+	if (fromImport) return true;
 	if (override.action === null) {
-		if (fromImport || existing.action === null) return true;
-		return actionGroup(existing.action) === "prompt" && !INPUT_NATIVE_ACTIONS.has(existing.action);
+		return (
+			existing.action !== null &&
+			actionGroup(existing.action) === "prompt" &&
+			actionLayer(existing.action) === "dispatched"
+		);
 	}
-	return existing.action !== null && actionGroup(existing.action) === actionGroup(override.action);
+	if (existing.action === null) return false;
+	return (
+		existing.action === override.action ||
+		(actionGroup(existing.action) === "prompt" && actionLayer(existing.action) === "dispatched")
+	);
 }
 
-function sequenceIdentity(keys: readonly KeyId[]): string {
+/** Normalizes modifiers and modifier order so two spellings of one sequence compare equal. */
+export function sequenceIdentity(keys: readonly KeyId[]): string {
 	return keys
 		.map((key) =>
 			key

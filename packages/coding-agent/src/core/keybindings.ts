@@ -19,6 +19,7 @@ import {
 	importCcKeybindings,
 	parseKeySequence,
 	resolveBindings,
+	sequenceIdentity,
 } from "./keybindings/import-cc.ts";
 import { userSettingsPath } from "./settings/cc/paths.ts";
 
@@ -355,7 +356,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	private resolvedContexts = new Map<Binding["context"], readonly Binding[]>();
 	private diagnostics: string[] = [];
 	private chordTimer: ReturnType<typeof setTimeout> | undefined;
-	private chordStatusListeners = new Set<(message: string | undefined) => void>();
+	private chordStatusTarget: ((message: string | undefined) => void) | undefined;
 
 	constructor(userBindings: KeybindingsConfig = {}, configPath?: string) {
 		super(KEYBINDINGS, userBindings);
@@ -370,15 +371,6 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		return manager;
 	}
 
-	/** Registers a listener for pending and cancelled chord feedback so each editor renders its own border. */
-	onChordStatus(listener: (message: string | undefined) => void): void {
-		this.chordStatusListeners.add(listener);
-	}
-
-	private setChordStatus(message: string | undefined): void {
-		for (const listener of this.chordStatusListeners) listener(message);
-	}
-
 	/** Load failures become startup warnings; per-entry warnings go to the debug log like CC's validation log. */
 	private recordImport(imported: ImportedBindings, source: string): void {
 		this.diagnostics.push(...imported.diagnostics.map((message) => `${source}: ${message}`));
@@ -386,6 +378,11 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	}
 
 	reload(): void {
+		this.loadConfigFiles();
+		this.warnHiddenSingleKeyActions();
+	}
+
+	private loadConfigFiles(): void {
 		if (!this.configPath) return;
 		this.cancelChord();
 		this.importedBindings = [];
@@ -461,26 +458,65 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		this.cancelChord();
 	}
 
-	cancelChord(): void {
-		this.chordResolver.reset();
-		clearTimeout(this.chordTimer);
-		this.chordTimer = undefined;
-		this.setChordStatus(undefined);
+	/** A chord's first stroke is consumed as pending, so pi actions on the prefix key stop firing; CC hides them the same way. */
+	private warnHiddenSingleKeyActions(): void {
+		if (this.importedBindings.length === 0) return;
+		const singleKeyActions = new Map<string, string[]>();
+		for (const [action, value] of Object.entries(this.getResolvedBindings())) {
+			const keys = typeof value === "string" ? [value] : (value ?? []);
+			for (const key of keys) {
+				const sequence = sequenceIdentity([key]);
+				singleKeyActions.set(sequence, [...(singleKeyActions.get(sequence) ?? []), action]);
+			}
+		}
+		const reported = new Set<string>();
+		for (const binding of this.importedBindings) {
+			if (binding.action === null || binding.keys.length < 2) continue;
+			for (let index = 1; index < binding.keys.length; index++) {
+				const prefix = sequenceIdentity(binding.keys.slice(0, index));
+				for (const action of singleKeyActions.get(prefix) ?? []) {
+					const line = `imported chord prefix "${binding.keys.slice(0, index).join(" ")}" hides pi action "${action}"`;
+					if (!reported.has(line)) {
+						reported.add(line);
+						appendImportWarning(line);
+					}
+				}
+			}
+		}
 	}
 
-	/** Runs all checks for one editor event against a single chord resolution. */
-	dispatchInput(data: string, context: Binding["context"], handle: () => void): void {
+	cancelChord(): void {
+		this.chordResolver.reset();
+		if (this.chordTimer !== undefined) {
+			clearTimeout(this.chordTimer);
+			this.chordTimer = undefined;
+			this.chordStatusTarget?.(undefined);
+			this.chordStatusTarget = undefined;
+		}
+	}
+
+	/** Runs all checks for one editor event against a single chord resolution. Chord feedback goes to the editor that received the keystroke. */
+	dispatchInput(
+		data: string,
+		context: Binding["context"],
+		handle: () => void,
+		onChordStatus?: (message: string | undefined) => void,
+	): void {
 		if (this.importedBindings.length === 0) {
 			handle();
 			return;
 		}
 		const result = this.chordResolver.resolve(data, this.getContextBindings(context));
 		if (result.kind === "pending") {
-			clearTimeout(this.chordTimer);
-			this.setChordStatus("Waiting for next key (3s)");
+			if (this.chordTimer !== undefined) {
+				clearTimeout(this.chordTimer);
+				this.chordTimer = undefined;
+			}
+			this.chordStatusTarget = onChordStatus;
+			this.chordStatusTarget?.("Waiting for next key (3s)");
 			this.chordTimer = setTimeout(() => {
 				this.chordResolver.reset();
-				this.setChordStatus("Chord cancelled. No next key within 3s");
+				this.chordStatusTarget?.("Chord cancelled. No next key within 3s");
 				this.chordTimer = setTimeout(() => this.cancelChord(), 3000);
 				this.chordTimer.unref();
 			}, 3000);
