@@ -142,4 +142,20 @@ describe("system message replay", () => {
 		expect(hasNonAdditiveToolChanges(redeclared.messages)).toBe(true);
 		expect(hasToolRedefinitions(redeclared.messages)).toBe(true);
 	});
+
+	test("replays the machine context, a later value replaces it, and single-block text renders it last", () => {
+		const messages = normalizeContext({
+			messages: [
+				{ role: "system", content: "", sections: { a: "A" }, context: "first", timestamp: 1 },
+				{ role: "system", content: "", sections: { a: "A2" }, timestamp: 2 },
+				{ role: "system", content: "", context: "second", timestamp: 3 },
+			],
+		}).messages;
+
+		const head = getCurrentSystemMessage(messages);
+
+		expect(head?.context).toBe("second");
+		expect(getSystemMessageText(head ?? { role: "system", content: "", timestamp: 0 })).toBe("A2\n\nsecond");
+		expect(getCurrentSystemMessage(messages.slice(0, 2))?.context).toBe("first");
+	});
 });
