@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setKeybindings, TuiMainScreen } from "@earendil-works/pi-tui";
+import { type Keybinding, setKeybindings, TuiMainScreen } from "@earendil-works/pi-tui";
 import { Compile } from "typebox/compile";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
@@ -10,7 +10,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createEventBus } from "../src/core/event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import { ExtensionRunner } from "../src/core/extensions/runner.ts";
-import { ChordResolver } from "../src/core/keybindings/chords.ts";
+import { type Binding, ChordResolver } from "../src/core/keybindings/chords.ts";
 import { importCcKeybindings, parseKeySequence, resolveBindings } from "../src/core/keybindings/import-cc.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { KeybindingsSchema } from "../src/core/keybindings-schema.ts";
@@ -37,10 +37,11 @@ function load(file: unknown) {
 	roots.push(root);
 	const path = join(root, "keybindings.json");
 	writeFileSync(path, JSON.stringify(file));
+	vi.stubEnv("PI_CODING_AGENT_DIR", root);
 	const manager = KeybindingsManager.create(root);
 	setKeybindings(manager);
 	const editor = new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, manager);
-	return { path, manager, editor };
+	return { path, root, manager, editor };
 }
 
 const cc = (bindings: Record<string, string | null>) => ({ bindings: [{ context: "Chat", bindings }] });
@@ -133,12 +134,16 @@ describe("CC keybinding file import", () => {
 		["chat:newline", "tui.input.newLine"],
 		["chat:undo", "tui.editor.undo"],
 		["chat:imagePaste", "app.clipboard.pasteImage"],
-		["history:previous", "tui.editor.historyPrevious"],
-		["history:next", "tui.editor.historyNext"],
-		["chat:thinkingToggle", "app.thinking.toggle"],
-		["app:interrupt", "app.interrupt"],
+		["history:previous", "tui.editor.cursorUp"],
+		["history:next", "tui.editor.cursorDown"],
 	])("maps %s to its pi action", (action, expected) => {
 		expect(importCcKeybindings(cc({ "ctrl+y": action }), new Set()).bindings[0]?.action).toBe(expected);
+	});
+
+	it.each(["chat:thinkingToggle", "app:interrupt"])("leaves %s unmapped with a warning", (action) => {
+		const imported = importCcKeybindings(cc({ "meta+t": action }), new Set());
+		expect(imported.bindings).toEqual([]);
+		expect(imported.warnings).toEqual([`Unsupported keybinding action: ${action}`]);
 	});
 
 	it("treats all CC root metadata as opaque and accepts CC's literal space spelling", () => {
@@ -157,7 +162,7 @@ describe("CC keybinding file import", () => {
 	});
 
 	it("reports unsupported actions and contexts without enabling them globally", () => {
-		const { bindings, diagnostics } = importCcKeybindings(
+		const { bindings, warnings } = importCcKeybindings(
 			{
 				bindings: [
 					{ context: "Unknown", bindings: { enter: "chat:submit" } },
@@ -167,7 +172,7 @@ describe("CC keybinding file import", () => {
 			new Set(),
 		);
 		expect(bindings).toEqual([]);
-		expect(diagnostics).toHaveLength(3);
+		expect(warnings).toHaveLength(3);
 	});
 
 	it("applies ordered null unbinding and keeps Chat declarations out of Global", () => {
@@ -184,18 +189,53 @@ describe("CC keybinding file import", () => {
 		expect(resolveBindings([], imported.bindings, "Chat")[0]?.action).toBeNull();
 	});
 
-	it.each([
-		["esc", "escape"],
-		["escape", "esc"],
-		["return", "enter"],
-		["enter", "return"],
-	] as const)("unbinds native %s with CC %s", (native, imported) => {
-		const overrides = importCcKeybindings(cc({ [imported]: null }), new Set()).bindings;
-		expect(
-			resolveBindings([{ context: "Global", keys: [native], action: "tui.input.submit" }], overrides, "Chat"),
-		).toEqual([
-			{ context: "Chat", keys: [imported === "esc" || imported === "escape" ? "escape" : "enter"], action: null },
+	it("keeps select actions bound when CC restates prompt defaults", () => {
+		const { manager } = load(cc({ enter: "chat:submit", escape: "chat:cancel", up: "history:previous" }));
+		const bound: string[] = [];
+		const probes: [string, Keybinding[]][] = [
+			["\r", ["tui.select.confirm", "tui.input.submit"]],
+			["\u001b", ["tui.select.cancel", "app.interrupt"]],
+			["\u001b[A", ["tui.select.up", "tui.editor.cursorUp"]],
+		];
+		for (const [data, actions] of probes) {
+			manager.dispatchInput(data, "Chat", () => {
+				for (const action of actions) if (manager.matches(data, action)) bound.push(action);
+			});
+		}
+		expect(bound.sort()).toEqual([
+			"app.interrupt",
+			"tui.editor.cursorUp",
+			"tui.input.submit",
+			"tui.select.cancel",
+			"tui.select.confirm",
+			"tui.select.up",
 		]);
+	});
+
+	it("keeps autocomplete confirm when a pi file reassigns submit alongside a CC file", () => {
+		const ccDir = mkdtempSync(join(tmpdir(), "cc-keybindings-"));
+		roots.push(ccDir);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", ccDir);
+		writeFileSync(join(ccDir, "keybindings.json"), JSON.stringify(cc({ "ctrl+y": "chat:submit" })));
+		const { manager } = load({ "tui.input.submit": "enter" });
+		const bound: string[] = [];
+		manager.dispatchInput("\r", "Chat", () => {
+			for (const action of ["tui.select.confirm", "tui.input.submit"] as Keybinding[]) {
+				if (manager.matches("\r", action)) bound.push(action);
+			}
+		});
+		expect(bound.sort()).toEqual(["tui.input.submit", "tui.select.confirm"]);
+	});
+
+	it("keeps native submit working under a CC unbinding of the same sequence", () => {
+		const overrides = importCcKeybindings(cc({ enter: null }), new Set()).bindings;
+		const resolved = resolveBindings(
+			[{ context: "Global", keys: ["enter"], action: "tui.input.submit" }],
+			overrides,
+			"Chat",
+		);
+		expect(resolved).toContainEqual({ context: "Global", keys: ["enter"], action: "tui.input.submit" });
+		expect(resolved.at(-1)).toMatchObject({ keys: ["enter"], action: null });
 	});
 
 	it("publishes schemas for native sequences and the CC envelope", () => {
@@ -221,13 +261,27 @@ describe("prompt chord dispatch", () => {
 	});
 
 	it("provides source-qualified import diagnostics for startup warnings", () => {
-		const { path, manager } = load(cc({ "ctrl+y": "unknown:action" }));
-		expect(manager.getImportDiagnostics()).toEqual([`${path}: Unsupported keybinding action: unknown:action`]);
+		const { path, root, manager } = load(cc({ "ctrl+y": "unknown:action" }));
+		expect(manager.getImportDiagnostics()).toEqual([]);
+		expect(readFileSync(join(root, "pi-debug.log"), "utf-8")).toContain(
+			`${path}: Unsupported keybinding action: unknown:action`,
+		);
+	});
+
+	it("warns at startup only when the CC file cannot be loaded at all", () => {
+		const broken = mkdtempSync(join(tmpdir(), "cc-keybindings-broken-"));
+		roots.push(broken);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", broken);
+		writeFileSync(join(broken, "keybindings.json"), "{oops");
+		const { manager } = load(cc({ "ctrl+y": "chat:submit" }));
+		expect(manager.getImportDiagnostics()).toEqual([
+			`${join(broken, "keybindings.json")}: CC keybindings file could not be read as JSON`,
+		]);
 	});
 	it("does not treat object prototype properties as action aliases", () => {
 		const imported = importCcKeybindings(cc({ "ctrl+k": "constructor", "ctrl+s": "__proto__" }), new Set());
 		expect(imported.bindings).toEqual([]);
-		expect(imported.diagnostics).toHaveLength(2);
+		expect(imported.warnings).toHaveLength(2);
 	});
 	it("consumes a prefix and submits only after its final stroke", () => {
 		const { editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
@@ -250,7 +304,7 @@ describe("prompt chord dispatch", () => {
 		expect(count).toBe(1);
 	});
 
-	it("honors null unbindings and sequence reassignment", () => {
+	it("honors sequence reassignment and keeps Return submitting after a CC enter unbinding", () => {
 		const { editor } = load(cc({ enter: null, "ctrl+l": "chat:submit" }));
 		let models = 0;
 		const submitted: string[] = [];
@@ -258,10 +312,22 @@ describe("prompt chord dispatch", () => {
 		editor.onSubmit = (text) => submitted.push(text);
 		editor.setText("draft");
 		editor.handleInput("\r");
-		expect(submitted).toEqual([]);
-		editor.handleInput("\x0c");
 		expect(submitted).toEqual(["draft"]);
+		editor.setText("again");
+		editor.handleInput("\x0c");
+		expect(submitted).toEqual(["draft", "again"]);
 		expect(models).toBe(0);
+	});
+
+	it("keeps an unbound chord's prefix and next keystroke working", () => {
+		const { editor } = load(cc({ "ctrl+x ctrl+k": null }));
+		let copies = 0;
+		editor.onAction("app.message.copy", () => copies++);
+		editor.handleInput("\x18");
+		expect(editor.render(80).join("\n")).not.toContain("Waiting for next key");
+		expect(copies).toBe(1);
+		editor.handleInput("q");
+		expect(editor.getText()).toBe("q");
 	});
 
 	it("swallows a mismatching stroke and does not restart on a repeated prefix", () => {
@@ -359,6 +425,16 @@ describe("prompt chord dispatch", () => {
 		expect(resolver.resolve("\x13", bindings, 7000)).toEqual({ kind: "input", actions: new Set() });
 	});
 
+	it("starts a chord only when a longer binding has an action", () => {
+		const bindings: Binding[] = [
+			{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null },
+			{ context: "Chat", keys: ["ctrl+x", "ctrl+s"], action: "app.exit" },
+		];
+		expect(new ChordResolver().resolve("\x18", bindings, 0)).toEqual({ kind: "pending" });
+		const nullOnly: Binding[] = [{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null }];
+		expect(new ChordResolver().resolve("\x18", nullOnly, 0)).toEqual({ kind: "input", actions: new Set() });
+	});
+
 	it("imports native named-action chords alongside ordinary bindings and resets on reload", () => {
 		const { path, manager, editor } = load({ "app.model.select": ["ctrl+k ctrl+s", "ctrl+l"] });
 		expect(manager.getPromptKeys("app.model.select")).toEqual(["ctrl+l", "ctrl+k ctrl+s"]);
@@ -383,5 +459,50 @@ describe("prompt chord dispatch", () => {
 			}),
 		).toThrow("handler");
 		expect(manager.matches("\x0c", "app.model.select")).toBe(true);
+	});
+});
+
+describe("CC imports keep pi input behavior", () => {
+	const slashProvider = (items: { value: string; label: string }[]) => ({
+		getSuggestions: async () => ({ items, prefix: "/" }),
+		applyCompletion: (lines: string[], cursorLine: number, _cursorCol: number, item: { value: string }) => ({
+			lines: lines.map((line, index) => (index === cursorLine ? item.value : line)),
+			cursorLine,
+			cursorCol: item.value.length,
+		}),
+	});
+
+	it("confirms an open autocomplete menu with Enter after CC restates submit", async () => {
+		const { editor } = load(cc({ enter: "chat:submit" }));
+		editor.setAutocompleteProvider(slashProvider([{ value: "/model", label: "model" }]));
+		editor.handleInput("/mod");
+		await vi.waitFor(() => expect(editor.isShowingAutocomplete()).toBe(true));
+		const submitted: string[] = [];
+		editor.onSubmit = (text) => submitted.push(text);
+		editor.handleInput("\r");
+		expect(submitted).toEqual(["/model"]);
+	});
+
+	it("moves the multiline cursor up with CC's history restate instead of browsing history", () => {
+		const { editor } = load(cc({ up: "history:previous", down: "history:next" }));
+		editor.addToHistory("queued entry");
+		editor.setText("one\ntwo");
+		editor.handleInput("\u001b[A");
+		expect(editor.getText()).toBe("one\ntwo");
+	});
+
+	it("navigates an open autocomplete menu with Up after CC's history restate", async () => {
+		const { editor } = load(cc({ up: "history:previous" }));
+		editor.setAutocompleteProvider(
+			slashProvider(["/command-0", "/command-1", "/command-2"].map((value) => ({ value, label: value }))),
+		);
+		editor.handleInput("/");
+		await vi.waitFor(() => expect(editor.isShowingAutocomplete()).toBe(true));
+		editor.handleInput("\u001b[B");
+		editor.handleInput("\u001b[A");
+		const submitted: string[] = [];
+		editor.onSubmit = (text) => submitted.push(text);
+		editor.handleInput("\r");
+		expect(submitted).toEqual(["/command-0"]);
 	});
 });
