@@ -130,11 +130,11 @@ describe("wire profile", () => {
 		expect(billingHeader("sdk-cli")).toHaveLength(74);
 	});
 
-	test("carries the automatic betas first and --betas after them", () => {
-		const policy = buildCcPolicy({ ...noFlags, flags: { betas: ["probe-beta"] } });
+	test("carries the automatic betas first and the recognized --betas values after them, dropping the rest", () => {
+		const policy = buildCcPolicy({ ...noFlags, flags: { betas: ["probe-beta", "context-1m-2025-08-07"] } });
 		const profile = ccWireProfile(policy, model("claude-opus-5-5"), true, false, false);
 
-		expect(profile?.extraBetas).toEqual([...CC_AUTO_BETAS, "probe-beta"]);
+		expect(profile?.extraBetas).toEqual([...CC_AUTO_BETAS, "context-1m-2025-08-07"]);
 		expect(profile?.defaultEffort).toBe("medium");
 	});
 

@@ -167,6 +167,7 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-probe-fb-two",
 		"probe-beta-2026-01-01",
 		"probe-beta-two-2026-02-02",
+		"context-1m-2025-08-07",
 		"low",
 		"medium",
 		"high",

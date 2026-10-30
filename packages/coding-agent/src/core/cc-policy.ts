@@ -50,6 +50,31 @@ export const CC_AUTO_BETAS: readonly string[] = [
 	"effort-2025-11-24",
 ];
 
+/** The betas the pinned Claude Code recognizes; `--betas` values outside this set never reach the header. */
+const CC_KNOWN_BETAS: ReadonlySet<string> = new Set([
+	...CC_AUTO_BETAS,
+	"context-1m-2025-08-07",
+	"structured-outputs-2025-12-15",
+	"web-search-2025-03-05",
+	"tool-search-tool-2025-10-19",
+	"task-budgets-2026-03-13",
+	"prompt-caching-scope-2026-01-05",
+	"prompt-caching-evict-2026-05-12",
+	"cache-keepalive-2026-09-03",
+	"extended-cache-ttl-2025-04-11",
+	"fast-mode-2026-02-01",
+	"redact-thinking-2026-02-12",
+	"thinking-resumption-2026-07-17",
+	"afk-mode-2026-01-31",
+	"advisor-tool-2026-03-01",
+	"cache-diagnosis-2026-04-07",
+	"context-hint-2026-04-09",
+	"mcp-servers-2025-12-04",
+	"files-api-2025-04-14",
+	"environments-2025-11-01",
+	"ccr-byoc-2025-07-29",
+]);
+
 /** Effort used for a model with effort control that the table does not list. */
 const FALLBACK_EFFORT: CcEffort = "high";
 
@@ -97,7 +122,7 @@ export function buildCcPolicy(input: CcPolicyInput): CcPolicy {
 	return {
 		entrypoint: input.entrypoint,
 		effort: parseEffort(flags.effort),
-		extraBetas: flags.betas ?? [],
+		extraBetas: (flags.betas ?? []).filter((beta) => CC_KNOWN_BETAS.has(beta)),
 		fallbackModels: parseFallbackModels(flags.fallbackModel),
 		autocompactWindow: autocompactWindow(flags.autocompact),
 		excludeDynamic: flags.excludeDynamicSystemPromptSections === true && !input.customPrompt,
