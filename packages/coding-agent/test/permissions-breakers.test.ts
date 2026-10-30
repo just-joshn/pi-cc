@@ -339,6 +339,35 @@ describe("round 5 parser regressions", () => {
 	});
 });
 
+describe("what Claude Code does not read inside function bodies, case items and compound bodies", () => {
+	it.each([
+		"f() { rmdir /usr; }; true",
+		"case one in one) rmdir /usr;; esac",
+		"if true; then X=. & rmdir /usr; fi",
+		"for Y in one; do X=. & rmdir *; done",
+		"true <(X=. || rmdir $X/usr)",
+		'(export X=/usr || rmdir "$X")',
+		'local X=\\$HOME\nrmdir "$X"',
+		`(typeset X=${brace("HOME")}; rmdir /usr)`,
+	])("lets %s through", (command) => {
+		expect(removal(command), command).toBeUndefined();
+	});
+
+	it.each([
+		[`f() { X=.; rmdir ${brace("X")}/; }; true`, "is a shell variable expansion"],
+		["{ X=.\nrmdir $X; }", "workspace directory"],
+		["true $(export X=1 || rmdir $X/usr)", "(inside a command substitution)"],
+		["readonly X=\\$HOME | rmdir $X/usr", "is a shell variable expansion"],
+		[`true ${brace(" declare X=.; rmdir sub; ")}`, "could not be checked for dangerous rm operations"],
+	])("still refuses %s", (command, text) => {
+		expect(removal(command)?.message, command).toContain(text);
+	});
+
+	it("does not follow a variable set outside a group into it", () => {
+		expect(removal("X=/usr; { rm -rf $X; }")).toBeUndefined();
+	});
+});
+
 describe("a removal target in quotes", () => {
 	it.each(['rm -rf "*"', "rm -rf '*'", "rmdir \\*", 'rm -rf "./*"', 'rm -rf "/*"'])("refuses %s", (command) => {
 		expect(removal(command)?.message, command).toMatch(/^Dangerous (?:rm|rmdir) operation detected/);

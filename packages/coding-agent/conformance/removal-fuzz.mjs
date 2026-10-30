@@ -6,8 +6,14 @@ import { evaluatePermission } from "../src/core/permissions/evaluate.ts";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 export const SEED = 0x50404;
+const CORPORA = {
+	main: { seed: SEED, directory: "removal-fuzz", fixed: true },
+	holdout: { seed: 0x1badf00d, directory: "removal-fuzz-holdout", fixed: false },
+	blind: { seed: 0xc0ffee11, directory: "removal-fuzz-blind", fixed: false },
+	blind2: { seed: 0x0badcafe, directory: "removal-fuzz-blind2", fixed: false },
+};
 
-export function corpus(seed = SEED) {
+export function corpus(seed = SEED, fixed = true) {
 	if (!Number.isInteger(seed) || seed < 1 || seed > 0xffffffff) throw new Error("Seed must be a nonzero uint32");
 	let state = seed >>> 0;
 	const pick = (items) => {
@@ -16,19 +22,19 @@ export function corpus(seed = SEED) {
 		state ^= state << 5;
 		return items[(state >>> 0) % items.length];
 	};
-	const lines = new Set([
+	const lines = new Set(fixed ? [
 		"X=$HOME; rmdir $X",
 		"X=~; rmdir $X",
 		"X=/usr; rmdir '$X'",
 		"X=/usr; rmdir \\$X",
 		"true <<EOF\n$(rmdir /usr)\nEOF",
 		"rmdir /tmp/p04-fuzz-does-not-exist/..",
-	]);
+	] : []);
 	const values = [".", "..", "/usr", "/", "~", "$HOME", "${HOME}", "'$HOME'", '"$HOME"', "\\$HOME", "'*'", "\"*\"", "sub", "p04-fuzz-does-not-exist", "''"];
 	const targets = [".", "..", "*", '"*"', "~", "/usr", "/", "$HOME", "sub", "sub/..", "p04-fuzz-does-not-exist", "p04-fuzz-does-not-exist/..", "$X", '"$X"', "'$X'", "\\$X", "${X}/", "$X/usr"];
 	const keywords = ["", "export ", "local ", "readonly ", "declare ", "typeset "];
 	const separators = ["; ", " && ", " || ", " | ", " & ", "\n"];
-	for (let depth = 0; depth <= 8; depth++) {
+	for (let depth = 0; fixed && depth <= 8; depth++) {
 		for (const count of [0, 63, 64, 65]) {
 			let inner = `: ${Array(count).fill("$(:)").join(" ")}`;
 			for (let level = 0; level < depth; level++) inner = `: $(${inner})`;
@@ -70,17 +76,19 @@ export function evaluate(command, cwd, home) {
 }
 
 const mode = process.argv[2];
+const corpusSpec = CORPORA[process.argv[3] ?? "main"];
+if (corpusSpec === undefined) throw new Error("Corpus must be main, holdout, blind, or blind2");
 if (mode === "generate") {
-	const seed = Number(process.argv[3] ?? SEED);
-	const lines = corpus(seed);
-	writeFileSync(join(directory, "removal-fuzz-corpus.json"), `${JSON.stringify({ seed, lines }, null, "\t")}\n`);
-	const cases = join(directory, "cases", "removal-fuzz");
+	const seed = Number(process.argv[4] ?? corpusSpec.seed);
+	const lines = corpus(seed, corpusSpec.fixed);
+	writeFileSync(join(directory, `${corpusSpec.directory}-corpus.json`), `${JSON.stringify({ seed, lines }, null, "\t")}\n`);
+	const cases = join(directory, "cases", corpusSpec.directory);
 	mkdirSync(cases, { recursive: true });
 	for (let offset = 0; offset < lines.length; offset += 32) {
 		const batch = lines.slice(offset, offset + 32);
-		const id = `removal-fuzz/batch-${String(offset / 32).padStart(2, "0")}`;
+		const id = `${corpusSpec.directory}/batch-${String(offset / 32).padStart(2, "0")}`;
 		const testCase = {
-			id, area: "removal-fuzz",
+			id, area: corpusSpec.directory,
 			argv: ["-p", "Run permission probes", "--model", "claude-opus-4-7", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose"],
 			env: { CLAUDE_CODE_TMPDIR: "$TMP" }, stdin: null,
 			files: { "seed.txt": "SEED\n", "sub/seed.txt": "SUB\n" },
@@ -96,11 +104,11 @@ if (mode === "generate") {
 if (mode === "record") {
 	const report = JSON.parse(readFileSync(join(directory, ".out/report.json"), "utf8"));
 	if (!report.claude?.frozen || report.aborted) throw new Error("Pinned oracle and isolation gate required");
-	const generated = JSON.parse(readFileSync(join(directory, "removal-fuzz-corpus.json"), "utf8"));
+	const generated = JSON.parse(readFileSync(join(directory, `${corpusSpec.directory}-corpus.json`), "utf8"));
 	const fixtures = [];
 	const differences = [];
 	for (let batch = 0; batch < 16; batch++) {
-		const id = `removal-fuzz/batch-${String(batch).padStart(2, "0")}`;
+		const id = `${corpusSpec.directory}/batch-${String(batch).padStart(2, "0")}`;
 		if (report.cases.find(testCase => testCase.id === id)?.verdict !== "PASS") throw new Error(`Incomplete harness batch ${id}`);
 		const root = realpathSync(join(report.run_root, id, "claude"));
 		const requests = readFileSync(join(root, "out/requests.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
@@ -124,8 +132,8 @@ if (mode === "record") {
 			if (JSON.stringify(actual) !== JSON.stringify(expected)) differences.push(normalize({ command, expected, actual }));
 		}
 	}
-	writeFileSync(join(directory, "removal-fuzz-fixtures.json"), `${JSON.stringify({ seed: generated.seed, oracle: report.claude, run: report.run, entries: fixtures }, null, "\t")}\n`);
-	writeFileSync(join(directory, ".out/removal-fuzz-differences.json"), `${JSON.stringify(differences, null, "\t")}\n`);
+	writeFileSync(join(directory, `${corpusSpec.directory}-fixtures.json`), `${JSON.stringify({ seed: generated.seed, oracle: report.claude, run: report.run, entries: fixtures }, null, "\t")}\n`);
+	writeFileSync(join(directory, `.out/${corpusSpec.directory}-differences.json`), `${JSON.stringify(differences, null, "\t")}\n`);
 	console.log(`${fixtures.length} oracle observations, ${differences.length} differences`);
 	process.exitCode = differences.length === 0 ? 0 : 1;
 }

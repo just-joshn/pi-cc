@@ -7,7 +7,7 @@
 		"banner": "2.1.312 (Claude Code)",
 		"frozen": true
 	},
-	"run": "2026-10-30T15:31:42.587Z",
+	"run": "2026-10-30T19:49:48.145Z",
 	"entries": [
 		{
 			"command": "X=$HOME; rmdir $X",
@@ -1166,7 +1166,7 @@
 			"expected": {
 				"behavior": "allow"
 			},
-			"toolResult": "(eval):1: nice(5) failed: operation not permitted\nrmdir: $X: No such file or directory"
+			"toolResult": "(eval):1: nice(5) failed: operation not permitted"
 		},
 		{
 			"command": "local X='$HOME' || rmdir p04-fuzz-does-not-exist/..",
@@ -1541,7 +1541,7 @@
 			"expected": {
 				"behavior": "allow"
 			},
-			"toolResult": "(eval):1: nice(5) failed: operation not permitted\nrmdir: : No such file or directory"
+			"toolResult": "(eval):1: nice(5) failed: operation not permitted"
 		},
 		{
 			"command": "case one in one) export X=${HOME} && rmdir sub;; esac",
@@ -2273,7 +2273,7 @@
 			"expected": {
 				"behavior": "allow"
 			},
-			"toolResult": "(eval):1: nice(5) failed: operation not permitted\nrmdir: sub: Directory not empty"
+			"toolResult": "(eval):1: nice(5) failed: operation not permitted"
 		},
 		{
 			"command": "f() { readonly X=p04-fuzz-does-not-exist & rmdir ..; }; true",
@@ -3218,7 +3218,7 @@
 			"expected": {
 				"behavior": "allow"
 			},
-			"toolResult": "usage: rmdir [-pv] directory ..."
+			"toolResult": "(Bash completed with no output)"
 		},
 		{
 			"command": "true <<'EOF'\n$(export X='*' & rmdir ~)\nEOF",

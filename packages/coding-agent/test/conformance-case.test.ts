@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(373);
+		expect(cases.length).toBe(422);
 	});
 
 	test("rejects a misspelled compare key", () => {
