@@ -427,6 +427,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 					].map(
 						(keys): Binding => ({
 							context: "Global",
+							origin: "pi-file",
 							keys,
 							action: action as Keybinding,
 						}),
@@ -546,7 +547,9 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		if (!bindings) {
 			const base = Object.entries(this.getResolvedBindings()).flatMap(([action, value]) => {
 				const keys = typeof value === "string" ? [value] : (value ?? []);
-				return keys.map((key): Binding => ({ context: "Global", keys: [key], action: action as Keybinding }));
+				return keys.map(
+					(key): Binding => ({ context: "Global", origin: "pi-base", keys: [key], action: action as Keybinding }),
+				);
 			});
 			bindings = resolveBindings(base, this.importedBindings, context);
 			this.resolvedContexts.set(context, bindings);

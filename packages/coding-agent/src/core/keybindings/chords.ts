@@ -1,7 +1,11 @@
 import { type Keybinding, type KeyId, matchesKey } from "@earendil-works/pi-tui";
 
+/** Where a binding was declared: pi's defaults or user action file, or a CC action name imported from a CC file. */
+export type BindingOrigin = "pi-base" | "pi-file" | "cc-import";
+
 export interface Binding {
 	context: "Global" | "Chat";
+	origin: BindingOrigin;
 	keys: readonly [KeyId, ...KeyId[]];
 	action: Keybinding | null;
 }

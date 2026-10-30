@@ -93,10 +93,11 @@ export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<s
 				result.warnings.push(`Invalid key sequence: ${key}`);
 				continue;
 			}
+			const isCcAction = action !== null && Object.hasOwn(actions, action);
 			const mapped =
 				action === null
 					? null
-					: Object.hasOwn(actions, action)
+					: isCcAction
 						? actions[action]
 						: nativeActions.has(action)
 							? (action as Keybinding)
@@ -105,7 +106,13 @@ export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<s
 				result.warnings.push(`Unsupported keybinding action: ${action}`);
 				continue;
 			}
-			result.bindings.push({ context: block.context, keys, action: mapped });
+			// A pi action name written in a CC file is a pi declaration, not a CC-dispatched action.
+			result.bindings.push({
+				context: block.context,
+				origin: isCcAction || action === null ? "cc-import" : "pi-file",
+				keys,
+				action: mapped,
+			});
 		}
 	}
 	return result;
@@ -132,13 +139,18 @@ function actionLayer(action: Keybinding): "input" | "dispatched" {
 }
 
 /**
- * Applies later declarations to the same sequence. Imports are dispatched declarations in CC's sense: a later one
- * replaces earlier imports and the sequence's dispatched pi bindings, the way CC's dispatcher takes the last
- * declaration across active contexts. Pi's built-in input actions (`tui.editor.*`/`tui.input.*`) are the layer CC's
- * dispatched actions decline and fall through to, so an import never removes them; an identical (sequence, action)
- * restatement collapses to one binding. A `null` action removes bindings the import introduced and the sequence's
- * dispatched pi bindings, matching CC's fall-through on an unbound key (jet returns "unbound" without consuming
- * outside a chord).
+ * Applies later declarations to the same sequence, tracking each binding's origin instead of its object identity.
+ * - Pi base bindings are never removed by a declaration that restates them. A restatement is dropped, so a later
+ *   `null` cannot delete a base input action the file only repeated.
+ * - A later import or file declaration replaces earlier non-base declarations on its sequence.
+ * - Imported dispatched app/chat actions replace pi's dispatched prompt actions on the sequence, the way CC's
+ *   dispatcher takes the last declaration. They leave pi's input layer (`tui.editor.*`, `tui.input.*`) alone because
+ *   CC falls through to the text input when a handler declines (app:exit on a non-empty prompt).
+ * - A CC action that pi models as an input action (chat:newline, chat:undo) is dispatched before the text input's
+ *   own handling and always consumes, so it displaces the input actions pi had on that sequence until the
+ *   declaration is replaced or nulled.
+ * - A `null` removes non-base declarations and pi's dispatched prompt actions on the sequence, restores displaced
+ *   input actions, and leaves the base input layer working (CC's dispatcher returns `unbound` without consuming).
  */
 export function resolveBindings(
 	base: readonly Binding[],
@@ -146,33 +158,46 @@ export function resolveBindings(
 	context: Binding["context"],
 ): Binding[] {
 	let resolved = base.filter((binding) => binding.context === "Global" || binding.context === context);
-	const introduced = new Set<Binding>();
+	let displaced: Binding[] = [];
 	for (const binding of overrides) {
 		if (binding.context !== "Global" && binding.context !== context) continue;
 		const sequence = sequenceIdentity(binding.keys);
-		resolved = resolved.filter((existing) => {
-			if (sequenceIdentity(existing.keys) !== sequence) return true;
-			return !isShadowed(binding, existing, introduced.has(existing));
-		});
+		const onSequence = (existing: Binding) => sequenceIdentity(existing.keys) === sequence;
+		resolved.push(...displaced.filter(onSequence));
+		displaced = displaced.filter((existing) => !onSequence(existing));
+		resolved = resolved.filter((existing) => !onSequence(existing) || isKept(existing));
+		if (binding.action !== null) {
+			const restated = resolved.some(
+				(existing) => onSequence(existing) && existing.origin === "pi-base" && existing.action === binding.action,
+			);
+			if (isCcInputAction(binding)) {
+				displaced.push(...resolved.filter((existing) => onSequence(existing) && isDisplaceable(binding, existing)));
+				resolved = resolved.filter((existing) => !displaced.includes(existing));
+			}
+			if (restated) continue;
+		}
 		resolved.push(binding);
-		introduced.add(binding);
 	}
 	return resolved;
 }
 
-function isShadowed(override: Binding, existing: Binding, fromImport: boolean): boolean {
-	if (fromImport) return true;
-	if (override.action === null) {
-		return (
-			existing.action !== null &&
-			actionGroup(existing.action) === "prompt" &&
-			actionLayer(existing.action) === "dispatched"
-		);
-	}
-	if (existing.action === null) return false;
+function isKept(existing: Binding): boolean {
+	if (existing.origin !== "pi-base") return false;
+	if (existing.action === null) return true;
+	return !(actionGroup(existing.action) === "prompt" && actionLayer(existing.action) === "dispatched");
+}
+
+function isCcInputAction(binding: Binding): boolean {
+	return binding.origin === "cc-import" && binding.action !== null && actionLayer(binding.action) === "input";
+}
+
+function isDisplaceable(override: Binding, existing: Binding): boolean {
 	return (
-		existing.action === override.action ||
-		(actionGroup(existing.action) === "prompt" && actionLayer(existing.action) === "dispatched")
+		existing.origin === "pi-base" &&
+		existing.action !== null &&
+		existing.action !== override.action &&
+		actionGroup(existing.action) === "prompt" &&
+		actionLayer(existing.action) === "input"
 	);
 }
 

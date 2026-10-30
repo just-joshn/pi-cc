@@ -239,7 +239,12 @@ describe("CC keybinding file import", () => {
 			overrides,
 			"Chat",
 		);
-		expect(resolved).toContainEqual({ context: "Global", keys: ["enter"], action: "tui.input.submit", origin: "pi-base" });
+		expect(resolved).toContainEqual({
+			context: "Global",
+			keys: ["enter"],
+			action: "tui.input.submit",
+			origin: "pi-base",
+		});
 		expect(resolved.at(-1)).toMatchObject({ keys: ["enter"], action: null });
 	});
 
@@ -703,7 +708,10 @@ describe("CC binding identity", () => {
 	});
 
 	it("tags each binding with its origin and layer", () => {
-		const imported = importCcKeybindings(cc({ enter: "chat:submit", "ctrl+y": "tui.editor.undo" }), new Set(["tui.editor.undo"]));
+		const imported = importCcKeybindings(
+			cc({ enter: "chat:submit", "ctrl+y": "tui.editor.undo" }),
+			new Set(["tui.editor.undo"]),
+		);
 		expect(imported.bindings.map((binding) => binding.origin)).toEqual(["cc-import", "pi-file"]);
 	});
 });
