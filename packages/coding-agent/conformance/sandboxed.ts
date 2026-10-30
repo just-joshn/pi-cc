@@ -63,14 +63,15 @@ export function runSandboxed(
 			clearTimeout(timer);
 			reject(error);
 		});
+		// A child that stayed in the group and holds the pipes keeps `close` from firing, so the group dies on `exit`.
+		child.on("exit", () => {
+			if (child.pid !== undefined) killGroup(child.pid);
+		});
 		child.on("close", async (code) => {
 			stdinAbort.abort();
 			await stdinDone;
 			clearTimeout(timer);
-			const reaped =
-				child.pid === undefined
-					? { survived: false, converged: true }
-					: await reap(roots.root, { group: child.pid });
+			const reaped = child.pid === undefined ? { survived: false, converged: true } : await reap(roots.root);
 			if (stdinFailure !== undefined) {
 				reject(stdinFailure);
 				return;

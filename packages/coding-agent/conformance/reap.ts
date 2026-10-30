@@ -11,8 +11,6 @@ export interface ReapResult {
 export interface ReapOptions {
 	/** Where the workspace moved to after the side exited, which a process can still reach through a working directory or an open file. */
 	moved?: string;
-	/** The side's own process group, signalled once up front: a child that stayed in it holds nothing a scan sees. */
-	group?: number;
 	lsof?: string;
 	deadlineMs?: number;
 	/** Consecutive scans that must find nothing. The default is for the first reap; a check that already follows one can use fewer. */
@@ -30,7 +28,7 @@ const SAMPLE_STAGGER_MS = 30;
 const execFileAsync = promisify(execFile);
 
 /**
- * Kills the side's own group when `group` is given, and every process group with a member working inside the side's root, or inside `moved` once the
+ * Kills every process group with a member working inside the side's root, or inside `moved` once the
  * workspace has moved, and returns once repeated scans find nothing. A member is a process whose working
  * directory or any open file is under one of those paths. A SessionStart hook is spawned detached, so
  * its shell lands in its own process group and whatever it starts survives the side's group.
@@ -56,7 +54,6 @@ export async function reap(root: string, options: ReapOptions = {}): Promise<Rea
 	let survived = false;
 	let clean = 0;
 	const killed = new Set<number>();
-	if (options.group !== undefined) killGroup(options.group);
 	const deadline = Date.now() + (options.deadlineMs ?? REAP_DEADLINE_MS);
 	const cleanSweeps = options.cleanSweeps ?? CLEAN_SWEEPS;
 	while (clean < cleanSweeps || [...killed].some(groupExists)) {

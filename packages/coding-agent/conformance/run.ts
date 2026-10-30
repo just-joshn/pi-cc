@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { ConformanceCase, FileSpec, StdinSpec } from "./case.ts";
+import type { ConformanceCase, FileSpec } from "./case.ts";
 import { loadCases } from "./case.ts";
 import type { Diff, Observation } from "./compare.ts";
 import { compare } from "./compare.ts";
