@@ -30,6 +30,6 @@ describe("the pinned dossier probe profiles", () => {
 		const sentinelLines = lines.filter((line) => new RegExp(SENTINEL_PATH).test(line));
 
 		expect(sentinelLines).toHaveLength(1);
-		expect(README).toContain("only the sentinel line differs");
+		expect(README.replace(/\s+/g, " ")).toContain("only the sentinel line differs");
 	});
 });
