@@ -76,7 +76,7 @@ export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOption
 	};
 }
 
-function renderProjectContext(contextFiles: Array<{ path: string; content: string }>): string {
+export function renderProjectContext(contextFiles: Array<{ path: string; content: string }>): string {
 	return [
 		"Project-specific instructions and guidelines:",
 		...contextFiles.map(
