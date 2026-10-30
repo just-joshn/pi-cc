@@ -3,17 +3,20 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ControlRequestBody, Json, SdkFrame, SdkInput } from "./frames.ts";
 
-/** One stdin line as the host acts on it. A line that is not JSON is `invalid`, the only fatal case. */
+/** One stdin line as the host acts on it. A line that is not JSON, or a user message that is not from the user, is `invalid` and fatal. */
 export function parseInputLine(line: string): SdkInput {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
 	} catch {
-		return { kind: "invalid", characters: line.length };
+		return {
+			kind: "invalid",
+			message: `Error parsing streaming input line (type=unknown, ${line.length} chars): SyntaxError`,
+		};
 	}
 	if (!isRecord(parsed)) return { kind: "ignored" };
 	if (parsed.type === "user") return parseUser(parsed);
-	if (parsed.type === "control_request" && isRecord(parsed.request) && typeof parsed.request.subtype === "string") {
+	if (parsed.type === "control_request" && isRecord(parsed.request)) {
 		return {
 			kind: "control",
 			requestId: typeof parsed.request_id === "string" ? parsed.request_id : undefined,
@@ -24,14 +27,12 @@ export function parseInputLine(line: string): SdkInput {
 	return { kind: "ignored" };
 }
 
-/** The error Claude Code prints for a stdin line that is not JSON, then exits 1 (measured). */
-export function invalidLineMessage(characters: number): string {
-	return `Error parsing streaming input line (type=unknown, ${characters} chars): SyntaxError`;
-}
-
 function parseUser(record: Json): SdkInput {
 	const message = record.message;
-	if (!isRecord(message)) return { kind: "ignored" };
+	const role = isRecord(message) ? message.role : undefined;
+	if (!isRecord(message) || role !== "user") {
+		return { kind: "invalid", message: `Error: Expected message role 'user', got '${String(role)}'` };
+	}
 	const content = message.content;
 	if (typeof content === "string") return { kind: "user", content, text: content, images: [] };
 	if (!Array.isArray(content)) return { kind: "ignored" };

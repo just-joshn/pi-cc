@@ -1276,6 +1276,7 @@ export async function main(args: string[], options?: MainOptions) {
 			messages: parsed.messages,
 			initialMessage,
 			initialImages,
+			maxTurns: parsed.maxTurns,
 		};
 		const exitCode = await runPrintMode(
 			runtime,
@@ -1291,6 +1292,7 @@ export async function main(args: string[], options?: MainOptions) {
 							includePartial: parsed.includePartialMessages === true,
 							replayUser: parsed.replayUserMessages === true,
 							permissionMode: sdkPermissionMode(parsed.permissionMode),
+							maxTurns: parsed.maxTurns,
 							hasAuth: (provider) => modelRuntime.hasConfiguredAuth(provider),
 							input: process.stdin,
 							env: process.env,

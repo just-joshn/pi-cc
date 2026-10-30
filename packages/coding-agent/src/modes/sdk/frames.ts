@@ -20,6 +20,8 @@ export interface MessageUsage {
 	output_tokens: number;
 	cache_creation_input_tokens?: number;
 	cache_read_input_tokens?: number;
+	/** Present when the request wrote cache entries, split by lifetime. */
+	cache_creation?: { ephemeral_5m_input_tokens: number; ephemeral_1h_input_tokens: number };
 }
 
 export interface SystemInitFrame {
@@ -74,18 +76,21 @@ export interface AssistantFrame {
 	session_id: string;
 	uuid: string;
 	timestamp: string;
+	/** Set on the row written for a block cut off by an interrupt. */
+	aborted?: true;
 }
 
-/** The synthetic assistant row Claude Code writes in place of a model reply when no credentials exist. */
-export interface NotLoggedInFrame {
+/** The synthetic assistant row Claude Code writes in place of a model reply when the request fails. */
+export interface SyntheticApiErrorFrame {
 	type: "assistant";
 	message: Json;
 	parent_tool_use_id: null;
 	session_id: string;
 	uuid: string;
 	timestamp: string;
-	error: "authentication_failed";
+	error: string;
 	is_api_error_message: true;
+	api_error_status?: number;
 }
 
 export interface UserToolResultFrame {
@@ -96,6 +101,18 @@ export interface UserToolResultFrame {
 	uuid: string;
 	timestamp: string;
 	tool_use_result: unknown;
+	/** Set when the tool never ran, with why. */
+	tool_result_meta?: Json[];
+}
+
+/** The text row Claude Code writes after it interrupted a request or a tool batch. */
+export interface UserInterruptFrame {
+	type: "user";
+	message: { role: "user"; content: Json[] };
+	parent_tool_use_id: null;
+	session_id: string;
+	uuid: string;
+	timestamp: string;
 }
 
 /** A stdin user message echoed back under `--replay-user-messages`. */
@@ -118,6 +135,8 @@ export interface StreamEventFrame {
 	api_message_id: string;
 	ttft_ms?: number;
 	thinking_display?: string;
+	/** On the `message_stop` of a request an interrupt cut off: the first block index that never finished. */
+	abandoned_blocks?: { api_message_id: string; from_block_index: number };
 }
 
 export type ResultFrame = Json & { type: "result"; subtype: string; is_error: boolean };
@@ -134,8 +153,9 @@ export type SdkFrame =
 	| SystemInitFrame
 	| SystemStatusFrame
 	| AssistantFrame
-	| NotLoggedInFrame
+	| SyntheticApiErrorFrame
 	| UserToolResultFrame
+	| UserInterruptFrame
 	| UserReplayFrame
 	| StreamEventFrame
 	| ResultFrame
@@ -143,7 +163,7 @@ export type SdkFrame =
 
 /** A control request body. The handler table dispatches on `subtype`, and a subtype with no handler is answered with an error. */
 export interface ControlRequestBody {
-	subtype: string;
+	subtype?: unknown;
 	[key: string]: unknown;
 }
 
@@ -152,4 +172,4 @@ export type SdkInput =
 	| { kind: "user"; content: string | Json[]; text: string; images: ImageContent[] }
 	| { kind: "control"; requestId: string | undefined; request: ControlRequestBody }
 	| { kind: "ignored" }
-	| { kind: "invalid"; characters: number };
+	| { kind: "invalid"; message: string };

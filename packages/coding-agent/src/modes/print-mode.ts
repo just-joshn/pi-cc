@@ -12,6 +12,7 @@ import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { toJsonEvent } from "./json-event.ts";
+import { limitTurns } from "./max-turns.ts";
 import { SdkHost, type SdkHostOptions, type SdkPrompt } from "./sdk/host.ts";
 
 /**
@@ -24,6 +25,8 @@ interface PrintModeBase {
 	initialMessage?: string;
 	/** Images to attach to the initial message */
 	initialImages?: ImageContent[];
+	/** Claude Code's `--max-turns`, for the text mode. The SDK host takes it in `sdk`. */
+	maxTurns?: number;
 }
 
 export type PrintModeOptions =
@@ -158,12 +161,29 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			return await sdkHost.run(prompts);
 		}
 
+		let reachedMaxTurns = false;
+		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<void> => {
+			const limit = limitTurns(session.agent, mode === "text" ? options.maxTurns : undefined);
+			try {
+				await session.prompt(text, { images });
+			} finally {
+				limit.release();
+			}
+			reachedMaxTurns ||= limit.reached();
+		};
+
 		if (initialMessage) {
-			await session.prompt(initialMessage, { images: initialImages });
+			await promptWithinLimit(initialMessage, initialImages);
 		}
 
 		for (const message of messages) {
-			await session.prompt(message);
+			if (reachedMaxTurns) break;
+			await promptWithinLimit(message);
+		}
+
+		if (reachedMaxTurns) {
+			writeRawStdout(`Error: Reached max turns (${options.maxTurns})`);
+			return 1;
 		}
 
 		if (mode === "text") {

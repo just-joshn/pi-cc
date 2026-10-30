@@ -15,9 +15,11 @@ import type {
 	MessageUsage,
 	SdkFrame,
 	StreamEventFrame,
+	UserInterruptFrame,
 	UserToolResultFrame,
 } from "./frames.ts";
-import { anthropicStopReason, type ModelLimits, type TurnTally } from "./result.ts";
+import { anthropicStopReason, apiErrorText, type ModelLimits, type TurnTally } from "./result.ts";
+import { syntheticApiErrorFrame } from "./synthetic.ts";
 
 export interface RenderContext {
 	sessionId(): string;
@@ -33,6 +35,11 @@ interface OpenMessage {
 	id: string;
 	model: string;
 	usage: MessageUsage;
+	/** Content block indexes that started, and those that finished. A block still open when an interrupt lands is abandoned. */
+	started: Set<number>;
+	ended: Set<number>;
+	/** The latest partial message the stream reported, which holds the text of a block cut off mid-way. */
+	partial: AssistantMessage | undefined;
 }
 
 interface SeenCall {
@@ -48,6 +55,7 @@ export class FrameRenderer {
 	private requests = 0;
 	private requestStartedAt = 0;
 	private firstBlockSeen = false;
+	private interrupted = false;
 	private readonly calls = new Map<string, SeenCall>();
 
 	constructor(context: RenderContext) {
@@ -59,6 +67,12 @@ export class FrameRenderer {
 		this.tally = tally;
 		this.open = undefined;
 		this.requests = 0;
+		this.interrupted = false;
+	}
+
+	/** An interrupt control request arrived: the tool results and aborted request that follow are its doing. */
+	markInterrupted(): void {
+		this.interrupted = true;
 	}
 
 	onEvent(event: AgentSessionEvent): void {
@@ -67,24 +81,20 @@ export class FrameRenderer {
 				this.requestStartedAt = this.context.now();
 				this.firstBlockSeen = false;
 				this.requests += 1;
-				if (this.requests > 1 && this.context.includePartial) this.status();
+				if (this.requests > 1 && this.context.includePartial && !this.interrupted) this.status();
 				return;
 			case "message_update":
 				this.onStream(event.assistantMessageEvent);
 				return;
 			case "message_end":
 				if (event.message.role === "assistant") {
-					const message = event.message as AssistantMessage;
-					this.messageEnd(message);
-					this.tally?.addAssistant(
-						message,
-						this.context.now() - this.requestStartedAt,
-						this.context.limitsOf(message),
-					);
-					this.open = undefined;
+					this.assistantEnd(event.message as AssistantMessage);
 				} else if (event.message.role === "toolResult") {
 					this.context.emit(this.toolResultFrame(event.message as ToolResultMessage));
 				}
+				return;
+			case "turn_end":
+				if (event.toolResults.length > 0 && this.tally !== undefined) this.tally.toolBatches += 1;
 				return;
 			default:
 				return;
@@ -103,6 +113,7 @@ export class FrameRenderer {
 	}
 
 	private onStream(event: AssistantMessageEvent): void {
+		if (this.open !== undefined && "partial" in event) this.open.partial = event.partial;
 		switch (event.type) {
 			case "text_start":
 				this.blockStart(event.partial, event.contentIndex, { type: "text", text: "" });
@@ -161,12 +172,23 @@ export class FrameRenderer {
 	private ensureOpen(partial: AssistantMessage): OpenMessage {
 		if (this.open !== undefined) return this.open;
 		const usage: MessageUsage = { input_tokens: partial.usage.input, output_tokens: partial.usage.output };
-		if (partial.usage.cacheWrite > 0) usage.cache_creation_input_tokens = partial.usage.cacheWrite;
+		if (partial.usage.cacheWrite > 0) {
+			usage.cache_creation_input_tokens = partial.usage.cacheWrite;
+			if (partial.usage.cacheWrite1h !== undefined) {
+				usage.cache_creation = {
+					ephemeral_5m_input_tokens: partial.usage.cacheWrite - partial.usage.cacheWrite1h,
+					ephemeral_1h_input_tokens: partial.usage.cacheWrite1h,
+				};
+			}
+		}
 		if (partial.usage.cacheRead > 0) usage.cache_read_input_tokens = partial.usage.cacheRead;
 		this.open = {
 			id: partial.responseId ?? `msg_${randomUUID().replaceAll("-", "")}`,
 			model: partial.responseModel ?? partial.model,
 			usage,
+			started: new Set(),
+			ended: new Set(),
+			partial,
 		};
 		return this.open;
 	}
@@ -174,6 +196,7 @@ export class FrameRenderer {
 	private blockStart(partial: AssistantMessage, index: number, block: ContentBlock): void {
 		const fresh = this.open === undefined;
 		const message = this.ensureOpen(partial);
+		message.started.add(index);
 		if (!this.firstBlockSeen && this.tally !== undefined) {
 			this.firstBlockSeen = true;
 			this.tally.ttftMs = this.context.now() - this.requestStartedAt;
@@ -208,8 +231,22 @@ export class FrameRenderer {
 
 	private blockEnd(index: number, block: ContentBlock): void {
 		if (this.open === undefined) return;
+		this.open.ended.add(index);
 		this.context.emit(this.assistantFrame(this.open, block));
 		if (this.context.includePartial) this.stream(this.open, { type: "content_block_stop", index });
+	}
+
+	private assistantEnd(message: AssistantMessage): void {
+		// A request started after an interrupt fails as a transport error, which is still the interrupt's doing.
+		const cutOff = message.stopReason === "aborted" || (this.interrupted && message.stopReason === "error");
+		if (cutOff) {
+			this.abortedEnd();
+		} else {
+			if (message.stopReason !== "error") this.messageEnd(message);
+			this.tally?.addAssistant(message, this.context.now() - this.requestStartedAt, this.context.limitsOf(message));
+			if (message.stopReason === "error") this.errorEnd();
+		}
+		this.open = undefined;
 	}
 
 	private messageEnd(message: AssistantMessage): void {
@@ -221,6 +258,70 @@ export class FrameRenderer {
 			});
 			this.stream(this.open, { type: "message_stop" });
 		}
+	}
+
+	/** A failed request becomes the synthetic API-error row, where Claude Code writes its own. */
+	private errorEnd(): void {
+		const outcome = this.tally?.outcome;
+		if (outcome?.kind !== "api_error") return;
+		this.context.emit(
+			syntheticApiErrorFrame({
+				sessionId: this.context.sessionId(),
+				text: apiErrorText(outcome),
+				error: outcome.status === 401 ? "authentication_failed" : "unknown",
+				status: outcome.status,
+			}),
+		);
+	}
+
+	/**
+	 * A request cut off by an interrupt. Text the model had begun is written as an aborted row, the
+	 * interrupt notice follows, and an open stream is closed with the blocks it abandoned. A thinking or
+	 * tool block that had not finished is dropped (measured).
+	 */
+	private abortedEnd(): void {
+		const open = this.open;
+		const unfinished =
+			open === undefined ? [] : [...open.started].filter((index) => !open.ended.has(index)).sort((a, b) => a - b);
+		let abandonedFrom = open === undefined ? 0 : Math.max(-1, ...open.started) + 1;
+		for (const index of unfinished) {
+			const block = open?.partial?.content[index];
+			if (open !== undefined && block?.type === "text" && block.text !== "") {
+				this.context.emit({ ...this.assistantFrame(open, { type: "text", text: block.text }), aborted: true });
+			} else {
+				abandonedFrom = Math.min(abandonedFrom, index);
+			}
+		}
+		const afterTools = this.tally?.outcome.kind === "aborted_tools";
+		this.context.emit(this.interruptFrame(afterTools));
+		if (this.tally !== undefined && !afterTools) this.tally.outcome = { kind: "aborted_streaming" };
+		if (open === undefined || !this.context.includePartial) return;
+		for (const index of unfinished) this.stream(open, { type: "content_block_stop", index });
+		this.stream(open, abortedMessageDelta(open.usage));
+		this.stream(
+			open,
+			{ type: "message_stop" },
+			{ abandoned_blocks: { api_message_id: open.id, from_block_index: abandonedFrom } },
+		);
+	}
+
+	private interruptFrame(afterTools: boolean): UserInterruptFrame {
+		return {
+			type: "user",
+			message: {
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: afterTools ? "[Request interrupted by user for tool use]" : "[Request interrupted by user]",
+					},
+				],
+			},
+			parent_tool_use_id: null,
+			session_id: this.context.sessionId(),
+			uuid: randomUUID(),
+			timestamp: new Date(this.context.now()).toISOString(),
+		};
 	}
 
 	private assistantFrame(message: OpenMessage, block: ContentBlock): AssistantFrame {
@@ -257,28 +358,70 @@ export class FrameRenderer {
 	}
 
 	private toolResultFrame(message: ToolResultMessage): UserToolResultFrame {
-		const text = message.content
-			.filter((block) => block.type === "text")
-			.map((block) => block.text)
-			.join("\n");
-		const call = this.calls.get(message.toolCallId);
-		const block: Json = {
-			tool_use_id: message.toolCallId,
-			type: "tool_result",
-			content: toolResultContent(message, text),
-		};
-		if (message.isError) block.is_error = true;
-		return {
-			type: "user",
-			message: { role: "user", content: [block] },
+		const frame = {
+			type: "user" as const,
 			parent_tool_use_id: null,
 			session_id: this.context.sessionId(),
 			uuid: randomUUID(),
 			timestamp: new Date(this.context.now()).toISOString(),
-			tool_use_result: toolUseResult(call, text, message.isError),
+		};
+		if (this.interrupted && message.isError) {
+			if (this.tally !== undefined) this.tally.outcome = { kind: "aborted_tools" };
+			return {
+				...frame,
+				message: {
+					role: "user",
+					content: [
+						{ type: "tool_result", content: REJECTED_TOOL_TEXT, is_error: true, tool_use_id: message.toolCallId },
+					],
+				},
+				tool_use_result: "User rejected tool use",
+				tool_result_meta: [{ id: message.toolCallId, non_execution_kind: "user-rejected" }],
+			};
+		}
+		const call = this.calls.get(message.toolCallId);
+		const isBash = call?.modelName === "Bash" && !message.isError;
+		const text = message.content
+			.filter((block) => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+		const shown = isBash ? text.trimEnd() : text;
+		const block: Json = {
+			tool_use_id: message.toolCallId,
+			type: "tool_result",
+			content: toolResultContent(message, shown),
+		};
+		if (message.isError) block.is_error = true;
+		else if (isBash) block.is_error = false;
+		return {
+			...frame,
+			message: { role: "user", content: [block] },
+			tool_use_result: toolUseResult(call, shown, message.isError),
 		};
 	}
 }
+
+/** The `message_delta` Claude Code writes for a request an interrupt cut off: no stop reason, and the usage the stream began with. */
+function abortedMessageDelta(usage: MessageUsage): Json {
+	return {
+		type: "message_delta",
+		context_management: null,
+		delta: { container: null, stop_details: null, stop_reason: null, stop_sequence: null },
+		usage: {
+			output_tokens_details: { thinking_tokens: 0 },
+			cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+			cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+			input_tokens: usage.input_tokens,
+			iterations: [],
+			output_tokens: usage.output_tokens,
+			server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+			fallback_credit: null,
+		},
+	};
+}
+
+const REJECTED_TOOL_TEXT =
+	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
 
 /** Text-only results are one string. A result holding images is an array of blocks in the order the tool produced them. */
 function toolResultContent(message: ToolResultMessage, text: string): string | Json[] {

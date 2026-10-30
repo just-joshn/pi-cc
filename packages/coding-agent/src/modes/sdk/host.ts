@@ -9,13 +9,15 @@ import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
+import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
-import { encodeFrame, invalidLineMessage, parseInputLine } from "./codec.ts";
+import { encodeFrame, parseInputLine } from "./codec.ts";
 import { handleControlRequest } from "./control.ts";
-import type { Json, NotLoggedInFrame, SdkFrame, UserReplayFrame } from "./frames.ts";
+import type { Json, SdkFrame, UserReplayFrame } from "./frames.ts";
 import { buildInitFrame, readSessionFacts } from "./init.ts";
 import { FrameRenderer } from "./render.ts";
-import { SessionLedger, TurnTally } from "./result.ts";
+import { reportedOutputCap, SessionLedger, TurnTally } from "./result.ts";
+import { syntheticApiErrorFrame } from "./synthetic.ts";
 
 export interface SdkHostOptions {
 	outputFormat: "json" | "stream-json";
@@ -25,6 +27,8 @@ export interface SdkHostOptions {
 	includePartial: boolean;
 	replayUser: boolean;
 	permissionMode: string;
+	/** `--max-turns`: model requests one user message may take before it ends with `error_max_turns`. */
+	maxTurns?: number;
 	/** Whether the provider has a credential, asked for the model selected now so a `set_model` shows. */
 	hasAuth(provider: string): boolean;
 	/** Where stream-json user messages and control requests arrive. */
@@ -50,6 +54,7 @@ export class SdkHost {
 	private readonly permissionMode: { current: string };
 	private readonly collected: SdkFrame[] = [];
 	private readonly renderer: FrameRenderer;
+	private readonly defaultModel: AgentSession["model"];
 	private exitCode = 0;
 	private ended = false;
 
@@ -57,6 +62,7 @@ export class SdkHost {
 		this.getSession = getSession;
 		this.options = options;
 		this.permissionMode = { current: options.permissionMode };
+		this.defaultModel = getSession().model;
 		this.renderer = new FrameRenderer({
 			sessionId: () => this.getSession().sessionId,
 			includePartial: options.includePartial,
@@ -64,7 +70,10 @@ export class SdkHost {
 			now: () => Date.now(),
 			limitsOf: (message) => {
 				const model = this.getSession().modelRuntime.getModel(message.provider, message.model);
-				return { contextWindow: model?.contextWindow ?? 0, maxOutputTokens: model?.maxTokens ?? 0 };
+				return {
+					contextWindow: model?.contextWindow ?? 0,
+					maxOutputTokens: reportedOutputCap(message.model, model?.maxTokens ?? 0),
+				};
 			},
 		});
 	}
@@ -108,7 +117,13 @@ export class SdkHost {
 		const { facts, authConfigured } = this.factsOf(session);
 		this.emit(buildInitFrame(facts));
 		if (!authConfigured) {
-			this.emit(notLoggedInFrame(facts.sessionId));
+			this.emit(
+				syntheticApiErrorFrame({
+					sessionId: facts.sessionId,
+					text: NOT_LOGGED_IN_TEXT,
+					error: "authentication_failed",
+				}),
+			);
 			this.emit(this.ledger.notLoggedInResult(facts.sessionId, Date.now(), startedAt, NOT_LOGGED_IN_TEXT));
 			this.exitCode = 1;
 			return;
@@ -117,8 +132,16 @@ export class SdkHost {
 		if (this.options.replayUser) this.emit(replayFrame(facts.sessionId, prompt));
 		const tally = new TurnTally(startedAt);
 		this.renderer.beginTurn(tally);
-		await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
-		await session.waitForIdle();
+		const limit = limitTurns(session.agent, this.options.maxTurns);
+		try {
+			await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
+			await session.waitForIdle();
+		} finally {
+			limit.release();
+		}
+		if (limit.reached() && this.options.maxTurns !== undefined) {
+			tally.outcome = { kind: "max_turns", limit: this.options.maxTurns };
+		}
 		const result = this.ledger.result(tally, session.sessionId, Date.now());
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
@@ -131,7 +154,7 @@ export class SdkHost {
 			if (line.trim() === "") return;
 			const input = parseInputLine(line);
 			if (input.kind === "invalid") {
-				inbox.fail(invalidLineMessage(input.characters));
+				inbox.fail(input.message);
 			} else if (input.kind === "user") {
 				// Behind earlier control requests, so their responses leave before the turn's init frame.
 				control = control.then(() =>
@@ -147,6 +170,8 @@ export class SdkHost {
 						env: this.options.env,
 						home: homedir(),
 						permissionMode: this.permissionMode,
+						defaultModel: this.defaultModel,
+						interrupted: () => this.renderer.markInterrupted(),
 						endSession: () => {
 							this.ended = true;
 							inbox.close();
@@ -239,44 +264,5 @@ function replayFrame(sessionId: string, prompt: SdkPrompt): UserReplayFrame {
 		uuid: randomUUID(),
 		timestamp: new Date().toISOString(),
 		isReplay: true,
-	};
-}
-
-function notLoggedInFrame(sessionId: string): NotLoggedInFrame {
-	return {
-		type: "assistant",
-		message: {
-			diagnostics: null,
-			id: randomUUID(),
-			container: null,
-			model: "<synthetic>",
-			role: "assistant",
-			stop_details: null,
-			stop_reason: "stop_sequence",
-			stop_sequence: "",
-			type: "message",
-			usage: {
-				output_tokens_details: null,
-				input_tokens: 0,
-				output_tokens: 0,
-				cache_creation_input_tokens: 0,
-				cache_read_input_tokens: 0,
-				server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
-				service_tier: null,
-				cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
-				inference_geo: null,
-				iterations: null,
-				speed: null,
-				fallback_credit: null,
-			},
-			content: [{ type: "text", text: NOT_LOGGED_IN_TEXT }],
-			context_management: null,
-		},
-		parent_tool_use_id: null,
-		session_id: sessionId,
-		uuid: randomUUID(),
-		timestamp: new Date().toISOString(),
-		error: "authentication_failed",
-		is_api_error_message: true,
 	};
 }
