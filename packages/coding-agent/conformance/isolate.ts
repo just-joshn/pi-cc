@@ -23,6 +23,7 @@ import {
 	readFileSync,
 	readlinkSync,
 	realpathSync,
+	renameSync,
 	writeFileSync,
 } from "node:fs";
 import { userInfo } from "node:os";
@@ -249,6 +250,29 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
 		scanDirectory(current.path, current.prefix, root, wantedPaths, scan, pending);
 	}
 	return scan;
+}
+
+/**
+ * Moves the workspace out of the side's write grant before the harness reads it, and returns where it
+ * now lives. A process that outlived the side can then neither add nor change a file in the tree the
+ * harness hashes, because the profile grants writes only under `roots.root`. A workspace that no longer
+ * exists is scanned where the case expected it, which reports it as unreadable.
+ */
+function takeWorkspace(roots: Roots): string {
+	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
+	try {
+		renameSync(roots.workspace, snapshot);
+		return snapshot;
+	} catch {
+		// The workspace could not be moved out of the side's reach, so scan a path that cannot exist
+		// rather than a tree the side can still write. That reports as unreadable, which fails the case.
+		return join(dirname(roots.root), `snapshot-${roots.side}-unavailable`);
+	}
+}
+
+/** Hashes the workspace after moving it out of the side's reach. */
+export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan {
+	return hashTree(takeWorkspace(roots), wanted);
 }
 
 /** The paths that exist, where a dangling link counts as present: the side tried to create something. */
