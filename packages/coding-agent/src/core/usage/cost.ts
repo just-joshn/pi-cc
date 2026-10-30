@@ -1,5 +1,3 @@
-/** Pure cost arithmetic: a request's token categories, the rates that apply to its model, and the dollars that follow. */
-
 import type { Usage } from "@earendil-works/pi-ai";
 import { type CatalogModel, DEFAULT_RATES, findCatalogModel, type ModelRates, ratesOf } from "./pricing.ts";
 

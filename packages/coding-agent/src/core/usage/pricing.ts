@@ -1,5 +1,3 @@
-/** Claude Code 2.1.312's model price list, as data: rate tiers, the catalog of models that use them, and how a model name finds its entry. */
-
 /** US dollars per million tokens, and per web search request. */
 export interface ModelRates {
 	input: number;
@@ -292,7 +290,6 @@ export const CATALOG: readonly CatalogModel[] = [
 /** What a model Claude Code has no price for pays: the Opus 4.5 to 5 tier. */
 export const DEFAULT_RATES: ModelRates = TIERS.tier_5_25;
 
-/** The rates a fast-mode response pays. Only the models that offer fast mode have an entry. */
 const FAST_RATES: Readonly<Record<string, ModelRates>> = {
 	"claude-opus-5-5": { input: 8, output: 40, cacheWrite5m: 10, cacheWrite1h: 16, cacheRead: 0.4, webSearch: 0.01 },
 	"claude-opus-4-8": { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 1, webSearch: 0.01 },

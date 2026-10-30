@@ -550,13 +550,11 @@ async function* iterateAnthropicEvents(response: Response, signal?: AbortSignal)
 	}
 }
 
-/** Records the TTL split of cache writes exactly as the response reported it, each figure only when present. */
 function recordCacheSplit(target: Usage, split: AnthropicUsage["cache_creation"]): void {
 	if (split?.ephemeral_1h_input_tokens != null) target.cacheWrite1h = split.ephemeral_1h_input_tokens;
 	if (split?.ephemeral_5m_input_tokens != null) target.cacheWrite5m = split.ephemeral_5m_input_tokens;
 }
 
-/** Copies the billing facts beyond token counts (web searches, serving region, speed tier) the usage reports. */
 function recordServedFields(target: Usage, wire: AnthropicUsage): void {
 	const searches = wire.server_tool_use?.web_search_requests;
 	if (searches != null) target.webSearchRequests = searches;

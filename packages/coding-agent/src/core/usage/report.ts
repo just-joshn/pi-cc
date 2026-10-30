@@ -1,5 +1,3 @@
-/** What `/usage` (also `/cost` and `/stats`) shows for a session: per-model totals folded from its messages, and Claude Code's text for them. */
-
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { type CostBasis, canonicalName, chargeFor, hasNativeRates, type PricingPolicy } from "./cost.ts";
 
@@ -112,7 +110,6 @@ interface PatchedDetails {
 	patch?: unknown;
 }
 
-/** Lines the session's successful edits and writes added and removed: edit patches count their `+` and `-` lines, a write counts its content as added. */
 function codeChanges(messages: readonly SessionMessage[]): { added: number; removed: number } {
 	const writes = new Map<string, string>();
 	for (const message of messages) {
@@ -230,10 +227,6 @@ export function formatUsageReport(input: UsageReportInput): string {
 	].join("\n");
 }
 
-/**
- * The prompt cache row. Claude Code also describes a warm or cold cache and each miss, which needs a
- * per-request cache tracker pi does not have, so the row appears only for a session that never cached.
- */
 function cacheLine(input: UsageReportInput): string | undefined {
 	if (input.requests === 0 || input.cachingObserved) return undefined;
 	const percent = Math.round((input.cacheHitRatio ?? 0) * 100);

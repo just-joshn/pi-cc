@@ -1,5 +1,3 @@
-/** The `/usage` view: Claude Code's session usage text in a dialog that closes with Esc and writes nothing to the transcript. */
-
 import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

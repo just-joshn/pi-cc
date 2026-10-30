@@ -91,7 +91,6 @@ export class TurnTally {
 	ttftMs = 0;
 	denials: Denial[] = [];
 	private readonly price: RequestPricer;
-	/** What earlier user messages of the session spent, which `--max-budget-usd` counts too. */
 	private readonly priorCostUSD: number;
 	private readonly budgetUsd: number | undefined;
 

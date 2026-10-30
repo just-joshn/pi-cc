@@ -1,5 +1,3 @@
-/** Claude Code's `--max-budget-usd`: when a run is past its limit, what it says, and the agent hooks that end it. */
-
 import type { Agent, AgentTurnDecision } from "@earendil-works/pi-agent-core";
 
 /** A run is over budget once its spend reaches the limit. A spend that is not a number counts as over. */

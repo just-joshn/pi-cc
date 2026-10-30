@@ -1,5 +1,3 @@
-/** The usage fields Claude Code hands a status line command, computed from a session's totals. */
-
 /** The latest request's usage in Anthropic's wire names. */
 export interface CurrentUsage {
 	input_tokens: number;

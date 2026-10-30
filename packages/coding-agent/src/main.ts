@@ -181,7 +181,6 @@ function openCcSettingsForRun(parsed: Args, cwd: string, trust: boolean | "pendi
 	return run;
 }
 
-/** The operator's `modelPricing`, honored only from the managed policy tier. */
 function ccPricingPolicy(settings: CcSettings): PricingPolicy | undefined {
 	return settings.sources.get("modelPricing") === "policy"
 		? parsePricingPolicy(settings.values.modelPricing)
