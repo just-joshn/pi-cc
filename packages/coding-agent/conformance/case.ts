@@ -154,7 +154,8 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 	const model = object.model === null ? null : asCheckedObject(object.model, source, "model", MODEL_KEYS);
 	const probe = asProbeName(object.probe, source);
 	const argv = asOptionalStringArray(object.argv, source, "argv") ?? [];
-	const problem = argvProblem(argv, probe ?? "side");
+	const notApplicable = asNotApplicable(object.not_applicable, source);
+	const problem = argvProblem(argv, probe ?? "side", notApplicable.claude === undefined);
 	if (problem !== undefined) fail(source, problem);
 	const env = asStringRecord(object.env, source, "env");
 	const envIssue = envProblem(env);
@@ -179,7 +180,7 @@ function parseCase(raw: unknown, source: string, area: string): ConformanceCase 
 		timeout_ms,
 		compare: asCompareSpec(object.compare, source),
 		skip,
-		notApplicable: asNotApplicable(object.not_applicable, source),
+		notApplicable,
 	};
 }
 

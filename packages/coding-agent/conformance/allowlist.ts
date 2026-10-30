@@ -88,6 +88,14 @@ const SIDE_ARGV: ArgvAllowlist = {
 };
 
 /**
+ * Words only the pi-cc side may run. `claude update` replaces the reference binary from Anthropic's
+ * release feed, so a case that names one must declare the claude side not applicable, and the loader
+ * refuses it otherwise. The pi-cc side cannot reach a feed: it has none configured and the sandbox
+ * denies the network.
+ */
+const PI_CC_ONLY_WORDS: readonly string[] = ["update", "upgrade"];
+
+/**
  * Each probe's own argv surface, keyed by `PROBES` so a new probe cannot ship without its list. A
  * probe runs a fixed system binary, so its flags are not Claude Code's flags.
  */
@@ -115,6 +123,8 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"ANTHROPIC_DEFAULT_SONNET_MODEL",
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
+	// P39: the administrator switch `update` honors, which only a pi-cc-only case sets.
+	"DISABLE_UPDATES",
 ];
 
 /**
@@ -129,7 +139,7 @@ const UNSET_ENV_KEYS: readonly string[] = ["ANTHROPIC_API_KEY"];
 const BARE_WORD = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /** What a case may not run, or undefined. Tokens that are neither flags nor bare words are free text. */
-export function argvProblem(argv: readonly string[], program: ArgvProgram): string | undefined {
+export function argvProblem(argv: readonly string[], program: ArgvProgram, claudeRuns = true): string | undefined {
 	const allowlist = program === "side" ? SIDE_ARGV : PROBE_ARGV[program];
 	const name = program === "side" ? "SIDE_ARGV" : `PROBE_ARGV.${program}`;
 	for (const token of argv) {
@@ -137,6 +147,12 @@ export function argvProblem(argv: readonly string[], program: ArgvProgram): stri
 			const flag = token.split("=")[0];
 			if (allowlist.flags.includes(flag)) continue;
 			return `argv flag "${flag}" is not in the reviewed allowlist, so add it to ${name}.flags in conformance/allowlist.ts after review`;
+		}
+		if (program === "side" && PI_CC_ONLY_WORDS.includes(token)) {
+			if (claudeRuns) {
+				return `argv word "${token}" is not in the reviewed allowlist for a case the claude side runs, so declare not_applicable.claude for the case or drop the word`;
+			}
+			continue;
 		}
 		if (!BARE_WORD.test(token) || allowlist.words.includes(token)) continue;
 		return `argv word "${token}" is not in the reviewed allowlist, so add it to ${name}.words in conformance/allowlist.ts after review`;

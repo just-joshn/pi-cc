@@ -280,6 +280,18 @@ Running `pi update` without a target updates Pi itself.
 
 Add `--force` to reinstall Pi when the selected update includes Pi.
 
+`pi upgrade` is an alias for `pi update`.
+
+pi-cc has no release feed of its own and never contacts Anthropic. With no feed, `pi update` (and `--all`) prints the current version, reports that there is no release feed, and exits 1. Rebuild from the source checkout instead. Point `PI_CC_UPDATE_FEED_URL` at your own feed, a JSON endpoint returning `{ "version": "x.y.z", "packageName": "...", "note": "..." }`, to enable self-update and the startup check. The feed URL names the channel, so `autoUpdatesChannel` has no effect.
+
+| Control | Effect |
+|---|---|
+| `DISABLE_UPDATES` | `pi update` prints "Updates are disabled by your administrator" and exits 0 for the self-update part. The startup check is off. |
+| `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | The startup check is off. A manual `pi update` still runs. |
+| `minimumVersion` (user settings) | `pi update` stays on the current version when the feed is below it. |
+| `requiredMaximumVersion` (managed policy) | `pi update` stays when the feed is above it. A run of a build above it refuses to start. |
+| `requiredMinimumVersion` (managed policy) | A run of a build below it refuses to start. |
+
 `pi update` cannot update Pi when another package manager provides it, such as Nix. Update Pi with that package manager, for example `nix profile upgrade pi`. Package and model catalog updates still work.
 
 ### Aliases and command options

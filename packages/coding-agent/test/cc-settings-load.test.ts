@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
+import { APP_NAME } from "../src/config.ts";
 import { type ProjectTrustSignals, readInitialProjectTrust } from "../src/core/project-trust.ts";
 import { type CcSettingsLocation, ccPolicyGate, loadCcSettings } from "../src/core/settings/cc/load.ts";
 import {
@@ -398,16 +399,22 @@ describe("policy tier", () => {
 		expect(gate.policy.allowedProviders).toBeUndefined();
 	});
 
-	test("a policy above the running version refuses and names the file", () => {
+	test("a policy above the running version refuses with the organization's wording", () => {
 		const gate = ccPolicyGate({ requiredMinimumVersion: "9.0.0" }, "1.4.0", MANAGED);
-		expect(gate.refusal).toContain(MANAGED);
-		expect(gate.refusal).toContain("above the running version");
+		expect(gate.refusal).toContain("older than the minimum version required by your organization (9.0.0)");
+		expect(gate.refusal?.startsWith(`${APP_NAME} 1.4.0 is older`)).toBe(true);
+	});
+
+	test("a policy below the running version refuses on the maximum", () => {
+		const gate = ccPolicyGate({ requiredMaximumVersion: "1.0.0" }, "1.4.0", MANAGED);
+		expect(gate.refusal).toContain("newer than the maximum version allowed by your organization (1.0.0)");
 	});
 
 	test("an unusable provider list refuses and names the file", () => {
 		const gate = ccPolicyGate({ allowedProviders: [] }, "1.4.0", MANAGED);
 		expect(gate.refusal).toContain(MANAGED);
 		expect(gate.refusal).toContain("allowedProviders");
+		expect(gate.refusal?.startsWith("Error: ")).toBe(true);
 	});
 
 	test("a usable provider list is exposed without a refusal", () => {

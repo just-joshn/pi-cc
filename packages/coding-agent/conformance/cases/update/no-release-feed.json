@@ -1,0 +1,31 @@
+{
+	"id": "update/no-release-feed",
+	"area": "update",
+	"argv": [
+		"update"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 1,
+		"requests": [],
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Current version: \\S+"
+			]
+		},
+		"stderr": {
+			"contains": [
+				"Cannot update pi: it has no release feed"
+			]
+		}
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "claude update replaces the reference binary from Anthropic's release feed, so the harness never runs it; the measured claude behavior is in the P39 PR body and the dossier's help.update case"
+	}
+}

@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(87);
+		expect(cases.length).toBe(92);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -310,6 +310,28 @@ const FORMERLY_DENIED: string[][] = [
 describe("words the old denylist refused", () => {
 	test.each(FORMERLY_DENIED.map((argv) => [argv]))("still refuses %j", (argv) => {
 		expect(() => loadOne({ ...MINIMAL_CASE, argv })).toThrow(/is not in the reviewed allowlist/);
+	});
+});
+
+describe("words only the pi-cc side may run", () => {
+	test.each(["update", "upgrade"])("%s loads when the claude side is not applicable", (word) => {
+		const loaded = loadOne({ ...MINIMAL_CASE, argv: [word], not_applicable: { claude: "no release feed" } });
+		expect(loaded.argv).toEqual([word]);
+	});
+
+	test.each(["update", "upgrade"])("%s is refused when the claude side would run it", (word) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: [word] })).toThrow(
+			/is not in the reviewed allowlist for a case the claude side runs/,
+		);
+		expect(() => loadOne({ ...MINIMAL_CASE, argv: [word], not_applicable: { "pi-cc": "x" } })).toThrow(
+			/is not in the reviewed allowlist for a case the claude side runs/,
+		);
+	});
+
+	test("a probe never takes the word", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, probe: "ls", argv: ["update"], not_applicable: { claude: "x" } }),
+		).toThrow(/PROBE_ARGV\.ls\.words/);
 	});
 });
 

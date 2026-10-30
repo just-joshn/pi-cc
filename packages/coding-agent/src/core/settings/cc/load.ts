@@ -24,7 +24,7 @@ export interface CcSettingsLocation {
 	readonly home: string;
 	readonly env: Readonly<Record<string, string | undefined>>;
 	readonly platform: string;
-	/** The running version, for the policy's `requiredMinimumVersion` gate. */
+	/** The running version, for the policy's `requiredMinimumVersion` and `requiredMaximumVersion` gates. */
 	readonly version: string;
 	/** Tier names from `--setting-sources`. Undefined admits the three default file tiers. */
 	readonly settingSources: readonly string[] | undefined;
@@ -88,8 +88,8 @@ export function loadCcSettings(location: CcSettingsLocation): CcLoadResult {
 }
 
 /**
- * Parses the policy tier and applies its two gates. A refusal names the file, because the operator who
- * wrote it is the only one who can fix it.
+ * Parses the policy tier and applies its two gates. A provider refusal names the file, because the
+ * operator who wrote it is the only one who can fix it. A version refusal is Claude Code's text as is.
  */
 export function ccPolicyGate(
 	values: Readonly<Record<string, unknown>>,
@@ -98,10 +98,10 @@ export function ccPolicyGate(
 ): { readonly policy: CcPolicy; readonly refusal: string | undefined } {
 	const parsed = parseCcPolicy(values);
 	if (parsed.kind === "refusal") {
-		return { policy: EMPTY_CC_POLICY, refusal: `${path}: ${parsed.message}` };
+		return { policy: EMPTY_CC_POLICY, refusal: `Error: ${path}: ${parsed.message}` };
 	}
 	const gated = policyRefusal(parsed.policy, version);
-	return { policy: parsed.policy, refusal: gated === undefined ? undefined : `${path}: ${gated}` };
+	return { policy: parsed.policy, refusal: gated };
 }
 
 /** R1: `--setting-sources` narrows the file tiers only; the flag and policy tiers are always admitted. */

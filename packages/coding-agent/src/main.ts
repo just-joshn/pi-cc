@@ -165,7 +165,7 @@ function openCcSettingsForRun(parsed: Args, cwd: string, trust: boolean | "pendi
 	}
 	reportCcSettings(run);
 	if (run.refusal !== undefined) {
-		console.error(chalk.red(`Error: ${run.refusal}`));
+		console.error(chalk.red(run.refusal));
 		process.exit(1);
 	}
 	applyCcEnv(ccRunSettings(run.settings, parsed));
@@ -853,7 +853,7 @@ export async function main(args: string[], options?: MainOptions) {
 			}
 			reportCcSettings(repoTierReport(result.admission.run));
 			if (result.admission.run.refusal !== undefined) {
-				console.error(chalk.red(`Error: ${result.admission.run.refusal}`));
+				console.error(chalk.red(result.admission.run.refusal));
 				process.exit(1);
 			}
 			applyCcEnv(ccRunSettings(result.admission.run.settings, parsed));

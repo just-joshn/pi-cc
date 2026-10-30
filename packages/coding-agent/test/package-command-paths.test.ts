@@ -25,6 +25,8 @@ import { handlePackageCommand } from "../src/package-manager-cli.ts";
 import { captureStartupEnv } from "../src/utils/internal-env.ts";
 import { allowNetwork } from "./test-network-env.ts";
 
+const UPDATE_FEED = "https://releases.example.test/latest";
+
 describe("package commands", () => {
 	let tempDir: string;
 	let agentDir: string;
@@ -102,7 +104,7 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 			"fetch",
 			vi.fn(async (input: string | URL | Request) => {
 				const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-				if (url === "https://pi.dev/api/latest-version") {
+				if (url === UPDATE_FEED) {
 					return Response.json({ packageName: PACKAGE_NAME, version: targetVersion });
 				}
 				const releaseUrl = `https://example.test/api/installer/releases/${targetVersion}`;
@@ -162,6 +164,9 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 			return undefined as never;
 		}) as typeof process.exit);
 		process.env[ENV_AGENT_DIR] = agentDir;
+		vi.stubEnv("PI_CC_UPDATE_FEED_URL", UPDATE_FEED);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(tempDir, "claude-config"));
+		vi.stubEnv("DISABLE_UPDATES", undefined);
 		process.chdir(projectDir);
 	});
 
@@ -645,6 +650,88 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 				process.env.PI_SKIP_VERSION_CHECK = previousSkipVersionCheck;
 			}
 		}
+	});
+
+	describe("without a release feed", () => {
+		it.each(["update", "upgrade"])("%s reports no feed and exits 1 without a request", async (verb) => {
+			vi.stubEnv("PI_CC_UPDATE_FEED_URL", undefined);
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+			await runPackageCommandDirectly([verb]);
+
+			expect(fetchMock).not.toHaveBeenCalled();
+			expect(logSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
+				`Current version: ${VERSION}`,
+			);
+			expect(errorSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain("has no release feed");
+			expect(process.exitCode).toBe(1);
+		});
+
+		it("DISABLE_UPDATES exits 0 with the administrator message", async () => {
+			vi.stubEnv("DISABLE_UPDATES", "1");
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+			await runPackageCommandDirectly(["update"]);
+
+			expect(fetchMock).not.toHaveBeenCalled();
+			expect(logSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
+				"Updates are disabled by your administrator. Contact your IT team to get the latest version.",
+			);
+			expect(process.exitCode).toBeUndefined();
+		});
+
+		it("DISABLE_UPDATES=0 does not disable update", async () => {
+			vi.stubEnv("DISABLE_UPDATES", "0");
+			vi.stubEnv("PI_CC_UPDATE_FEED_URL", undefined);
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+			vi.spyOn(console, "error").mockImplementation(() => {});
+
+			await runPackageCommandDirectly(["update"]);
+
+			expect(logSpy.mock.calls.map(([message]) => String(message)).join("\n")).not.toContain(
+				"disabled by your administrator",
+			);
+			expect(process.exitCode).toBe(1);
+		});
+
+		it("update --models still runs with no feed", async () => {
+			vi.stubEnv("PI_CC_UPDATE_FEED_URL", undefined);
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async () => new Response("{}", { status: 404 })),
+			);
+
+			await runPackageCommandDirectly(["update", "--models"]);
+
+			expect(errorSpy.mock.calls.map(([message]) => String(message)).join("\n")).not.toContain("no release feed");
+		});
+	});
+
+	describe("version bounds on the update target", () => {
+		it("stays on the current version when the feed is below minimumVersion", async () => {
+			const claudeConfig = join(tempDir, "claude-config");
+			mkdirSync(claudeConfig, { recursive: true });
+			writeFileSync(join(claudeConfig, "settings.json"), JSON.stringify({ minimumVersion: "99.0.0" }));
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async () => Response.json({ packageName: PACKAGE_NAME, version: getNewerPatchVersion() })),
+			);
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+			await runPackageCommandDirectly(["update"]);
+
+			const stdout = logSpy.mock.calls.map(([message]) => String(message)).join("\n");
+			expect(stdout).toContain("which is below your minimumVersion setting (99.0.0)");
+			expect(stdout).toContain(`Staying on ${VERSION}.`);
+			expect(process.exitCode).toBeUndefined();
+		});
 	});
 
 	it("retries a transient self-update version check", async () => {

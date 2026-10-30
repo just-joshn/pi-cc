@@ -1,0 +1,27 @@
+{
+	"id": "update/upgrade-help",
+	"area": "update",
+	"argv": [
+		"upgrade",
+		"--help"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 30000,
+	"compare": {
+		"exit": 0,
+		"requests": [],
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"(?s)Usage:.*update"
+			]
+		}
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "claude update replaces the reference binary from Anthropic's release feed, so the harness never runs it; the measured claude behavior is in the P39 PR body and the dossier's help.update case"
+	}
+}
