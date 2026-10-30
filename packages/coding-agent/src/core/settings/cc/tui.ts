@@ -44,8 +44,10 @@ function screenReaderOn(settings: CcSettings, inputs: CcTuiInputs): boolean {
 		return true;
 	}
 	const fromEnv = inputs.env.CLAUDE_AX_SCREEN_READER;
+	// Claude Code uses the raw value: any non-empty string enables, even "false" or "0", and an
+	// empty one disables without consulting the setting (chunk-mn8jmdnf.js:108-113).
 	if (fromEnv !== undefined) {
-		return /^(1|true|yes|on)$/i.test(fromEnv.trim());
+		return fromEnv !== "";
 	}
 	return settings.operatorTier.axScreenReader === true;
 }

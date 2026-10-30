@@ -120,8 +120,17 @@ describe("resolveCcTuiSettings", () => {
 		const off = settingsFrom(document("user", { axScreenReader: false }));
 		expect(resolveCcTuiSettings(on, inputs).screenReader).toBe(true);
 		expect(resolveCcTuiSettings(off, { axScreenReaderFlag: true, env: {} }).screenReader).toBe(true);
+		// The environment value is used raw: any non-empty string enables, even "false" or "0",
+		// and an empty one disables without consulting the setting (chunk-mn8jmdnf.js:108-113).
 		expect(
-			resolveCcTuiSettings(on, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "0" } }).screenReader,
+			resolveCcTuiSettings(on, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "false" } })
+				.screenReader,
+		).toBe(true);
+		expect(
+			resolveCcTuiSettings(off, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "0" } }).screenReader,
+		).toBe(true);
+		expect(
+			resolveCcTuiSettings(on, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "" } }).screenReader,
 		).toBe(false);
 		expect(
 			resolveCcTuiSettings(off, { axScreenReaderFlag: false, env: { CLAUDE_AX_SCREEN_READER: "true" } })

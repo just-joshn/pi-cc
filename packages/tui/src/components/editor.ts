@@ -22,10 +22,13 @@ import {
 	sliceByColumn,
 	visibleWidth,
 } from "../utils.ts";
-import { INSERT_STATE, type VimInput, type VimState, vimKey } from "../vim/engine.ts";
-import { BACKSPACE } from "../vim/motions.ts";
+import type { Buffer } from "../vim/edits.ts";
+import { INSERT_STATE, type VimInput, type VimMode, type VimState, vimKey } from "../vim/engine.ts";
+import { pendingClass, routeSpecialKey } from "../vim/keys.ts";
 import { type PendingRemap, stepRemap, type VimConfig } from "../vim/remaps.ts";
 import { clampNormal } from "../vim/text.ts";
+import { visualBounds } from "../vim/visual.ts";
+import { isPasteMarker, lineRows, PASTE_MARKER_SINGLE, wordWrapLine } from "../vim/wrap.ts";
 import { findWordBackward, findWordForward } from "../word-navigation.ts";
 import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.ts";
 
@@ -34,14 +37,6 @@ const wordSegmenter = getWordSegmenter();
 
 /** Regex matching paste markers like `[paste #1 +123 lines]` or `[paste #2 1234 chars]`. */
 const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
-
-/** Non-global version for single-segment testing. */
-const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
-
-/** Check if a segment is a paste marker (i.e. was merged by segmentWithMarkers). */
-function isPasteMarker(segment: string): boolean {
-	return segment.length >= 10 && PASTE_MARKER_SINGLE.test(segment);
-}
 
 /**
  * A segmenter that wraps Intl.Segmenter and merges graphemes that fall
@@ -104,121 +99,6 @@ function segmentWithMarkers(
 	return result;
 }
 
-/**
- * Represents a chunk of text for word-wrap layout.
- * Tracks both the text content and its position in the original line.
- */
-export interface TextChunk {
-	text: string;
-	startIndex: number;
-	endIndex: number;
-}
-
-/**
- * Split a line into word-wrapped chunks.
- * Wraps at word boundaries when possible, falling back to character-level
- * wrapping for words longer than the available width.
- *
- * @param line - The text line to wrap
- * @param maxWidth - Maximum visible width per chunk
- * @param preSegmented - Optional pre-segmented graphemes (e.g. with paste-marker awareness).
- *                       When omitted the default Intl.Segmenter is used.
- * @returns Array of chunks with text and position information
- */
-export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl.SegmentData[]): TextChunk[] {
-	if (!line || maxWidth <= 0) {
-		return [{ text: "", startIndex: 0, endIndex: 0 }];
-	}
-
-	const lineWidth = visibleWidth(line);
-	if (lineWidth <= maxWidth) {
-		return [{ text: line, startIndex: 0, endIndex: line.length }];
-	}
-
-	const chunks: TextChunk[] = [];
-	const segments = preSegmented ?? [...graphemeSegmenter.segment(line)];
-
-	let currentWidth = 0;
-	let chunkStart = 0;
-
-	// Wrap opportunity: the position after the last whitespace before a non-whitespace
-	// grapheme, i.e. where a line break is allowed.
-	let wrapOppIndex = -1;
-	let wrapOppWidth = 0;
-
-	for (let i = 0; i < segments.length; i++) {
-		const seg = segments[i]!;
-		const grapheme = seg.segment;
-		const gWidth = visibleWidth(grapheme);
-		const charIndex = seg.index;
-		const isWs = !isPasteMarker(grapheme) && isWhitespaceChar(grapheme);
-
-		// Overflow check before advancing.
-		if (currentWidth + gWidth > maxWidth) {
-			if (wrapOppIndex >= 0 && currentWidth - wrapOppWidth + gWidth <= maxWidth) {
-				// Backtrack to last wrap opportunity (the remaining content
-				// plus the current grapheme still fits within maxWidth).
-				chunks.push({ text: line.slice(chunkStart, wrapOppIndex), startIndex: chunkStart, endIndex: wrapOppIndex });
-				chunkStart = wrapOppIndex;
-				currentWidth -= wrapOppWidth;
-			} else if (chunkStart < charIndex) {
-				// No viable wrap opportunity: force-break at current position.
-				// This also handles the case where backtracking to a word
-				// boundary wouldn't help because the remaining content plus
-				// the current grapheme (e.g. a wide character) still exceeds
-				// maxWidth.
-				chunks.push({ text: line.slice(chunkStart, charIndex), startIndex: chunkStart, endIndex: charIndex });
-				chunkStart = charIndex;
-				currentWidth = 0;
-			}
-			wrapOppIndex = -1;
-		}
-
-		if (gWidth > maxWidth) {
-			// Single atomic segment wider than maxWidth (e.g. paste marker
-			// in a narrow terminal). Re-wrap it at grapheme granularity.
-
-			// The segment remains logically atomic for cursor
-			// movement / editing — the split is purely visual for word-wrap layout.
-			const subChunks = wordWrapLine(grapheme, maxWidth);
-			for (let j = 0; j < subChunks.length - 1; j++) {
-				const sc = subChunks[j]!;
-				chunks.push({ text: sc.text, startIndex: charIndex + sc.startIndex, endIndex: charIndex + sc.endIndex });
-			}
-			const last = subChunks[subChunks.length - 1]!;
-			chunkStart = charIndex + last.startIndex;
-			currentWidth = visibleWidth(last.text);
-			wrapOppIndex = -1;
-			continue;
-		}
-
-		// Advance.
-		currentWidth += gWidth;
-
-		// Record wrap opportunity: whitespace followed by non-whitespace
-		// (multiple spaces join; the break point is after the last space),
-		// or at a boundary where either side is CJK (CJK allows breaking
-		// between any adjacent characters).
-		const next = segments[i + 1];
-		if (isWs && next && (isPasteMarker(next.segment) || !isWhitespaceChar(next.segment))) {
-			wrapOppIndex = next.index;
-			wrapOppWidth = currentWidth;
-		} else if (!isWs && next && !isWhitespaceChar(next.segment)) {
-			const isCjk = !isPasteMarker(grapheme) && cjkBreakRegex.test(grapheme);
-			const nextIsCjk = !isPasteMarker(next.segment) && cjkBreakRegex.test(next.segment);
-			if (isCjk || nextIsCjk) {
-				wrapOppIndex = next.index;
-				wrapOppWidth = currentWidth;
-			}
-		}
-	}
-
-	// Push final chunk.
-	chunks.push({ text: line.slice(chunkStart), startIndex: chunkStart, endIndex: line.length });
-
-	return chunks;
-}
-
 // Kitty CSI-u sequences for printable keys, including optional shifted/base codepoints.
 interface EditorState {
 	lines: string[];
@@ -235,6 +115,8 @@ interface EditorSnapshot {
 
 interface LayoutLine {
 	text: string;
+	/** Offset of the line's first character in the whole text. */
+	start: number;
 	hasCursor: boolean;
 	cursorPos?: number;
 }
@@ -298,6 +180,17 @@ function createScrollBorder(direction: "↑" | "↓", hiddenLineCount: number, w
 	return sliceByColumn(indicator, 0, indicatorWidth, true) + ellipsis;
 }
 
+const INVERSE_ON = "\x1b[7m";
+const INVERSE_OFF = "\x1b[27m";
+
+/** Inverts the part of `text` inside the selection; `start` is where `text` begins in the whole text. */
+function invertSpan(text: string, selection: { from: number; to: number }, start: number): string {
+	const from = Math.max(0, selection.from - start);
+	const to = Math.min(text.length, selection.to - start);
+	if (from >= to) return text;
+	return text.slice(0, from) + INVERSE_ON + text.slice(from, to) + INVERSE_OFF + text.slice(to);
+}
+
 interface VimRuntime {
 	config: VimConfig;
 	state: VimState;
@@ -305,14 +198,6 @@ interface VimRuntime {
 	/** Undo stack depth when the current insert session began, so Escape can fold the session into one undo step. */
 	insertUndoDepth: number;
 }
-
-/** Normal-mode keys with no printable form that vim maps to a motion, by editor action. */
-const VIM_KEY_ACTIONS = [
-	["tui.editor.cursorLeft", "h"],
-	["tui.editor.cursorRight", "l"],
-	["tui.editor.deleteCharBackward", BACKSPACE],
-	["tui.editor.deleteCharForward", "x"],
-] as const;
 
 export class Editor implements Component, Focusable {
 	private state: EditorState = {
@@ -597,15 +482,19 @@ export class Editor implements Component, Focusable {
 		// autocomplete (e.g. slash-command menu) is visible.
 		const emitCursorMarker = this.focused;
 
+		const selection = this.visualSelection();
+
 		for (const layoutLine of visibleLines) {
-			let displayText = layoutLine.text;
+			const shade = (text: string, from: number) =>
+				selection === undefined ? text : invertSpan(text, selection, layoutLine.start + from);
+			let displayText = shade(layoutLine.text, 0);
 			let lineVisibleWidth = visibleWidth(layoutLine.text);
 			let cursorInPadding = false;
 
 			// Add cursor if this line has it
 			if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
-				const before = displayText.slice(0, layoutLine.cursorPos);
-				const after = displayText.slice(layoutLine.cursorPos);
+				const before = layoutLine.text.slice(0, layoutLine.cursorPos);
+				const after = layoutLine.text.slice(layoutLine.cursorPos);
 
 				// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
 				const marker = emitCursorMarker ? CURSOR_MARKER : "";
@@ -617,12 +506,13 @@ export class Editor implements Component, Focusable {
 					const firstGrapheme = afterGraphemes[0]?.segment || "";
 					const restAfter = after.slice(firstGrapheme.length);
 					const cursor = renderFakeCursor(firstGrapheme);
-					displayText = before + marker + cursor + restAfter;
+					displayText =
+						shade(before, 0) + marker + cursor + shade(restAfter, layoutLine.cursorPos + firstGrapheme.length);
 					// lineVisibleWidth stays the same - we're replacing, not adding
 				} else {
 					// Cursor is at the end - add highlighted space
 					const cursor = renderFakeCursor(" ");
-					displayText = before + marker + cursor;
+					displayText = shade(before, 0) + marker + cursor;
 					lineVisibleWidth = lineVisibleWidth + 1;
 					// If cursor overflows content width into the padding, flag it
 					if (lineVisibleWidth > contentWidth && paddingX > 0) {
@@ -655,7 +545,8 @@ export class Editor implements Component, Focusable {
 			}
 		}
 
-		if (this.vim?.state.mode === "insert") result.push(`${leftPadding}-- INSERT --`.slice(0, width));
+		const modeLine = this.vimModeLine();
+		if (modeLine !== undefined) result.push(`${leftPadding}${modeLine}`.slice(0, width));
 
 		return result;
 	}
@@ -724,6 +615,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		if (this.vimDropsKey(data)) return;
 		const kb = getKeybindings();
 
 		// Handle character jump mode (awaiting next character to jump to)
@@ -1037,6 +929,7 @@ export class Editor implements Component, Focusable {
 			// Empty editor
 			layoutLines.push({
 				text: "",
+				start: 0,
 				hasCursor: true,
 				cursorPos: 0,
 			});
@@ -1044,8 +937,11 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Process each logical line
+		let lineStartOffset = 0;
 		for (let i = 0; i < this.state.lines.length; i++) {
 			const line = this.state.lines[i] || "";
+			const start = lineStartOffset;
+			lineStartOffset += line.length + 1;
 			const isCurrentLine = i === this.state.cursorLine;
 			const lineVisibleWidth = visibleWidth(line);
 
@@ -1054,12 +950,14 @@ export class Editor implements Component, Focusable {
 				if (isCurrentLine) {
 					layoutLines.push({
 						text: line,
+						start,
 						hasCursor: true,
 						cursorPos: this.state.cursorCol,
 					});
 				} else {
 					layoutLines.push({
 						text: line,
+						start,
 						hasCursor: false,
 					});
 				}
@@ -1102,12 +1000,14 @@ export class Editor implements Component, Focusable {
 					if (hasCursorInChunk) {
 						layoutLines.push({
 							text: chunk.text,
+							start: start + chunk.startIndex,
 							hasCursor: true,
 							cursorPos: adjustedCursorPos,
 						});
 					} else {
 						layoutLines.push({
 							text: chunk.text,
+							start: start + chunk.startIndex,
 							hasCursor: false,
 						});
 					}
@@ -1904,22 +1804,8 @@ export class Editor implements Component, Focusable {
 
 		for (let i = 0; i < this.state.lines.length; i++) {
 			const line = this.state.lines[i] || "";
-			const lineVisWidth = visibleWidth(line);
-			if (line.length === 0) {
-				// Empty line still takes one visual line
-				visualLines.push({ logicalLine: i, startCol: 0, length: 0 });
-			} else if (lineVisWidth <= width) {
-				visualLines.push({ logicalLine: i, startCol: 0, length: line.length });
-			} else {
-				// Line needs wrapping - use word-aware wrapping
-				const chunks = wordWrapLine(line, width, [...this.segment(line, "grapheme")]);
-				for (const chunk of chunks) {
-					visualLines.push({
-						logicalLine: i,
-						startCol: chunk.startIndex,
-						length: chunk.endIndex - chunk.startIndex,
-					});
-				}
+			for (const row of lineRows(line, width, (text) => [...this.segment(text, "grapheme")])) {
+				visualLines.push({ logicalLine: i, startCol: row.start, length: row.end - row.start });
 			}
 		}
 
@@ -2213,7 +2099,21 @@ export class Editor implements Component, Focusable {
 		this.tui.requestRender();
 	}
 
-	getVimMode(): "insert" | "normal" | undefined {
+	private vimModeLine(): string | undefined {
+		const state = this.vim?.state;
+		if (state?.mode === "insert") return "-- INSERT --";
+		if (state?.visual !== undefined) return state.visual.kind === "line" ? "-- VISUAL LINE --" : "-- VISUAL --";
+		return undefined;
+	}
+
+	/** The characters the visual selection covers, or undefined outside visual mode. */
+	private visualSelection(): { from: number; to: number } | undefined {
+		const visual = this.vim?.state.visual;
+		if (visual === undefined) return undefined;
+		return visualBounds(visual, this.getText(), this.getCursorOffset(), visual.kind === "line");
+	}
+
+	getVimMode(): VimMode | undefined {
 		return this.vim?.state.mode;
 	}
 
@@ -2231,7 +2131,7 @@ export class Editor implements Component, Focusable {
 		if (vim.state.mode === "insert") return this.handleVimInsertInput(vim, data, isEscape);
 		if (isEscape) return this.applyVimInput(vim, { kind: "escape" });
 		const printable = this.vimPrintable(data);
-		if (printable === undefined) return this.applyVimInput(vim, this.vimSpecialKey(vim, data));
+		if (printable === undefined) return this.handleVimSpecialKey(vim, data);
 		// A read that carries several characters is typed one at a time.
 		let consumed = false;
 		for (const { segment } of graphemeSegmenter.segment(printable)) {
@@ -2246,17 +2146,21 @@ export class Editor implements Component, Focusable {
 		return data.length > 0 && !data.startsWith("\x1b") && !/[\x00-\x1f\x7f]/.test(data) ? data : undefined;
 	}
 
-	private vimSpecialKey(vim: VimRuntime, data: string): VimInput {
-		const kb = getKeybindings();
-		const key = parseKey(data);
-		if (key === undefined || key.includes("+")) return { kind: "other" };
-		const idle = vim.state.pending === "";
-		for (const [action, mapped] of VIM_KEY_ACTIONS) {
-			if (kb.matches(data, action) && (idle || mapped !== "x")) return { kind: "key", key: mapped };
-		}
-		if (!idle && kb.matches(data, "tui.editor.cursorUp")) return { kind: "key", key: "k" };
-		if (!idle && kb.matches(data, "tui.editor.cursorDown")) return { kind: "key", key: "j" };
-		return { kind: "other" };
+	/** Non-printable keys follow Claude Code's router (see `routeSpecialKey`). Returns whether vim consumed the key. */
+	private handleVimSpecialKey(vim: VimRuntime, data: string): boolean {
+		const visual = vim.state.mode === "visual";
+		const route = routeSpecialKey(parseKey(data), visual ? "visual" : "normal", pendingClass(vim.state.pending));
+		if (route.route === "key") return this.applyVimInput(vim, { kind: "key", key: route.key }) || visual;
+		if (route.route === "leave") return this.applyVimInput(vim, { kind: "other" }) || visual;
+		return visual;
+	}
+
+	/** Keys Claude Code's normal mode drops without the editor acting on them: Tab, Home, End, and a Delete or Backspace
+	 * its pending command does not take. */
+	private vimDropsKey(data: string): boolean {
+		const vim = this.vim;
+		if (vim === undefined || vim.state.mode !== "normal" || this.vimPrintable(data) !== undefined) return false;
+		return routeSpecialKey(parseKey(data), "normal", pendingClass(vim.state.pending)).route === "drop";
 	}
 
 	private handleVimInsertInput(vim: VimRuntime, data: string, isEscape: boolean): boolean {
@@ -2280,8 +2184,8 @@ export class Editor implements Component, Focusable {
 	}
 
 	/** Runs one key through the engine and applies what it asks for. Returns whether the key was consumed. */
-	private applyVimInput(vim: VimRuntime, input: VimInput, buffer?: { text: string; offset: number }): boolean {
-		const current = buffer ?? { text: this.getText(), offset: this.getCursorOffset() };
+	private applyVimInput(vim: VimRuntime, input: VimInput, buffer?: Buffer): boolean {
+		const current = buffer ?? { text: this.getText(), offset: this.getCursorOffset(), columns: this.lastWidth };
 		const depth = this.undoStack.length;
 		const before = vim.state.mode;
 		const step = vimKey(vim.state, input, current);
@@ -2290,8 +2194,8 @@ export class Editor implements Component, Focusable {
 		if (step.undo) this.undo();
 		if (step.buffer) this.setBuffer(step.buffer.text, step.buffer.offset);
 		else if (buffer !== undefined) this.setBuffer(buffer.text, buffer.offset);
-		if (step.state.mode === "normal") this.clampVimCursor();
-		if (before === "normal" && step.state.mode === "insert") vim.insertUndoDepth = depth;
+		if (step.state.mode === "normal" && !step.keepCursor) this.clampVimCursor();
+		if (before !== "insert" && step.state.mode === "insert") vim.insertUndoDepth = depth;
 		if (before === "insert" && step.state.mode === "normal") this.foldUndoSince(vim.insertUndoDepth);
 		this.tui.requestRender();
 		return !step.passThrough;

@@ -76,6 +76,17 @@ function unitIndex(starts: readonly number[], at: number): number {
 	return low;
 }
 
+/** The editing units of `text` as segments, for word wrap: graphemes, with each paste marker whole. */
+export function unitSegments(text: string): Intl.SegmentData[] {
+	const starts = unitStarts(text);
+	const segments: Intl.SegmentData[] = [];
+	for (let i = 0; i + 1 < starts.length; i += 1) {
+		const index = starts[i] ?? 0;
+		segments.push({ segment: text.slice(index, starts[i + 1]), index, input: text });
+	}
+	return segments;
+}
+
 /** Start of the unit after the one at `at`. */
 export function nextUnit(text: string, at: number): number {
 	if (at >= text.length) return text.length;

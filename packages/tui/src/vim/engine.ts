@@ -1,5 +1,6 @@
 // Claude Code's vim mode as a pure state machine over the prompt text and cursor. The editor feeds it one key
 // at a time with the current buffer, and applies the buffer it returns as one undo step.
+import { displayMove } from "./display.ts";
 import {
 	applyEmpty,
 	applyLines,
@@ -44,10 +45,11 @@ import {
 	wordEnd,
 	wordForward,
 } from "./text.ts";
+import { enterVisual, MAX_COUNT, replayVisual, type VisualChange, type VisualState, visualKey } from "./visual.ts";
 
 export type { Buffer } from "./edits.ts";
 
-export type VimMode = "insert" | "normal";
+export type VimMode = "insert" | "normal" | "visual";
 
 /** What the editor tells the engine about a key press. Printable keys arrive as their character. */
 export type VimInput =
@@ -60,16 +62,20 @@ export interface Find {
 	readonly char: string;
 }
 
-interface Change {
+export interface Change {
 	/** The command's keys, replayed by `.`; empty for plain typing in insert mode. */
 	readonly keys: string;
 	readonly inserted: string;
+	/** A visual-mode change, replayed over the same amount of text at the cursor; its keys are empty. */
+	readonly visual?: VisualChange;
 }
 
 interface InsertSession {
 	readonly start: number;
 	readonly before: string;
 	readonly keys: string;
+	/** The session follows a visual c: Escape records it as a visual change that retypes its text. */
+	readonly visual?: Pick<VisualChange, "span" | "linewise">;
 }
 
 export interface VimState {
@@ -81,6 +87,8 @@ export interface VimState {
 	readonly lastChange?: Change;
 	readonly insert?: InsertSession;
 	readonly wanted?: Wanted;
+	/** The selection; present exactly in visual mode. */
+	readonly visual?: VisualState;
 }
 
 export interface VimStep {
@@ -93,12 +101,13 @@ export interface VimStep {
 	readonly history?: "up" | "down";
 	/** The key is not vim's: give it to the editor unchanged. */
 	readonly passThrough: boolean;
+	/** Leave the cursor where it is, even past the last character (a chord that ends visual mode). */
+	readonly keepCursor?: boolean;
 }
 
 export const INSERT_STATE: VimState = { mode: "insert", pending: "" };
 export const NORMAL_STATE: VimState = { mode: "normal", pending: "" };
 
-const MAX_COUNT = 10000;
 const COUNT = String.raw`[1-9]\d*`;
 const MOTION = String.raw`[hl \x08jkwbeWBE0^$%G]|g[gjk]|[fFtT][\s\S]+`;
 const OBJECT = String.raw`[ia][wW"'\x60()b[\]{}B<>]`;
@@ -121,11 +130,6 @@ interface Command {
 
 const cap = (digits: string | undefined) => (digits === undefined ? undefined : Math.min(Number(digits), MAX_COUNT));
 
-// gj and gk are j and k: the engine has no wrap width.
-function normalizeMotion(target: string): string {
-	return target === "gj" ? "j" : target === "gk" ? "k" : target;
-}
-
 function parse(keys: string): Command | "partial" | undefined {
 	if (COUNT_ENDING.test(keys)) return "partial";
 	const match = COMMAND.exec(keys);
@@ -135,11 +139,11 @@ function parse(keys: string): Command | "partial" | undefined {
 	if (op !== undefined) {
 		const target = opTarget ?? "";
 		if (target.length === 1 && "dcy".includes(target) && target !== op) return undefined;
-		parsed = { count: cap(count), op: op as Operator, opCount: cap(opCount), target: normalizeMotion(target) };
+		parsed = { count: cap(count), op: op as Operator, opCount: cap(opCount), target: target };
 	} else if (indent !== undefined) {
 		parsed = { count: cap(count), target: indent };
 	} else {
-		const target = normalizeMotion(motion ?? command ?? "");
+		const target = motion ?? command ?? "";
 		const lineOp = LINE_ALIASES[target];
 		const tillEnd = TILL_END_ALIASES[target];
 		if (lineOp !== undefined) parsed = { count: cap(count), op: lineOp, target: lineOp };
@@ -271,6 +275,40 @@ function verticalOperator(
 	return linesToward(state, op, buffer, target, keys, motion === "k" ? target : Math.min(offset, target));
 }
 
+/** An operator over display rows. When the rows run out only the cursor moves, and nothing is recorded. */
+function displayOperator(
+	state: VimState,
+	op: Operator,
+	down: boolean,
+	count: number,
+	buffer: Buffer,
+	keys: string,
+): VimStep {
+	const { text, offset, columns } = buffer;
+	if (columns === undefined) return cancel(state);
+	const move = displayMove(text, offset, down, count, columns, state.wanted);
+	if (move.runOut) return placeCursor(state, move.offset, move.column, buffer);
+	if (move.stepped === offset) return cancel(state);
+	const edit = applyRange(op, text, Math.min(offset, move.stepped), Math.max(offset, move.stepped));
+	return settle(state, edit, keys, op !== "y");
+}
+
+/** Moves the cursor to a gj or gk target and remembers its display column, if it keeps one. */
+function placeCursor(state: VimState, target: number, column: number | undefined, buffer: Buffer): VimStep {
+	const { text, offset } = buffer;
+	const to = clampNormal(text, target);
+	if (to === offset) return cancel(state);
+	const wanted = column === undefined ? undefined : { column, offset: to, text };
+	return step({ ...state, pending: "", wanted }, { text, offset: to });
+}
+
+function displayMotion(state: VimState, down: boolean, count: number, buffer: Buffer): VimStep {
+	const { text, offset, columns } = buffer;
+	if (columns === undefined) return cancel(state);
+	const move = displayMove(text, offset, down, count, columns, state.wanted);
+	return placeCursor(state, move.offset, move.column, buffer);
+}
+
 function motionOperator(
 	state: VimState,
 	op: Operator,
@@ -281,6 +319,7 @@ function motionOperator(
 ): VimStep {
 	const { text, offset } = buffer;
 	if (motion === "j" || motion === "k") return verticalOperator(state, op, motion, count, buffer, keys);
+	if (motion === "gj" || motion === "gk") return displayOperator(state, op, motion === "gj", count, buffer, keys);
 	const target = motionTarget(text, offset, motion, count);
 	if (motion === "%" && target === offset) return cancel(state);
 	if (target === offset && !"eE$%".includes(motion)) {
@@ -410,6 +449,9 @@ function plainMotion(state: VimState, cmd: Command, buffer: Buffer): VimStep | u
 		case "j":
 		case "k":
 			return verticalMotion(state, target === "j", count, buffer);
+		case "gj":
+		case "gk":
+			return displayMotion(state, target === "gj", count, buffer);
 		case "$": {
 			const to = lastChar(text, buffer.offset);
 			return step(
@@ -486,9 +528,16 @@ function runCommand(state: VimState, cmd: Command, buffer: Buffer, keys: string)
 	}
 }
 
+// Without a wrap width every logical line is one display row, so gj and gk are j and k.
+function withoutWrap(cmd: Command, buffer: Buffer): Command {
+	if (buffer.columns !== undefined || (cmd.target !== "gj" && cmd.target !== "gk")) return cmd;
+	return { ...cmd, target: cmd.target === "gj" ? "j" : "k" };
+}
+
 function execute(state: VimState, cmd: Command, buffer: Buffer, keys: string): VimStep {
-	if (cmd.op !== undefined) return runOperator(state, cmd, cmd.op, buffer, keys);
-	return runCommand(state, cmd, buffer, keys);
+	const command = withoutWrap(cmd, buffer);
+	if (command.op !== undefined) return runOperator(state, command, command.op, buffer, keys);
+	return runCommand(state, command, buffer, keys);
 }
 
 // `.` with a count replaces the count of commands where a count means "how many", not "how far".
@@ -504,22 +553,59 @@ function countable(cmd: Command): boolean {
 function repeatChange(state: VimState, buffer: Buffer, count: number | undefined): VimStep {
 	const change = state.lastChange;
 	if (change === undefined) return cancel(state);
+	if (change.visual !== undefined) return repeatVisual(state, buffer, change, change.visual);
 	let working = { ...state, pending: "" };
 	let after = buffer;
 	if (change.keys !== "") {
 		const parsed = parse(change.keys);
 		if (parsed === undefined || parsed === "partial") return cancel(state);
-		if (/^[iIaAoO]$/.test(change.keys) && change.inserted === "") return cancel(state);
+		// Claude Code's i/I/a/A records carry no text, so . skips an empty one. Its o/O record an openLine whose
+		// replay inserts through the buffer without entering insert mode (chunk-hz2c9q6k.js:403, 1299-1312), so
+		// . ends in normal mode like those four. s, S and the change operators rerun and do stay in insert.
+		if (/^[iIaA]$/.test(change.keys) && change.inserted === "") return cancel(state);
 		const cmd = count !== undefined && countable(parsed) ? { ...parsed, count, opCount: undefined } : parsed;
 		const ran = execute(working, cmd, buffer, change.keys);
 		if (ran.state.mode !== "insert") return step({ ...ran.state, lastChange: change }, ran.buffer);
 		working = ran.state;
 		after = ran.buffer ?? buffer;
+		const typed = applyInserted(after, change.inserted);
+		if (/^[iIaAoO]$/.test(change.keys)) {
+			return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, typed);
+		}
+		// A rerun that opened insert stays there, like Claude Code's replay; Escape then records only
+		// what is typed next.
+		return step(
+			{ ...working, insert: { start: typed.offset, before: typed.text, keys: "" }, lastChange: change },
+			typed,
+		);
 	}
-	const text = after.text.slice(0, after.offset) + change.inserted + after.text.slice(after.offset);
-	const end = after.offset + change.inserted.length;
-	const offset = end > lineStart(text, end) ? prevUnit(text, end) : end;
-	return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, { text, offset });
+	return step(
+		{ ...working, mode: "normal", insert: undefined, lastChange: change },
+		applyInserted(after, change.inserted),
+	);
+}
+
+/** `.` over a visual change: the same amount of text at the cursor, then the typed text of a visual c. */
+function repeatVisual(state: VimState, buffer: Buffer, change: Change, visual: VisualChange): VimStep {
+	const ran = replayVisual(visual, buffer);
+	if (ran === undefined) return cancel(state);
+	const landed = ran.typed === undefined ? ran.buffer : applyInserted(ran.buffer, ran.typed);
+	const next = {
+		...state,
+		pending: "",
+		wanted: undefined,
+		register: ran.register ?? state.register,
+		lastChange: change,
+	};
+	return step(next, landed);
+}
+
+/** Inserts the recorded typing at the insert point; the cursor rests before its last character. */
+function applyInserted(after: Buffer, inserted: string): Buffer {
+	const text = after.text.slice(0, after.offset) + inserted + after.text.slice(after.offset);
+	const end = after.offset + inserted.length;
+	const offset = inserted !== "" && end > lineStart(text, end) ? prevUnit(text, end) : end;
+	return { text, offset };
 }
 
 /** Escape in insert mode: back to normal, one character left, and the typed text saved for `.`. */
@@ -530,7 +616,10 @@ function leaveInsert(state: VimState, buffer: Buffer): VimStep {
 	if (session !== undefined) {
 		const typed = offset < session.start ? "" : text.slice(session.start, offset);
 		const plain = session.before.slice(0, session.start) + typed + session.before.slice(session.start) === text;
-		if (session.keys !== "" || (plain && typed !== "")) {
+		if (session.visual !== undefined) {
+			const action = { kind: "change" as const, text: plain ? typed : "" };
+			lastChange = { keys: "", inserted: "", visual: { ...session.visual, action } };
+		} else if (session.keys !== "" || (plain && typed !== "")) {
 			lastChange = { keys: session.keys, inserted: plain ? typed : "" };
 		}
 	}
@@ -554,14 +643,24 @@ function historyStep(state: VimState, key: string, text: string, offset: number)
 	return undefined;
 }
 
+// Visual mode moves with the same motions as normal mode, plus ; and , for the last find.
+function visualMotion(state: VimState, target: string, count: number | undefined, buffer: Buffer): VimStep {
+	if (target === ";" || target === ",") return repeatFind(state, target === ",", count ?? 1, buffer);
+	return plainMotion(state, withoutWrap({ count, target }, buffer), buffer) ?? cancel(state);
+}
+
 /** One key press in vim mode. */
 export function vimKey(state: VimState, input: VimInput, buffer: Buffer): VimStep {
 	if (state.mode === "insert") return insertKey(state, input, buffer);
+	if (state.visual !== undefined) return visualKey(state, state.visual, input, buffer, visualMotion);
 	if (input.kind === "escape") return { state: { ...state, pending: "" }, passThrough: state.pending === "" };
-	if (input.kind === "other") return { state: { ...state, pending: "" }, passThrough: true };
-	const here = { text: buffer.text, offset: clampNormal(buffer.text, buffer.offset) };
+	if (input.kind === "other") return { state, passThrough: true };
+	const here = { ...buffer, offset: clampNormal(buffer.text, buffer.offset) };
 	const history = historyStep(state, input.key, here.text, here.offset);
 	if (history !== undefined) return history;
+	if ((input.key === "v" || input.key === "V") && /^(?:[1-9]\d*)?$/.test(state.pending)) {
+		return enterVisual(state, input.key === "V" ? "line" : "char", here);
+	}
 	const keys = state.pending + input.key;
 	const cmd = parse(keys);
 	if (cmd === "partial") return step({ ...state, pending: keys });

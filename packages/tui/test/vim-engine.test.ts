@@ -7,13 +7,14 @@ interface Run {
 	readonly mode: string;
 	readonly undos: number;
 	readonly history: string[];
+	readonly anchor: number | undefined;
 }
 
 const tokens = (keys: string): string[] => keys.match(/<Esc>|<BS>|[\s\S]/gu) ?? [];
 
 // A stand-in for the editor: it feeds keys to the engine and types printable pass-through keys itself.
 // "|" in `marked` is the cursor.
-function run(marked: string, keys: string, start: VimState = NORMAL_STATE): Run {
+function run(marked: string, keys: string, start: VimState = NORMAL_STATE, columns?: number): Run {
 	let text = marked.replace("|", "");
 	let offset = Math.max(0, marked.indexOf("|"));
 	let state = start;
@@ -22,7 +23,7 @@ function run(marked: string, keys: string, start: VimState = NORMAL_STATE): Run 
 	for (const token of tokens(keys)) {
 		const input: VimInput =
 			token === "<Esc>" ? { kind: "escape" } : { kind: "key", key: token === "<BS>" ? "\b" : token };
-		const buffer: Buffer = { text, offset };
+		const buffer: Buffer = { text, offset, columns };
 		const result = vimKey(state, input, buffer);
 		state = result.state;
 		if (result.undo) undos += 1;
@@ -33,10 +34,17 @@ function run(marked: string, keys: string, start: VimState = NORMAL_STATE): Run 
 			offset += input.key.length;
 		}
 	}
-	return { text: `${text.slice(0, offset)}|${text.slice(offset)}`, mode: state.mode, undos, history };
+	return {
+		text: `${text.slice(0, offset)}|${text.slice(offset)}`,
+		mode: state.mode,
+		undos,
+		history,
+		anchor: state.visual?.anchor,
+	};
 }
 
 const normal = (from: string, keys: string) => run(from, keys);
+const wrapped = (from: string, keys: string) => run(from, keys, NORMAL_STATE, 10);
 
 function table(name: string, rows: ReadonlyArray<readonly [string, string, string]>, mode = "normal") {
 	describe(name, () => {
@@ -207,6 +215,56 @@ describe("vim insert mode", () => {
 		assert.strictEqual(run("|", "ab<Esc>.", INSERT_STATE).text.replace("|", ""), "aabb");
 	});
 
+	describe("dot repeat after an empty insert", () => {
+		it("i<Esc> leaves . doing nothing", () => {
+			const result = run("|ab", "i<Esc>.");
+			assert.strictEqual(result.text, "|ab");
+			assert.strictEqual(result.mode, "normal");
+		});
+
+		it("o<Esc> leaves . opening another empty line below, back in normal mode", () => {
+			const result = run("|ab", "o<Esc>.");
+			assert.strictEqual(result.text, "ab\n\n|");
+			assert.strictEqual(result.mode, "normal");
+		});
+
+		it("O<Esc> leaves . opening another empty line above, back in normal mode", () => {
+			const result = run("|ab", "O<Esc>.");
+			assert.strictEqual(result.text, "|\n\nab");
+			assert.strictEqual(result.mode, "normal");
+		});
+
+		it("s<Esc> leaves . substituting again, in insert mode", () => {
+			const result = run("|ab", "s<Esc>.");
+			assert.strictEqual(result.text, "|");
+			assert.strictEqual(result.mode, "insert");
+		});
+
+		it("cw<Esc> leaves . changing again, in insert mode", () => {
+			const result = run("|foo bar", "cw<Esc>.");
+			assert.strictEqual(result.text, "|bar");
+			assert.strictEqual(result.mode, "insert");
+		});
+
+		it("o with typed text repeats the open line plus the text, back in normal mode", () => {
+			const result = run("|ab", "oX<Esc>.");
+			assert.strictEqual(result.text, "ab\nX\n|X");
+			assert.strictEqual(result.mode, "normal");
+		});
+
+		it("x then i<Esc> leaves . doing nothing", () => {
+			const result = run("|ab", "xi<Esc>.");
+			assert.strictEqual(result.text, "|b");
+			assert.strictEqual(result.mode, "normal");
+		});
+
+		it("a replay that opens insert keeps insert mode after more typing and Escape records only the new typing", () => {
+			const result = run("|abc", "s<Esc>.Z<Esc>");
+			assert.strictEqual(result.text, "|Zc");
+			assert.strictEqual(result.mode, "normal");
+		});
+	});
+
 	it("u asks the editor to undo once, ignoring a count", () => {
 		assert.strictEqual(run("|a", "u3u").undos, 2);
 	});
@@ -244,11 +302,11 @@ describe("vim insert mode", () => {
 		assert.strictEqual(vimKey(cleared.state, { kind: "escape" }, { text: "a", offset: 0 }).passThrough, true);
 	});
 
-	it("other keys pass through in both modes and clear a pending command", () => {
+	it("other keys pass through in both modes and keep a pending command", () => {
 		const pending = vimKey(NORMAL_STATE, { kind: "key", key: "d" }, { text: "a", offset: 0 });
 		const other = vimKey(pending.state, { kind: "other" }, { text: "a", offset: 0 });
 		assert.strictEqual(other.passThrough, true);
-		assert.strictEqual(other.state.pending, "");
+		assert.strictEqual(other.state.pending, "d");
 		assert.strictEqual(vimKey(INSERT_STATE, { kind: "other" }, { text: "a", offset: 0 }).passThrough, true);
 	});
 });
@@ -324,3 +382,198 @@ describe("vim unicode", () => {
 		assert.strictEqual(run("|e\u0301b", "x").text, "|b");
 	});
 });
+
+function wrappedTable(name: string, rows: ReadonlyArray<readonly [string, string, string]>) {
+	describe(name, () => {
+		for (const [from, keys, to] of rows) {
+			it(`${JSON.stringify(from)} ${keys} -> ${JSON.stringify(to)}`, () => {
+				const result = wrapped(from, keys);
+				assert.strictEqual(result.text, to);
+				assert.strictEqual(result.mode, "normal");
+			});
+		}
+	});
+}
+
+// Rows at 10 columns: "aaaa bbbb " | "cccc dddd " | "eeee ffff". Claude Code: gj and gk are display-row moves.
+wrappedTable("vim gj and gk over wrapped rows", [
+	["aa|aa bbbb cccc dddd", "gj", "aaaa bbbb cc|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "gk", "aa|aa bbbb cccc dddd"],
+	["a|aaa bbbb cccc dddd eeee ffff", "2gj", "aaaa bbbb cccc dddd e|eee ffff"],
+	["aaaa bbbb cccc dddd e|eee ffff", "2gk", "a|aaa bbbb cccc dddd eeee ffff"],
+	["aaaa bbbb cccc dddd e|eee ffff", "gk", "aaaa bbbb c|ccc dddd eeee ffff"],
+	["a|aaa bbbb cccc dddd eeee ffff", "gjgj", "aaaa bbbb cccc dddd e|eee ffff"],
+	// Past the last row the cursor still goes as far as it can.
+	["aa|aa bbbb cccc dddd", "3gj", "aaaa bbbb cc|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "gj", "aaaa bbbb cc|cc dddd"],
+	["aa|aa bbbb cccc dddd", "gk", "aa|aa bbbb cccc dddd"],
+	// A row shorter than the column clamps it, and the column is not remembered across wrapped rows.
+	["aaaa bbb|b cc", "gj", "aaaa bbbb c|c"],
+	["aaaa bbbb c|c", "gk", "a|aaa bbbb cc"],
+	// Between unwrapped lines the display column is remembered, like j and k.
+	["abcdef|gh\nab\nabcdefgh", "gjgj", "abcdefgh\nab\nabcdef|gh"],
+	["abcdefgh\nab\nabcdef|gh", "gkgk", "abcdef|gh\nab\nabcdefgh"],
+	// Not j: a wrapped line's second row is one gj away.
+	["aa|aa bbbb cccc dddd\nxyz", "gj", "aaaa bbbb cc|cc dddd\nxyz"],
+]);
+
+wrappedTable("vim gj and gk with an operator", [
+	["aa|aa bbbb cccc dddd", "dgj", "aa|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "dgk", "aa|cc dddd"],
+	["aa|aa bbbb cccc dddd", "cgjX<Esc>", "aa|Xcc dddd"],
+	["aa|aa bbbb cccc dddd", "ygj", "aa|aa bbbb cccc dddd"],
+	["a|aaa bbbb cccc dddd eeee ffff", "d2gj", "a|eee ffff"],
+	// When the rows run out only the cursor moves: no edit.
+	["aaaa bbbb cc|cc dddd", "dgj", "aaaa bbbb cc|cc dddd"],
+	["aa|aa bbbb cccc dddd", "dgk", "aa|aa bbbb cccc dddd"],
+	["aa|aa bbbb cccc dddd", "d3gj", "aaaa bbbb cc|cc dddd"],
+	["aaaa bbbb cc|cc dddd", "d3gk", "aa|aa bbbb cccc dddd"],
+]);
+
+describe("vim gj and gk without a wrap width", () => {
+	it("move like j and k", () => {
+		assert.strictEqual(normal("ab|c\ndef", "gj").text, "abc\nde|f");
+		assert.strictEqual(normal("abc\nde|f", "gk").text, "ab|c\ndef");
+		assert.strictEqual(normal("ab|c\ndef\nghi", "dgj").text, "|ghi");
+	});
+});
+
+// Visual mode. Claude Code: v and V from idle or a count, the key router Bt and its table Sn, the operators It and vt
+// (chunk-hz2c9q6k.js:568-1046). The span is anchor..cursor inclusive, whole lines for V.
+const visual = (from: string, keys: string) => run(from, keys);
+
+function visualTable(name: string, rows: ReadonlyArray<readonly [string, string, string]>, mode = "normal") {
+	describe(name, () => {
+		for (const [from, keys, to] of rows) {
+			it(`${JSON.stringify(from)} ${keys} -> ${JSON.stringify(to)}`, () => {
+				const result = visual(from, keys);
+				assert.strictEqual(result.text, to);
+				assert.strictEqual(result.mode, mode);
+			});
+		}
+	});
+}
+
+visualTable("vim visual operators", [
+	["|foo bar", "vwd", "|ar"],
+	["|foo bar", "vey", "|foo bar"],
+	["ab|cd", "vhy", "a|bcd"],
+	["|foo bar", "vecX<Esc>", "|X bar"],
+	["a\n|b\nc", "Vd", "a\n|c"],
+	["a\n|b", "Vd", "|a"],
+	["a\n|b\nc", "Vjy", "a\n|b\nc"],
+	["a\n|b\nc", "VcX<Esc>", "a\n|X\nc"],
+	["|abc", "vlx", "|c"],
+	["|abc", "vlsX<Esc>", "|Xc"],
+	["a|bc\nd", "vX", "|d"],
+	["a|bc\nd", "vD", "|d"],
+	["a|bc\nd", "vCX<Esc>", "|X\nd"],
+	["a|bc\nd", "vSX<Esc>", "|X\nd"],
+	["a|bc\nd", "vRX<Esc>", "|X\nd"],
+	["a|bc\nd", "vYp", "abc\n|abc\nd"],
+]);
+
+visualTable("vim visual motions and counts", [
+	["|a b c d", "v2wd", "| d"],
+	["|abcd", "v2ld", "|d"],
+	["|abcd", "2vld", "|cd"],
+	["a|bc\ndef", "vjd", "a|f"],
+	["|a\nb\nc\nd", "v2jd", "|\nd"],
+	["|a,b,c", "vf,d", "|b,c"],
+	["|a,b,c", "vt,d", "|,b,c"],
+	["|a,b,c", "vf,;d", "|c"],
+	["a,b,|c", "vF,d", "a,|b"],
+	["|ab\ncd", "v$d", "|cd"],
+	["|ab\ncde", "v$jd", "|"],
+	["|a\nb", "vGd", "|"],
+	["a\n|b", "vggd", "|"],
+	["|abc", "vl2<Esc>d", "|c"],
+	["|abc", "vlr<Esc>d", "|c"],
+]);
+
+visualTable("vim visual transforms", [
+	["|aBc", "vll~", "|AbC"],
+	["|abc", "vlU", "|ABc"],
+	["|ABC", "vlu", "|abC"],
+	["|abc", "vlrx", "|xxc"],
+	["|a\nb", "V>", "  |a\nb"],
+	["|a\nb", "V2>", "    |a\nb"],
+	["  |a", "V<", "|a"],
+	["a|b\ncd\nef", "vjJ", "ab| cd\nef"],
+	["|a\nb\nc\nd\ne\nf", "vjjJ<Esc>j.", "a b c\nd e| f"],
+	["|a\nb\nc\nd\ne\nf\ng\nh", "vjjjJ<Esc>j.", "a b c d\ne f g| h"],
+	["|a\nb\nc\nd", "vjJ<Esc>j.", "a b\nc| d"],
+	["|ab cd", "ywwvlp", "ab ab| "],
+	["|ab", "vlpd", "|"],
+]);
+
+visualTable("vim visual text objects", [
+	["f(a|b)g", "vi(d", "f(|)g"],
+	["f(a|b)g", "va(d", "f|g"],
+	['x "a|b" y', 'vi"d', 'x "|" y'],
+	["|foo bar", "viwd", "| bar"],
+	["|foo bar", "vawd", "|bar"],
+]);
+
+visualTable("vim visual toggling and leaving", [
+	["a|b\ncd", "vVd", "|cd"],
+	["|abc", "vlv", "a|bc"],
+	["|abc", "VV", "|abc"],
+	["|abc", "vl<Esc>", "a|bc"],
+	["|abc\nd", "v$<Esc>", "ab|c\nd"],
+	["|abcd", "lvlohd", "|d"],
+	["|abcd", "lvlod", "a|d"],
+]);
+
+visualTable(
+	"vim visual stays visual",
+	[
+		["|abc", "v", "|abc"],
+		["|abc", "vl", "a|bc"],
+		["|abc", "vV", "|abc"],
+		["|abc", "vlo", "|abc"],
+		["|abc", "v2", "|abc"],
+		["|abc", "vlp", "a|bc"],
+	],
+	"visual",
+);
+
+describe("vim visual state", () => {
+	it("v and V enter visual mode with their anchor, from idle or a count", () => {
+		assert.deepStrictEqual([visual("a|bc", "v").mode, visual("a|bc", "v").anchor], ["visual", 1]);
+		assert.strictEqual(visual("a|bc", "3V").mode, "visual");
+		assert.strictEqual(visual("a|bc", "dv").mode, "normal");
+	});
+
+	it("o swaps the anchor and the cursor", () => {
+		const result = visual("|abcd", "vllo");
+		assert.strictEqual(result.text, "|abcd");
+		assert.strictEqual(result.anchor, 2);
+	});
+
+	it("moves keep the anchor and never walk the history", () => {
+		const result = visual("|a", "vkj");
+		assert.deepStrictEqual(result.history, []);
+		assert.strictEqual(result.anchor, 0);
+		assert.deepStrictEqual(run("|a", "kj").history, ["up", "down"]);
+	});
+
+	it("an operator that changes opens insert mode", () => {
+		assert.strictEqual(visual("|abc", "vlc").mode, "insert");
+	});
+
+	it("keeps the display column across gj and gk", () => {
+		const result = run("aa|aa bbbb cccc dddd", "vgjd", NORMAL_STATE, 10);
+		assert.strictEqual(result.text, "aa|c dddd");
+		assert.strictEqual(run("aaaa bbbb cc|cc dddd", "vgkd", NORMAL_STATE, 10).text, "aa|c dddd");
+	});
+});
+
+visualTable("vim visual dot repeat", [
+	["|abcdefgh", "vld.", "|efgh"],
+	["|a\nb\nc\nd\ne", "Vjd.", "|e"],
+	["|abc abc", "vecX<Esc>w.", "X |X"],
+	["|abcd", "vlUl.", "A|BCd"],
+	["|abcd", "vlrxl.", "x|xxd"],
+	["|a\nb\nc", "Vj>j.", "  a\n    |b\n  c"],
+]);

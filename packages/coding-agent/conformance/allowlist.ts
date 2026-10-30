@@ -177,6 +177,9 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP",
 	// P39: the administrator switch `update` honors, which only a pi-cc-only case sets.
 	"DISABLE_UPDATES",
+	// VIMFIX: the screen reader toggle. A non-empty value only changes drawing in interactive mode,
+	// which the harness does not capture; it selects no provider and loads no code.
+	"CLAUDE_AX_SCREEN_READER",
 	// P38 (`cc/p38-telemetry`): the operator-owned OpenTelemetry export, aimed at the mock with `$MOCK_URL`.
 	"CLAUDE_CODE_ENABLE_TELEMETRY",
 	"OTEL_METRICS_EXPORTER",
