@@ -6,7 +6,13 @@
 import { ccAdmitRepoEnv } from "./env.ts";
 import { isJsonObject, mergeValue, POLICY_DROPPED, POLICY_FORCED } from "./keys.ts";
 import type { CcPolicy } from "./policy.ts";
-import { CC_SETTINGS_ORDER, type CcSettings, type CcSettingsDocument, type CcSettingsSource } from "./types.ts";
+import {
+	CC_OPERATOR_TIER_KEYS,
+	CC_SETTINGS_ORDER,
+	type CcSettings,
+	type CcSettingsDocument,
+	type CcSettingsSource,
+} from "./types.ts";
 
 export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy: CcPolicy): CcSettings {
 	const values: Record<string, unknown> = {};
@@ -39,7 +45,24 @@ export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy
 		values,
 		sources,
 		pluginOptions,
+		operatorTier: operatorTierValues(documents),
 	};
+}
+
+const OPERATOR_TIER_LOOKUP: readonly CcSettingsSource[] = ["policy", "flag", "user"];
+
+function operatorTierValues(documents: readonly CcSettingsDocument[]): Record<string, unknown> {
+	const found: Record<string, unknown> = {};
+	for (const key of CC_OPERATOR_TIER_KEYS) {
+		for (const source of OPERATOR_TIER_LOOKUP) {
+			const document = documents.find((candidate) => candidate.source === source && key in candidate.values);
+			if (document !== undefined) {
+				found[key] = document.values[key];
+				break;
+			}
+		}
+	}
+	return found;
 }
 
 /** R9: `--add-dir` records directories on the loaded value for the tool and permission units. */
