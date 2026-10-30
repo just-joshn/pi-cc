@@ -12,7 +12,6 @@ export interface ReapOptions {
 	/** Where the workspace moved to after the side exited, which a process can still reach through a working directory or an open file. */
 	moved?: string;
 	lsof?: string;
-	ps?: string;
 	deadlineMs?: number;
 	/** Consecutive scans that must find nothing. The default is for the first reap; a check that already follows one can use fewer. */
 	cleanSweeps?: number;
@@ -49,7 +48,7 @@ const execFileAsync = promisify(execFile);
  * the caller hashes the workspace, so a delayed writer cannot change what the case compared.
  */
 export async function reap(root: string, options: ReapOptions = {}): Promise<ReapResult> {
-	const tools = { lsof: options.lsof ?? LSOF, ps: options.ps ?? PS };
+	const lsof = options.lsof ?? LSOF;
 	const held = options.moved === undefined ? [root] : [root, options.moved];
 	let survived = false;
 	let clean = 0;
@@ -58,7 +57,7 @@ export async function reap(root: string, options: ReapOptions = {}): Promise<Rea
 	const cleanSweeps = options.cleanSweeps ?? CLEAN_SWEEPS;
 	while (clean < cleanSweeps || [...killed].some(groupExists)) {
 		if (Date.now() >= deadline) return { survived, converged: false };
-		const found = await observedGroups(held, tools);
+		const found = await observedGroups(held, lsof);
 		if (found === null) return { survived, converged: false };
 		if (found.size === 0) {
 			clean += 1;
@@ -98,8 +97,8 @@ function groupExists(pgid: number): boolean {
  * only the generations alive when it starts, so a single run often sees none. Runs started a few
  * milliseconds apart see different generations, and a sweep counts as clean only if all of them are.
  */
-async function observedGroups(held: string[], tools: { lsof: string; ps: string }): Promise<Set<number> | null> {
-	const own = ownGroup(tools.ps);
+async function observedGroups(held: string[], lsof: string): Promise<Set<number> | null> {
+	const own = ownGroup();
 	if (own === null) {
 		warnOnce("survivor sweep unavailable: /bin/ps could not report the harness's own process group");
 		return null;
@@ -107,7 +106,7 @@ async function observedGroups(held: string[], tools: { lsof: string; ps: string 
 	const listings = await Promise.all(
 		Array.from({ length: SAMPLES_PER_SWEEP }, async (_, index) => {
 			await delay(index * SAMPLE_STAGGER_MS);
-			return listOpenFiles(tools.lsof);
+			return listOpenFiles(lsof);
 		}),
 	);
 	const groups = new Set<number>();
@@ -140,8 +139,8 @@ async function listOpenFiles(lsof: string): Promise<string | null> {
 	return null;
 }
 
-function ownGroup(ps: string): number | null {
-	const listed = spawnSync(ps, ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8", timeout: 5_000 });
+function ownGroup(): number | null {
+	const listed = spawnSync(PS, ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8", timeout: 5_000 });
 	const parsed = Number.parseInt(listed.stdout ?? "", 10);
 	return listed.error !== undefined || Number.isNaN(parsed) ? null : parsed;
 }
