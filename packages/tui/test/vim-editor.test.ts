@@ -35,6 +35,65 @@ const marked = (editor: Editor) => {
 
 const plain = (editor: Editor) => editor.render(40).map((line) => stripTerminalSequences(line).trimEnd());
 
+describe("pending operator and count keys", () => {
+	it("Delete with a pending operator cancels it without deleting forward", () => {
+		const editor = createEditor();
+		press(editor, "abc<Esc>0");
+		assert.strictEqual(editor.handleVimInput("d", false), true);
+		assert.strictEqual(editor.handleVimInput("\x1b[3~", false), true);
+		assert.strictEqual(marked(editor), "|abc");
+		assert.strictEqual(editor.getVimMode(), "normal");
+		press(editor, "x");
+		assert.strictEqual(marked(editor), "|bc");
+	});
+
+	it("Delete with a pending count deletes forward and keeps the count", () => {
+		const editor = createEditor();
+		press(editor, "abcdef<Esc>0");
+		assert.strictEqual(editor.handleVimInput("3", false), true);
+		key(editor, "\x1b[3~");
+		assert.strictEqual(marked(editor), "|bcdef");
+		press(editor, "l");
+		assert.strictEqual(marked(editor), "bcd|ef");
+	});
+
+	it("Backspace with a pending operator deletes the character to the left", () => {
+		const editor = createEditor();
+		press(editor, "abc<Esc>$");
+		assert.strictEqual(editor.handleVimInput("d", false), true);
+		assert.strictEqual(editor.handleVimInput("\x7f", false), true);
+		assert.strictEqual(marked(editor), "a|c");
+	});
+
+	it("Backspace with a pending count moves left", () => {
+		const editor = createEditor();
+		press(editor, "abcd<Esc>$");
+		assert.strictEqual(editor.handleVimInput("3", false), true);
+		assert.strictEqual(editor.handleVimInput("\x7f", false), true);
+		assert.strictEqual(marked(editor), "|abcd");
+	});
+
+	it("Backspace with a pending find deletes backward and keeps the find", () => {
+		const editor = createEditor();
+		press(editor, "abid<Esc>h");
+		assert.strictEqual(editor.handleVimInput("f", false), true);
+		key(editor, "\x7f");
+		assert.strictEqual(editor.getText(), "aid");
+		key(editor, "i");
+		assert.strictEqual(editor.getVimMode(), "normal");
+		assert.strictEqual(marked(editor), "a|id");
+	});
+
+	it("Enter with a pending operator reaches the editor and keeps the command", () => {
+		const editor = createEditor();
+		press(editor, "abc<Esc>0d");
+		assert.strictEqual(editor.handleVimInput("\r", false), false);
+		assert.strictEqual(editor.handleVimInput("x", false), true);
+		assert.strictEqual(editor.getVimMode(), "normal");
+		assert.strictEqual(marked(editor), "|abc");
+	});
+});
+
 describe("Editor vim mode", () => {
 	it("starts in insert mode and reports undefined when off", () => {
 		const editor = createEditor();
