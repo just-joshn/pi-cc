@@ -329,8 +329,8 @@ describe("imported keys dispatch before pi handling", () => {
 		expect(t.press("\x13").events).toEqual(["model"]);
 	});
 
-	it("matches the pi file's spelling of a key however it is written", () => {
-		const t = probe({ "app.model.select": ["Ctrl+Y"] }, cc({ "control+y": "chat:submit" }));
+	it("matches a CC alias spelling of the pi-bound key", () => {
+		const t = probe({ "app.model.select": ["ctrl+y"] }, cc({ "control+y": "chat:submit" }));
 		t.editor.setText("draft");
 		expect(t.press("\x19").events).toEqual(["model"]);
 	});

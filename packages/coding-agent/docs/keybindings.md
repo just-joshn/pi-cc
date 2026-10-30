@@ -44,7 +44,7 @@ Examples: `ctrl+shift+x`, `alt+ctrl+x`, `ctrl+shift+alt+x`, `super+k`, `ctrl+sup
 
 ## Claude Code keybinding import
 
-Pi-cc reads Claude Code's `keybindings.json` and runs it as its own dispatch layer in front of the default prompt editor, the way CC's dispatcher runs before its text input. The layer never edits pi's binding table. Pi's own `<agent-dir>/keybindings.json` keeps its normal pi meaning, with or without a CC file.
+Pi-cc reads Claude Code's `keybindings.json` and runs it as its own dispatch layer in front of the default prompt editor, the way CC's dispatcher runs before its text input. The layer never edits pi's binding table. Pi's own `<agent-dir>/keybindings.json` keeps its normal pi meaning, with or without a CC file, and wins over the CC file (see Precedence).
 
 CC's file is `$CLAUDE_CONFIG_DIR/keybindings.json`, or `~/.claude/keybindings.json` when the variable is unset or empty. A pi-dir `keybindings.json` written in CC's context-block format is read into the same layer after CC's file. Later declarations on the same sequence win. Only `bindings` is required, and unknown root fields such as `$schema` and `$docs` are ignored:
 
@@ -77,7 +77,9 @@ An imported `null` removes that sequence from the CC layer. It does not touch pi
 
 A key can start a chord only when a longer imported binding exists. Its first stroke is consumed, so pi's action on that key stops firing while the chord is pending (importing CC's `ctrl+x ctrl+e` hides pi's Ctrl+X copy, and pi logs each hidden action to its debug log). A null chord never starts one. The pending prefix expires after three seconds. A mismatching next stroke, including Escape, is consumed and cancels. The prompt border shows a pending indicator, then a timeout notice.
 
-Because the CC layer runs first, an imported key beats pi's own binding of the same key.
+### Precedence
+
+Layering is pi defaults, then the CC file, then pi's own keybindings file. The CC layer runs first, so an imported key beats a pi default on the same key. A key that pi's own `<agent-dir>/keybindings.json` binds is the operator's choice and is not claimed by the CC layer: the CC binding on that key is dropped and pi's own handling runs. The same holds for a chord, so a CC chord whose first stroke the pi file binds is dropped whole and its prefix key keeps the pi action. Only keys the pi file explicitly binds count. Pi defaults the file restates also count. Keys are compared after CC aliases are normalized.
 
 ### Action mapping
 

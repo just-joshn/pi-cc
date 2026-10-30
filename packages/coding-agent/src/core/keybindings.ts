@@ -422,7 +422,12 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		}
 		const raw = this.configPath ? loadRawConfig(this.configPath) : undefined;
 		if (raw && Object.hasOwn(raw, "bindings")) take(this.configPath!, raw);
-		const bindings = resolveLayer(declarations);
+		const piKeys = new Set(
+			Object.values(this.getUserBindings()).flatMap((value) =>
+				(typeof value === "string" ? [value] : (value ?? [])).map((key) => sequenceIdentity([key])),
+			),
+		);
+		const bindings = resolveLayer(declarations).filter((binding) => !piKeys.has(sequenceIdentity([binding.keys[0]])));
 		this.cc.setBindings(bindings);
 		this.warnHiddenSingleKeyActions(bindings);
 	}
