@@ -15,6 +15,7 @@ import type { Roots, Side, SideName, Violation } from "./isolate.ts";
 import {
 	baseEnv,
 	createRoots,
+	createRunRoot,
 	expandPlaceholders,
 	findPresentPaths,
 	hashTree,
@@ -85,7 +86,7 @@ async function main(): Promise<number> {
 		return 2;
 	}
 
-	const runRoot = join(process.env.CONFORMANCE_TMP ?? join(tmpdir(), "pi-cc-conformance"), runStamp());
+	const runRoot = createRunRoot(process.env.CONFORMANCE_TMP ?? join(tmpdir(), "pi-cc-conformance"));
 	const claude = await probeClaude(runRoot);
 	if (claude === null) {
 		console.log("claude is absent. Every case runs on the pi-cc side and is reported unverified.\n");
@@ -300,10 +301,6 @@ function skipReason(testCase: ConformanceCase, claudeAbsent: boolean): string | 
 		if (reason === "claude-binary-absent" && claudeAbsent) return reason;
 	}
 	return null;
-}
-
-function runStamp(): string {
-	return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 function printHeader(selected: number, total: number, claude: ClaudeIdentity | null, allowDrift: boolean): void {

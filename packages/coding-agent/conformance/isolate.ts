@@ -70,6 +70,11 @@ const FIXTURES_DIR = fileURLToPath(new URL("../fixtures/", import.meta.url));
 
 const MODEL_API_KEY = "sk-ant-conformance-fixture-0000000000000000";
 
+/** A directory under `base` for one harness run, named by the time it started. */
+export function createRunRoot(base: string): string {
+	return mkdirp(join(base, new Date().toISOString().replace(/[:.]/g, "-")));
+}
+
 export function createRoots(tmpRoot: string, caseId: string, side: SideName): Roots {
 	const root = realpathSync(mkdirp(join(tmpRoot, caseId, side)));
 	const roots: Roots = {

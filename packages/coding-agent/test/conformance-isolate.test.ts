@@ -17,11 +17,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { type ExecLog, startExecLog } from "../conformance/execlog.ts";
 import {
 	baseEnv,
 	createRoots,
+	createRunRoot,
 	expandPlaceholders,
 	findPresentPaths,
 	hashTree,
@@ -629,5 +630,24 @@ describe.skipIf(!darwin)("the managed policy denial", () => {
 
 		expect(run.status).toBe(0);
 		expect(run.stdout.length).toBeGreaterThan(0);
+	});
+});
+
+describe("the directory of one harness run", () => {
+	test("two runs that start in the same millisecond do not share a root", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-cc-run-root-"));
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
+		try {
+			const first = createRunRoot(base);
+			const second = createRunRoot(base);
+
+			expect(second).not.toBe(first);
+			expect(existsSync(first)).toBe(true);
+			expect(existsSync(second)).toBe(true);
+		} finally {
+			vi.useRealTimers();
+			rmSync(base, { recursive: true, force: true });
+		}
 	});
 });
