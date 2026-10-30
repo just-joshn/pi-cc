@@ -248,6 +248,64 @@ describe("Claude Code tool surface", () => {
 		]);
 	});
 
+	describe("nested memory", () => {
+		const reminder = (path: string, text = "RULES") =>
+			`<system-reminder>\nContents of ${path}:\n\n${text}\n</system-reminder>`;
+		const result = (id: string, ...texts: string[]) => ({
+			role: "toolResult" as const,
+			toolCallId: id,
+			toolName: "read",
+			content: texts.map((text) => ({ type: "text" as const, text })),
+			isError: false,
+			timestamp: 0,
+		});
+		const texts = (message: { content: unknown } | undefined) =>
+			(message?.content as Array<{ text: string }>).map((block) => block.text);
+
+		it("follows the tool results as one text block per reminder on a model that takes system messages", () => {
+			const history = projectMessagesForModel([
+				result("a", "first", reminder("/w/a/CLAUDE.md")),
+				result("b", "second", reminder("/w/b/CLAUDE.md")),
+			]);
+			expect(history.map((message) => message.role)).toEqual(["toolResult", "toolResult", "user"]);
+			expect(texts(history[0])).toEqual(["first"]);
+			expect(texts(history[1])).toEqual(["second"]);
+			expect(texts(history[2])).toEqual([reminder("/w/a/CLAUDE.md"), reminder("/w/b/CLAUDE.md")]);
+		});
+
+		it("rides inside the last tool result of the run on a model that takes none", () => {
+			const history = projectMessagesForModel(
+				[result("a", "first", reminder("/w/a/CLAUDE.md")), result("b", "second", reminder("/w/b/CLAUDE.md"))],
+				{ midConversationSystemMessages: false },
+			);
+			expect(history.map((message) => message.role)).toEqual(["toolResult", "toolResult"]);
+			expect(texts(history[0])).toEqual(["first"]);
+			expect(texts(history[1])).toEqual([
+				`second\n\n${reminder("/w/a/CLAUDE.md")}\n\n${reminder("/w/b/CLAUDE.md")}`,
+			]);
+		});
+
+		it("sends AGENTS.md reminders as one system message and other memory as a user block", () => {
+			const agents = [reminder("/w/a/AGENTS.md", "AG_A"), reminder("/w/b/AGENTS.md", "AG_B")];
+			const history = projectMessagesForModel([result("a", "x", agents[0], reminder("/w/a/CLAUDE.md"), agents[1])]);
+			expect(history.map((message) => message.role)).toEqual(["toolResult", "user", "system"]);
+			expect(texts(history[1])).toEqual([reminder("/w/a/CLAUDE.md")]);
+			expect(history[2]).toMatchObject({ role: "system", content: agents.join("\n") });
+		});
+
+		it("keeps the partial-view notice a system message after the memory block", () => {
+			const read = { ...result("a", "x", reminder("/w/a/CLAUDE.md")), details: { ccNotice: "PARTIAL" } };
+			const history = projectMessagesForModel([read]);
+			expect(history.map((message) => message.role)).toEqual(["toolResult", "user", "system"]);
+			expect(history[2]).toMatchObject({ content: "PARTIAL" });
+		});
+
+		it("leaves a result without a reminder alone", () => {
+			const plain = result("a", "x");
+			expect(projectMessagesForModel([plain])).toEqual([plain]);
+		});
+	});
+
 	it("sorts a resumed session's merged tool list", () => {
 		const tool = (name: string) => ({ name, description: name, parameters: Type.Object({}) });
 		const history = projectMessagesForModel([

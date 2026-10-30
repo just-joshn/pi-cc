@@ -33,6 +33,11 @@ async function memoryHarness(): Promise<{ harness: Harness; workspace: string; m
 	writeFileSync(join(workspace, "CLAUDE.md"), "PROJECT_MEMORY");
 	writeFileSync(join(workspace, "sub", "CLAUDE.md"), "SUB_MEMORY");
 	writeFileSync(join(workspace, "sub", "file.txt"), "file body");
+	mkdirSync(join(workspace, "w"), { recursive: true });
+	writeFileSync(join(workspace, "w", "CLAUDE.md"), "WRITE_MEMORY");
+	mkdirSync(join(workspace, "e"), { recursive: true });
+	writeFileSync(join(workspace, "e", "CLAUDE.md"), "EDIT_MEMORY");
+	writeFileSync(join(workspace, "e", "file.txt"), "old");
 	const snapshot = discoverMemory({
 		cwd: workspace,
 		home: join(root, "home"),
@@ -102,6 +107,38 @@ describe("memory in an agent session", () => {
 
 		const storedUser = harness.session.messages.find((message) => message.role === "user");
 		expect(JSON.stringify(storedUser)).not.toContain("PROJECT_MEMORY");
+	});
+
+	test("a successful write or edit brings in the memory of its directory once", async () => {
+		const { harness, workspace } = await memoryHarness();
+		const requests: TranscriptContext[] = [];
+		const respond = (call?: ReturnType<typeof fauxToolCall>) => (context: TranscriptContext) => {
+			requests.push(context);
+			return call ? fauxAssistantMessage([call], { stopReason: "toolUse" }) : fauxAssistantMessage("done");
+		};
+		harness.setResponses([
+			respond(fauxToolCall("write", { path: join(workspace, "w", "a.txt"), content: "a" })),
+			respond(fauxToolCall("write", { path: join(workspace, "w", "b.txt"), content: "b" })),
+			respond(
+				fauxToolCall("edit", {
+					path: join(workspace, "e", "file.txt"),
+					edits: [{ oldText: "old", newText: "new" }],
+				}),
+			),
+			respond(),
+		]);
+
+		await harness.session.prompt("go");
+
+		const results = requests[3].messages.filter((message) => message.role === "toolResult");
+		const text = results.map((result) =>
+			blocks(result)
+				.map((block) => block.text ?? "")
+				.join("\n"),
+		);
+		expect(text[0]).toContain(`Contents of ${join(workspace, "w", "CLAUDE.md")}:\n\nWRITE_MEMORY`);
+		expect(text[1]).not.toContain("WRITE_MEMORY");
+		expect(text[2]).toContain(`Contents of ${join(workspace, "e", "CLAUDE.md")}:\n\nEDIT_MEMORY`);
 	});
 });
 

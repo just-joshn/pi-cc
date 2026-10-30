@@ -1,0 +1,63 @@
+{
+	"id": "memory/nested-memory-parallel-reads-haiku-4-5",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Read the fixtures",
+		"--model",
+		"claude-haiku-4-5"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"a/CLAUDE.md": "CL_A\n",
+		"a/x.txt": "x\n",
+		"b/CLAUDE.md": "CL_B\n",
+		"b/y.txt": "y\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_uses": [
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "a/x.txt"
+						}
+					},
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "b/y.txt"
+						}
+					}
+				]
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages?",
+				"count": 2,
+				"bodyMatch": [
+					"\"content\":\"[^\"]*\\\\n\\\\n<system-reminder>\\\\nContents of [^\"]*/workspace/a/CLAUDE\\.md:\\\\n\\\\nCL_A\\\\n\\\\n</system-reminder>",
+					"\"content\":\"[^\"]*\\\\n\\\\n<system-reminder>\\\\nContents of [^\"]*/workspace/b/CLAUDE\\.md:\\\\n\\\\nCL_B\\\\n\\\\n</system-reminder>"
+				],
+				"bodyNotMatch": [
+					"\"role\":\"user\",\"content\":\\[\\{\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of",
+					"\"role\":\"system\",\"content\":(?:\"|\\[\\{\"type\":\"text\",\"text\":\")[^\"]*Contents of",
+					"\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of"
+				]
+			}
+		]
+	},
+	"skip": []
+}

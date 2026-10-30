@@ -34,6 +34,12 @@ export function nestedReminderPath(text: string): string | undefined {
 	return end === -1 ? undefined : text.slice(NESTED_PREFIX.length, end);
 }
 
+/** Whether a reminder made by `renderNestedReminder` is for an AGENTS.md file. */
+export function isAgentsReminder(text: string): boolean {
+	const path = nestedReminderPath(text);
+	return path !== undefined && path.replace(/^.*[\\/]/, "") === "AGENTS.md";
+}
+
 /** The system prompt section that tells the model where auto memory lives. `dir` ends with a separator. */
 export function autoMemoryPromptSection(dir: string): string {
 	return [

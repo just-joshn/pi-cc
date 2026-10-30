@@ -23,9 +23,11 @@ import type {
 	Model,
 	Tool,
 	ToolCall,
+	ToolResultMessage,
 } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { type TSchema, Type } from "typebox";
+import { isAgentsReminder, nestedReminderPath } from "../memory/wrapper.ts";
 import { CC_READ_MAX_BYTES, CC_READ_MAX_TOKENS } from "./cc-text.ts";
 import { editToolSystemPromptContribution } from "./edit.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./truncate.ts";
@@ -466,7 +468,9 @@ export interface CcSurfaceOptions {
 	/**
 	 * Whether the model accepts system messages after the conversation starts. Default: true. When
 	 * false, the transport folds every later system message into the leading one, so a tool-result
-	 * notice rides inside its own tool result, wrapped the way Claude Code wraps it.
+	 * notice rides inside its own tool result, wrapped the way Claude Code wraps it. Nested memory
+	 * follows the same split: a text block after the tool results when true, inside the last tool
+	 * result when false.
 	 */
 	midConversationSystemMessages?: boolean;
 }
@@ -477,7 +481,9 @@ export interface CcSurfaceOptions {
  */
 export function projectMessagesForModel(messages: readonly Message[], options?: CcSurfaceOptions): Message[] {
 	const includePlaceholder = options?.placeholder !== false;
-	const projected = messages.flatMap((message): Message[] => {
+	const foldIntoResult = options?.midConversationSystemMessages === false;
+	let nestedReminders: string[] = [];
+	const projected = messages.flatMap((message, index, all): Message[] => {
 		if (message.role === "system") {
 			if (message.sections !== undefined) {
 				const sections = Object.fromEntries(
@@ -509,10 +515,18 @@ export function projectMessagesForModel(messages: readonly Message[], options?: 
 			return [{ ...message, content: message.content.map(projectHistoryBlock) }];
 		}
 		if (message.role === "toolResult") {
-			const notice = noticeOf(message);
-			if (!notice) return [message];
-			if (options?.midConversationSystemMessages === false) return [withNoticeInResult(message, notice)];
-			return [message, { role: "system", content: notice, timestamp: message.timestamp }];
+			const { result, reminders } = takeNestedReminders(message);
+			nestedReminders.push(...reminders);
+			const notice = noticeOf(result);
+			const out: Message[] = [result];
+			if (notice) {
+				if (foldIntoResult) out[0] = withNoticeInResult(result, notice);
+				else out.push({ role: "system", content: notice, timestamp: result.timestamp });
+			}
+			if (nestedReminders.length === 0 || all[index + 1]?.role === "toolResult") return out;
+			const run = nestedReminders;
+			nestedReminders = [];
+			return placeNestedReminders(out, run, foldIntoResult);
 		}
 		return [message];
 	});
@@ -659,16 +673,54 @@ function noticeOf(message: Message): string | undefined {
  * appended to the tool result it explains, inside `<system-reminder>` tags (measured on
  * claude-haiku-4-5, which answers a model that can with its own system message).
  */
-function withNoticeInResult(message: Message & { role: "toolResult" }, notice: string): Message {
-	const reminder = `<system-reminder>\n${notice}\n</system-reminder>`;
+function withNoticeInResult(message: ToolResultMessage, notice: string): ToolResultMessage {
+	return appendToResult(message, `<system-reminder>\n${notice}\n</system-reminder>`);
+}
+
+function appendToResult(message: ToolResultMessage, text: string): ToolResultMessage {
 	const content = [...message.content];
 	const last = content[content.length - 1];
 	if (last !== undefined && last.type === "text") {
-		content[content.length - 1] = { ...last, text: `${last.text}\n\n${reminder}` };
+		content[content.length - 1] = { ...last, text: `${last.text}\n\n${text}` };
 	} else {
-		content.push({ type: "text", text: reminder });
+		content.push({ type: "text", text });
 	}
 	return { ...message, content };
+}
+
+/** A tool result without the nested memory reminders its content carries, and those reminders in order. */
+function takeNestedReminders(message: ToolResultMessage): { result: ToolResultMessage; reminders: string[] } {
+	const reminders: string[] = [];
+	const content = message.content.filter((block) => {
+		if (block.type !== "text" || nestedReminderPath(block.text) === undefined) return true;
+		reminders.push(block.text);
+		return false;
+	});
+	return { result: reminders.length === 0 ? message : { ...message, content }, reminders };
+}
+
+/**
+ * Where Claude Code puts the nested memory a run of tool results brought in. A model that takes
+ * mid-conversation system messages gets one text block per reminder in the user message that
+ * carries the results, and the AGENTS.md reminders as one system message. Any other model gets
+ * them after the last result's own text.
+ */
+function placeNestedReminders(out: Message[], reminders: string[], foldIntoResult: boolean): Message[] {
+	const [result, ...rest] = out as [ToolResultMessage, ...Message[]];
+	if (foldIntoResult) return [appendToResult(result, reminders.join("\n\n")), ...rest];
+	const texts = reminders.filter((text) => !isAgentsReminder(text));
+	const placed: Message[] = [result];
+	if (texts.length > 0) {
+		placed.push({
+			role: "user",
+			content: texts.map((text) => ({ type: "text", text })),
+			timestamp: result.timestamp,
+		});
+	}
+	placed.push(...rest);
+	const agents = reminders.filter(isAgentsReminder);
+	if (agents.length > 0) placed.push({ role: "system", content: agents.join("\n"), timestamp: result.timestamp });
+	return placed;
 }
 
 /**

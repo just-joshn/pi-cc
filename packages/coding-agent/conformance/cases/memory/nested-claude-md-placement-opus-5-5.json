@@ -38,7 +38,7 @@
 				"count": 2,
 				"bodyMatch": [
 					"CL_SUB",
-					"\\},\\{\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of [^\"]*/workspace/sub/CLAUDE\\.md:\\\\n\\\\nCL_SUB\\\\n\\\\n</system-reminder>\"\\}"
+					"\\},\\{\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of [^\"]*/workspace/sub/CLAUDE\\.md:\\\\n\\\\nCL_SUB\\\\n\\\\n</system-reminder>\"(?:,\"cache_control\":\\{[^}]*\\})?\\}"
 				],
 				"bodyNotMatch": [
 					"\"content\":\"[^\"]*Contents of [^\"]*CL_SUB",

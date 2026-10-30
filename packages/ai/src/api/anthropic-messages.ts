@@ -1325,6 +1325,8 @@ function convertMessages(
 	// also mirrors where the managed-effort system messages are inserted. As a result an
 	// update placed before a user message in the transcript lands after it on the wire.
 	const pendingSystemMessages: AnthropicMessageParam[] = [];
+	// A user message right after tool results joins their message, as Claude Code sends it.
+	let toolResultMessage: AnthropicMessageParam | undefined;
 	const flushPendingSystemMessages = (): void => {
 		params.push(...pendingSystemMessages);
 		pendingSystemMessages.length = 0;
@@ -1381,6 +1383,10 @@ function convertMessages(
 					return true;
 				});
 				if (filteredBlocks.length === 0) continue;
+				if (toolResultMessage !== undefined && params[params.length - 1] === toolResultMessage) {
+					(toolResultMessage.content as AnthropicContentBlock[]).push(...filteredBlocks);
+					continue;
+				}
 				params.push({
 					role: "user",
 					content: filteredBlocks,
@@ -1475,10 +1481,11 @@ function convertMessages(
 			// Skip the messages we've already processed.
 			i = j - 1;
 
-			params.push({
+			toolResultMessage = {
 				role: "user",
 				content: [...toolResults, ...errorImages],
-			});
+			};
+			params.push(toolResultMessage);
 		}
 	}
 
