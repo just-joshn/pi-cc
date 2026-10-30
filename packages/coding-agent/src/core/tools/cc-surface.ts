@@ -505,6 +505,9 @@ export function projectMessagesForModel(messages: readonly Message[], options?: 
 				);
 				message = { ...message, sections };
 			}
+			if (message.context !== undefined) {
+				message = { ...message, context: projectToolList(projectPromptLines(message.context)) };
+			}
 			const toolsAdded = message.toolsAdded;
 			if (toolsAdded === undefined) return [message];
 			const projected = projectDeclarations(toolsAdded, includePlaceholder);
