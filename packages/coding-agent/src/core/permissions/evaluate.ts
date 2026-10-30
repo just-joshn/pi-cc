@@ -4,7 +4,8 @@
  *   denyRule        a whole-tool deny rule refuses the call
  *   askRule         a whole-tool ask rule asks (the tool's own check may still deny, or say why)
  *   toolCheck       the tool's own check; a deny ends here, an allow or ask is held for the stages below
- *   modeHold        an ask a rule, plan mode or a safety check stands behind is final (a safety check yields to bypass)
+ *   modeHold        an ask a rule, plan mode or a safety check stands behind is final (a safety check yields to bypass
+ *                   unless its breaker is bypass-immune, see breakers.ts)
  *   bypassMode      `bypassPermissions` allows what is left
  *   allowRule       a whole-tool allow rule allows what is left
  *   toolResult      the tool's own allow, ask or no opinion (which asks)
@@ -14,6 +15,7 @@
  * `allowRule` allow an ask nothing holds in place.
  */
 
+import { holdsUnderBypass } from "./breakers.ts";
 import type { PermissionContext } from "./context.ts";
 import { type CheckResult, type Decision, defaultAskMessage, dontAskMessage } from "./decision.ts";
 import { stricterMode } from "./mode.ts";
@@ -76,7 +78,7 @@ const STAGES: Readonly<Record<StageName, Stage>> = {
 		const held =
 			reason?.type === "rule" ||
 			(reason?.type === "mode" && reason.mode === "plan") ||
-			(reason?.type === "safetyCheck" && !bypassing);
+			(reason?.type === "safetyCheck" && (!bypassing || holdsUnderBypass(reason.breaker, ctx.removalWaived)));
 		return held ? check : undefined;
 	},
 

@@ -1,10 +1,11 @@
+import type { Breaker } from "./breakers.ts";
 import type { PermissionMode } from "./mode.ts";
 import type { PermissionRule } from "./rules.ts";
 
 export type DecisionReason =
 	| { readonly type: "rule"; readonly rule: PermissionRule }
 	| { readonly type: "mode"; readonly mode: PermissionMode }
-	| { readonly type: "safetyCheck"; readonly reason: string }
+	| { readonly type: "safetyCheck"; readonly reason: string; readonly breaker?: Breaker }
 	| { readonly type: "other"; readonly reason: string };
 
 export type AllowDecision = {

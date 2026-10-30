@@ -30,6 +30,9 @@ function settingsPermissions(values: Readonly<Record<string, unknown>>): Setting
 		ask: strings(permissions.ask),
 		deny: strings(permissions.deny),
 		...(typeof permissions.defaultMode === "string" ? { defaultMode: permissions.defaultMode } : {}),
+		...(permissions.blockReadsOutsideWorkingDirectories === true
+			? { blockReadsOutsideWorkingDirectories: true }
+			: {}),
 		...(typeof permissions.disableBypassPermissionsMode === "string"
 			? { disableBypassPermissionsMode: permissions.disableBypassPermissionsMode }
 			: {}),
@@ -71,6 +74,7 @@ export function permissionSetup(
 	settingsValues: Readonly<Record<string, unknown>>,
 	addDir: readonly string[],
 	cwd: string,
+	env: Readonly<Record<string, string | undefined>> = process.env,
 ): PermissionSetup {
 	const settings = settingsPermissions(settingsValues);
 	const rawDirectories = (settingsValues.permissions as { additionalDirectories?: unknown } | undefined)
@@ -94,6 +98,9 @@ export function permissionSetup(
 			...(cliMode === undefined ? {} : { cliMode }),
 			allowedTools,
 			disallowedTools,
+			removalWaiverRequested:
+				(env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS ?? "") !== "" &&
+				(env.CLAUDE_CODE_CHILD_SESSION ?? "") === "",
 			...(typeof settingsValues.useAutoModeDuringPlan === "boolean"
 				? { useAutoModeDuringPlan: settingsValues.useAutoModeDuringPlan }
 				: {}),
