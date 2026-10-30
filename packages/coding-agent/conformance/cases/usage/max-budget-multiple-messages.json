@@ -143,6 +143,7 @@
 		"requests": [
 			{
 				"pathStartsWith": "/v1/messages",
+				"count": 1,
 				"bodyIncludes": [
 					"first prompt"
 				]

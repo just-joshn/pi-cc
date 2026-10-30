@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
-import { gateBudget } from "../../core/usage/budget.ts";
+import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
 import { catalogLimits, chargeFor, hasNativeRates, type PricingPolicy } from "../../core/usage/cost.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
@@ -110,6 +110,7 @@ export class SdkHost {
 			const next = await inbox.next();
 			if (next === undefined || this.ended) break;
 			await this.turn(next);
+			if (budgetExhausted(this.ledger.spentUSD(), this.options.maxBudgetUsd)) break;
 		}
 		if (inbox.failure !== undefined) {
 			this.options.fail(inbox.failure);

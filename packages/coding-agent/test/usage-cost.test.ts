@@ -155,9 +155,54 @@ describe("managed pricing policy", () => {
 		expect(charge).toEqual({ usd: 6, basis: "managed" });
 	});
 
-	test("a malformed policy prices at list", () => {
+	test("a policy with nothing valid in it prices at list", () => {
+		expect(parsePricingPolicy("x")).toBeUndefined();
 		expect(parsePricingPolicy({ multiplier: -1 })).toBeUndefined();
 		expect(parsePricingPolicy({ overrides: { m: { input: "1" } } })).toBeUndefined();
+	});
+
+	test("a bad override row is skipped and valid rows keep their rates and geo handling", () => {
+		const mixed = parsePricingPolicy({
+			overrides: {
+				"claude-opus-4-8": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 },
+				broken: { input: "1" },
+				"claude-haiku-4-5": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: -1 },
+			},
+		});
+		expect([...(mixed?.exact.keys() ?? [])]).toEqual(["claude-opus-4-8"]);
+		expect(chargeFor("claude-opus-4-8", usage({ input: 1e6, inferenceGeo: "us" }), false, mixed)).toEqual({
+			usd: 1,
+			basis: "managed",
+		});
+		expect(chargeFor("claude-sonnet-4-5", usage({ input: 1e6, inferenceGeo: "us" }), false, mixed).usd).toBeCloseTo(
+			3.3,
+		);
+	});
+
+	test("an out-of-range multiplier is ignored while valid rows stay", () => {
+		const rows = { "claude-opus-4-8": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } };
+		for (const multiplier of [0, -1, 10.5, "2", Number.NaN]) {
+			const parsed = parsePricingPolicy({ multiplier, overrides: rows });
+			expect(parsed?.multiplier).toBe(1);
+			expect(chargeFor("claude-opus-4-8", usage({ input: 1e6 }), false, parsed).usd).toBe(1);
+		}
+		expect(parsePricingPolicy({ multiplier: 10, overrides: rows })?.multiplier).toBe(10);
+		expect(parsePricingPolicy({ multiplier: 99 })).toBeUndefined();
+	});
+
+	test("a built-in override reaches every spelling but not a model whose name merely contains the id", () => {
+		const parsed = parsePricingPolicy({
+			overrides: { "claude-sonnet-4-5": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
+		});
+		for (const name of ["claude-sonnet-4-5-20250929", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"]) {
+			expect(chargeFor(name, usage({ input: 1e6 }), false, parsed)).toEqual({ usd: 1, basis: "managed" });
+		}
+		const custom = parsePricingPolicy({
+			overrides: { "claude-sonnet-4-5-custom": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
+		});
+		expect(custom?.builtin.size).toBe(0);
+		expect(chargeFor("claude-sonnet-4-5", usage({ input: 1e6 }), false, custom)).toEqual({ usd: 3, basis: "list" });
+		expect(chargeFor("claude-sonnet-4-5-custom", usage({ input: 1e6 }), false, custom).usd).toBe(1);
 	});
 });
 

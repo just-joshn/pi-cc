@@ -1,5 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
-import { type CatalogModel, DEFAULT_RATES, findCatalogModel, type ModelRates, ratesOf } from "./pricing.ts";
+import { CATALOG, type CatalogModel, DEFAULT_RATES, findCatalogModel, type ModelRates, ratesOf } from "./pricing.ts";
 
 /** One request's usage, normalized to the categories Claude Code prices separately. */
 export interface UsageBreakdown {
@@ -146,26 +146,32 @@ export function canonicalName(name: string): string {
 	return findCatalogModel(name)?.id ?? name.replace(/-\d{8}$/, "");
 }
 
-/** Reads the `modelPricing` policy value. A malformed value prices at list, as Claude Code's catch does. */
+/** Reads the `modelPricing` policy value. A bad override row is dropped and an out-of-range multiplier falls back to 1, as Claude Code's reader does. */
 export function parsePricingPolicy(value: unknown): PricingPolicy | undefined {
 	if (!isRecord(value)) return undefined;
-	const multiplier = value.multiplier ?? 1;
-	if (typeof multiplier !== "number" || !(multiplier > 0)) return undefined;
+	const multiplier = validMultiplier(value.multiplier) ? value.multiplier : 1;
 	const exact = new Map<string, ModelRates>();
 	const builtin = new Map<string, ModelRates>();
-	const overrides = value.overrides ?? {};
-	if (!isRecord(overrides)) return undefined;
+	const overrides = isRecord(value.overrides) ? value.overrides : {};
 	for (const [name, row] of Object.entries(overrides)) {
 		const rates = overrideRates(row);
-		if (rates === undefined) return undefined;
+		if (rates === undefined) continue;
 		const key = name.toLowerCase().replace(/\[1m\]/g, "");
 		if (exact.has(key)) continue;
 		exact.set(key, rates);
-		const catalogId = findCatalogModel(key)?.id;
+		const catalogId = exactCatalogModel(key)?.id;
 		if (catalogId !== undefined && !builtin.has(catalogId)) builtin.set(catalogId, rates);
 	}
 	if (exact.size === 0 && multiplier === 1) return undefined;
 	return { multiplier, exact, builtin };
+}
+
+function validMultiplier(value: unknown): value is number {
+	return typeof value === "number" && value > 0 && value <= 10;
+}
+
+function exactCatalogModel(key: string): CatalogModel | undefined {
+	return CATALOG.find((model) => model.id === key || model.providerIds.includes(key));
 }
 
 function overrideRates(row: unknown): ModelRates | undefined {
