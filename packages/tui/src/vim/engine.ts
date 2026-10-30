@@ -523,9 +523,15 @@ function repeatChange(state: VimState, buffer: Buffer, count: number | undefined
 		}
 		// A rerun that opened insert stays there, like Claude Code's replay; Escape then records only
 		// what is typed next.
-		return step({ ...working, insert: { start: typed.offset, before: typed.text, keys: "" }, lastChange: change }, typed);
+		return step(
+			{ ...working, insert: { start: typed.offset, before: typed.text, keys: "" }, lastChange: change },
+			typed,
+		);
 	}
-	return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, applyInserted(after, change.inserted));
+	return step(
+		{ ...working, mode: "normal", insert: undefined, lastChange: change },
+		applyInserted(after, change.inserted),
+	);
 }
 
 /** Inserts the recorded typing at the insert point; the cursor rests before its last character. */
