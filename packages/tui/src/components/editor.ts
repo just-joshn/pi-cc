@@ -23,10 +23,11 @@ import {
 	visibleWidth,
 } from "../utils.ts";
 import type { Buffer } from "../vim/edits.ts";
-import { INSERT_STATE, type VimInput, type VimState, vimKey } from "../vim/engine.ts";
+import { INSERT_STATE, type VimInput, type VimMode, type VimState, vimKey } from "../vim/engine.ts";
 import { BACKSPACE } from "../vim/motions.ts";
 import { type PendingRemap, stepRemap, type VimConfig } from "../vim/remaps.ts";
 import { clampNormal } from "../vim/text.ts";
+import { visualBounds } from "../vim/visual.ts";
 import { isPasteMarker, lineRows, PASTE_MARKER_SINGLE, wordWrapLine } from "../vim/wrap.ts";
 import { findWordBackward, findWordForward } from "../word-navigation.ts";
 import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.ts";
@@ -114,6 +115,8 @@ interface EditorSnapshot {
 
 interface LayoutLine {
 	text: string;
+	/** Offset of the line's first character in the whole text. */
+	start: number;
 	hasCursor: boolean;
 	cursorPos?: number;
 }
@@ -175,6 +178,17 @@ function createScrollBorder(direction: "↑" | "↓", hiddenLineCount: number, w
 	const ellipsis = "...".slice(0, availableWidth);
 	const indicatorWidth = availableWidth - visibleWidth(ellipsis);
 	return sliceByColumn(indicator, 0, indicatorWidth, true) + ellipsis;
+}
+
+const INVERSE_ON = "\x1b[7m";
+const INVERSE_OFF = "\x1b[27m";
+
+/** Inverts the part of `text` inside the selection; `start` is where `text` begins in the whole text. */
+function invertSpan(text: string, selection: { from: number; to: number }, start: number): string {
+	const from = Math.max(0, selection.from - start);
+	const to = Math.min(text.length, selection.to - start);
+	if (from >= to) return text;
+	return text.slice(0, from) + INVERSE_ON + text.slice(from, to) + INVERSE_OFF + text.slice(to);
 }
 
 interface VimRuntime {
@@ -476,15 +490,19 @@ export class Editor implements Component, Focusable {
 		// autocomplete (e.g. slash-command menu) is visible.
 		const emitCursorMarker = this.focused;
 
+		const selection = this.visualSelection();
+
 		for (const layoutLine of visibleLines) {
-			let displayText = layoutLine.text;
+			const shade = (text: string, from: number) =>
+				selection === undefined ? text : invertSpan(text, selection, layoutLine.start + from);
+			let displayText = shade(layoutLine.text, 0);
 			let lineVisibleWidth = visibleWidth(layoutLine.text);
 			let cursorInPadding = false;
 
 			// Add cursor if this line has it
 			if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
-				const before = displayText.slice(0, layoutLine.cursorPos);
-				const after = displayText.slice(layoutLine.cursorPos);
+				const before = layoutLine.text.slice(0, layoutLine.cursorPos);
+				const after = layoutLine.text.slice(layoutLine.cursorPos);
 
 				// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
 				const marker = emitCursorMarker ? CURSOR_MARKER : "";
@@ -496,12 +514,13 @@ export class Editor implements Component, Focusable {
 					const firstGrapheme = afterGraphemes[0]?.segment || "";
 					const restAfter = after.slice(firstGrapheme.length);
 					const cursor = renderFakeCursor(firstGrapheme);
-					displayText = before + marker + cursor + restAfter;
+					displayText =
+						shade(before, 0) + marker + cursor + shade(restAfter, layoutLine.cursorPos + firstGrapheme.length);
 					// lineVisibleWidth stays the same - we're replacing, not adding
 				} else {
 					// Cursor is at the end - add highlighted space
 					const cursor = renderFakeCursor(" ");
-					displayText = before + marker + cursor;
+					displayText = shade(before, 0) + marker + cursor;
 					lineVisibleWidth = lineVisibleWidth + 1;
 					// If cursor overflows content width into the padding, flag it
 					if (lineVisibleWidth > contentWidth && paddingX > 0) {
@@ -534,7 +553,8 @@ export class Editor implements Component, Focusable {
 			}
 		}
 
-		if (this.vim?.state.mode === "insert") result.push(`${leftPadding}-- INSERT --`.slice(0, width));
+		const modeLine = this.vimModeLine();
+		if (modeLine !== undefined) result.push(`${leftPadding}${modeLine}`.slice(0, width));
 
 		return result;
 	}
@@ -916,6 +936,7 @@ export class Editor implements Component, Focusable {
 			// Empty editor
 			layoutLines.push({
 				text: "",
+				start: 0,
 				hasCursor: true,
 				cursorPos: 0,
 			});
@@ -923,8 +944,11 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Process each logical line
+		let lineStartOffset = 0;
 		for (let i = 0; i < this.state.lines.length; i++) {
 			const line = this.state.lines[i] || "";
+			const start = lineStartOffset;
+			lineStartOffset += line.length + 1;
 			const isCurrentLine = i === this.state.cursorLine;
 			const lineVisibleWidth = visibleWidth(line);
 
@@ -933,12 +957,14 @@ export class Editor implements Component, Focusable {
 				if (isCurrentLine) {
 					layoutLines.push({
 						text: line,
+						start,
 						hasCursor: true,
 						cursorPos: this.state.cursorCol,
 					});
 				} else {
 					layoutLines.push({
 						text: line,
+						start,
 						hasCursor: false,
 					});
 				}
@@ -981,12 +1007,14 @@ export class Editor implements Component, Focusable {
 					if (hasCursorInChunk) {
 						layoutLines.push({
 							text: chunk.text,
+							start: start + chunk.startIndex,
 							hasCursor: true,
 							cursorPos: adjustedCursorPos,
 						});
 					} else {
 						layoutLines.push({
 							text: chunk.text,
+							start: start + chunk.startIndex,
 							hasCursor: false,
 						});
 					}
@@ -2078,7 +2106,21 @@ export class Editor implements Component, Focusable {
 		this.tui.requestRender();
 	}
 
-	getVimMode(): "insert" | "normal" | undefined {
+	private vimModeLine(): string | undefined {
+		const state = this.vim?.state;
+		if (state?.mode === "insert") return "-- INSERT --";
+		if (state?.visual !== undefined) return state.visual.kind === "line" ? "-- VISUAL LINE --" : "-- VISUAL --";
+		return undefined;
+	}
+
+	/** The characters the visual selection covers, or undefined outside visual mode. */
+	private visualSelection(): { from: number; to: number } | undefined {
+		const visual = this.vim?.state.visual;
+		if (visual === undefined) return undefined;
+		return visualBounds(visual, this.getText(), this.getCursorOffset(), visual.kind === "line");
+	}
+
+	getVimMode(): VimMode | undefined {
 		return this.vim?.state.mode;
 	}
 
@@ -2096,6 +2138,7 @@ export class Editor implements Component, Focusable {
 		if (vim.state.mode === "insert") return this.handleVimInsertInput(vim, data, isEscape);
 		if (isEscape) return this.applyVimInput(vim, { kind: "escape" });
 		const printable = this.vimPrintable(data);
+		if (printable === undefined && vim.state.mode === "visual") return this.handleVisualSpecialKey(vim, data);
 		if (printable === undefined) {
 			const key = parseKey(data);
 			// Claude Code hands Enter to the editor before its state machine sees it, with any command pending.
@@ -2133,6 +2176,29 @@ export class Editor implements Component, Focusable {
 		if (!idle && kb.matches(data, "tui.editor.cursorUp")) return { kind: "key", key: "k" };
 		if (!idle && kb.matches(data, "tui.editor.cursorDown")) return { kind: "key", key: "j" };
 		return { kind: "other" };
+	}
+
+	/**
+	 * Claude Code's visual-mode key table (chunk-hz2c9q6k.js:1503-1535): arrows, Enter, Backspace and Delete become
+	 * motions from idle or a count and cancel any other pending command; Ctrl and Alt chords leave visual mode;
+	 * every other key is swallowed.
+	 */
+	private handleVisualSpecialKey(vim: VimRuntime, data: string): boolean {
+		const kb = getKeybindings();
+		const pending = this.pendingKeyClass(vim.state.pending);
+		const motion = pending === "idle" || pending === "count";
+		const mapped = (key: string, only = motion) => ({ kind: "key" as const, key: only ? key : "" });
+		const parsed = parseKey(data) ?? "";
+		let input: VimInput | undefined;
+		if (kb.matches(data, "tui.editor.cursorLeft")) input = mapped("h");
+		else if (kb.matches(data, "tui.editor.cursorRight")) input = mapped("l");
+		else if (kb.matches(data, "tui.editor.cursorUp")) input = mapped("k");
+		else if (kb.matches(data, "tui.editor.cursorDown") || parsed === "enter") input = mapped("j");
+		else if (kb.matches(data, "tui.editor.deleteCharBackward")) input = mapped(BACKSPACE);
+		else if (kb.matches(data, "tui.editor.deleteCharForward")) input = mapped("x", pending === "idle");
+		else if (/(^|\+)(ctrl|alt)\+/.test(parsed)) input = { kind: "other" };
+		if (input !== undefined) this.applyVimInput(vim, input);
+		return true;
 	}
 
 	private pendingKeyClass(pending: string): "idle" | "count" | "operator" | "other" {
@@ -2174,7 +2240,7 @@ export class Editor implements Component, Focusable {
 		if (step.buffer) this.setBuffer(step.buffer.text, step.buffer.offset);
 		else if (buffer !== undefined) this.setBuffer(buffer.text, buffer.offset);
 		if (step.state.mode === "normal") this.clampVimCursor();
-		if (before === "normal" && step.state.mode === "insert") vim.insertUndoDepth = depth;
+		if (before !== "insert" && step.state.mode === "insert") vim.insertUndoDepth = depth;
 		if (before === "insert" && step.state.mode === "normal") this.foldUndoSince(vim.insertUndoDepth);
 		this.tui.requestRender();
 		return !step.passThrough;

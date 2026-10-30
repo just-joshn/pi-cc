@@ -45,10 +45,11 @@ import {
 	wordEnd,
 	wordForward,
 } from "./text.ts";
+import { enterVisual, MAX_COUNT, replayVisual, type VisualChange, type VisualState, visualKey } from "./visual.ts";
 
 export type { Buffer } from "./edits.ts";
 
-export type VimMode = "insert" | "normal";
+export type VimMode = "insert" | "normal" | "visual";
 
 /** What the editor tells the engine about a key press. Printable keys arrive as their character. */
 export type VimInput =
@@ -61,16 +62,20 @@ export interface Find {
 	readonly char: string;
 }
 
-interface Change {
+export interface Change {
 	/** The command's keys, replayed by `.`; empty for plain typing in insert mode. */
 	readonly keys: string;
 	readonly inserted: string;
+	/** A visual-mode change, replayed over the same amount of text at the cursor; its keys are empty. */
+	readonly visual?: VisualChange;
 }
 
 interface InsertSession {
 	readonly start: number;
 	readonly before: string;
 	readonly keys: string;
+	/** The session follows a visual c: Escape records it as a visual change that retypes its text. */
+	readonly visual?: Pick<VisualChange, "span" | "linewise">;
 }
 
 export interface VimState {
@@ -82,6 +87,8 @@ export interface VimState {
 	readonly lastChange?: Change;
 	readonly insert?: InsertSession;
 	readonly wanted?: Wanted;
+	/** The selection; present exactly in visual mode. */
+	readonly visual?: VisualState;
 }
 
 export interface VimStep {
@@ -99,7 +106,6 @@ export interface VimStep {
 export const INSERT_STATE: VimState = { mode: "insert", pending: "" };
 export const NORMAL_STATE: VimState = { mode: "normal", pending: "" };
 
-const MAX_COUNT = 10000;
 const COUNT = String.raw`[1-9]\d*`;
 const MOTION = String.raw`[hl \x08jkwbeWBE0^$%G]|g[gjk]|[fFtT][\s\S]+`;
 const OBJECT = String.raw`[ia][wW"'\x60()b[\]{}B<>]`;
@@ -545,6 +551,7 @@ function countable(cmd: Command): boolean {
 function repeatChange(state: VimState, buffer: Buffer, count: number | undefined): VimStep {
 	const change = state.lastChange;
 	if (change === undefined) return cancel(state);
+	if (change.visual !== undefined) return repeatVisual(state, buffer, change, change.visual);
 	let working = { ...state, pending: "" };
 	let after = buffer;
 	if (change.keys !== "") {
@@ -575,6 +582,21 @@ function repeatChange(state: VimState, buffer: Buffer, count: number | undefined
 	);
 }
 
+/** `.` over a visual change: the same amount of text at the cursor, then the typed text of a visual c. */
+function repeatVisual(state: VimState, buffer: Buffer, change: Change, visual: VisualChange): VimStep {
+	const ran = replayVisual(visual, buffer);
+	if (ran === undefined) return cancel(state);
+	const landed = ran.typed === undefined ? ran.buffer : applyInserted(ran.buffer, ran.typed);
+	const next = {
+		...state,
+		pending: "",
+		wanted: undefined,
+		register: ran.register ?? state.register,
+		lastChange: change,
+	};
+	return step(next, landed);
+}
+
 /** Inserts the recorded typing at the insert point; the cursor rests before its last character. */
 function applyInserted(after: Buffer, inserted: string): Buffer {
 	const text = after.text.slice(0, after.offset) + inserted + after.text.slice(after.offset);
@@ -591,7 +613,10 @@ function leaveInsert(state: VimState, buffer: Buffer): VimStep {
 	if (session !== undefined) {
 		const typed = offset < session.start ? "" : text.slice(session.start, offset);
 		const plain = session.before.slice(0, session.start) + typed + session.before.slice(session.start) === text;
-		if (session.keys !== "" || (plain && typed !== "")) {
+		if (session.visual !== undefined) {
+			const action = { kind: "change" as const, text: plain ? typed : "" };
+			lastChange = { keys: "", inserted: "", visual: { ...session.visual, action } };
+		} else if (session.keys !== "" || (plain && typed !== "")) {
 			lastChange = { keys: session.keys, inserted: plain ? typed : "" };
 		}
 	}
@@ -615,14 +640,24 @@ function historyStep(state: VimState, key: string, text: string, offset: number)
 	return undefined;
 }
 
+// Visual mode moves with the same motions as normal mode, plus ; and , for the last find.
+function visualMotion(state: VimState, target: string, count: number | undefined, buffer: Buffer): VimStep {
+	if (target === ";" || target === ",") return repeatFind(state, target === ",", count ?? 1, buffer);
+	return plainMotion(state, withoutWrap({ count, target }, buffer), buffer) ?? cancel(state);
+}
+
 /** One key press in vim mode. */
 export function vimKey(state: VimState, input: VimInput, buffer: Buffer): VimStep {
 	if (state.mode === "insert") return insertKey(state, input, buffer);
+	if (state.visual !== undefined) return visualKey(state, state.visual, input, buffer, visualMotion);
 	if (input.kind === "escape") return { state: { ...state, pending: "" }, passThrough: state.pending === "" };
 	if (input.kind === "other") return { state: { ...state, pending: "" }, passThrough: true };
 	const here = { ...buffer, offset: clampNormal(buffer.text, buffer.offset) };
 	const history = historyStep(state, input.key, here.text, here.offset);
 	if (history !== undefined) return history;
+	if ((input.key === "v" || input.key === "V") && /^(?:[1-9]\d*)?$/.test(state.pending)) {
+		return enterVisual(state, input.key === "V" ? "line" : "char", here);
+	}
 	const keys = state.pending + input.key;
 	const cmd = parse(keys);
 	if (cmd === "partial") return step({ ...state, pending: keys });

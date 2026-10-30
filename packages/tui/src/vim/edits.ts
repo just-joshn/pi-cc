@@ -187,7 +187,8 @@ export function joinLines(buffer: Buffer, count: number): Edit | undefined {
 	return { buffer: { text: merged, offset: clampNormal(merged, lineOffset(merged, row) + seam) } };
 }
 
-function shiftLine(line: string, dir: ">" | "<"): string {
+/** One line shifted by two spaces, right or left; an empty line stays empty. */
+export function shiftLine(line: string, dir: ">" | "<"): string {
 	if (line === "") return line;
 	if (dir === ">") return `  ${line}`;
 	if (line.startsWith("  ")) return line.slice(2);
