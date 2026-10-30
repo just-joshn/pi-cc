@@ -88,7 +88,7 @@ If rebase conflicts occur:
 
 ## Issues and PRs
 
-See `CONTRIBUTING.md` for the contributor gate (auto-close workflows, `lgtm`/`lgtmi`, quality bar).
+This is a private, operator-only fork (`just-joshn/pi-cc`). See `CONTRIBUTING.md` for the local check, build, and test workflow.
 
 When reviewing PRs:
 
@@ -128,12 +128,8 @@ Rules:
 
 Attribution:
 
-- Internal (from issues): `Fixed foo bar ([#123](https://github.com/earendil-works/pi/issues/123))`
-- External contributions: `Added feature X ([#456](https://github.com/earendil-works/pi/pull/456) by [@username](https://github.com/username))`
-
-## Releasing
-
-For release preparation, publishing, verification, or recovery, load and follow [.pi/skills/release.md](.pi/skills/release.md).
+- Internal (from issues): `Fixed foo bar ([#123](https://github.com/just-joshn/pi-cc/issues/123))`
+- External contributions: `Added feature X ([#456](https://github.com/just-joshn/pi-cc/pull/456) by [@username](https://github.com/username))`
 
 ## User Override
 

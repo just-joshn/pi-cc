@@ -18,7 +18,6 @@ function assertFailsBeforeWork(result, message) {
 }
 
 test("rejects missing option values before doing work", () => {
-	assertFailsBeforeWork(runScript("local-release.mjs", ["--out"]), /--out/);
 	assertFailsBeforeWork(runScript("pack-packages.mjs", ["--out", "--force"]), /--out/);
 	assertFailsBeforeWork(runScript("use-local-packages.mjs", ["--manifest", "--consumer", "target"]), /--manifest/);
 });

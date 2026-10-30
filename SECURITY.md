@@ -23,11 +23,9 @@ coding agent trivially and this cannot be protected against.
 
 ## Reporting a Vulnerability
 
-If you believe you found a security vulnerability in pi or another package in
-this repository, please report it privately by either:
-
-- Emailing `security@earendil.com`, or
-- Opening a private report through GitHub Security Advisories for this repository
+This is the private, operator-only `just-joshn/pi-cc` fork. Report security
+findings directly to the operator through the private repository. Do not send
+fork-specific reports to upstream maintainers.
 
 Please include:
 
@@ -41,9 +39,9 @@ reports and coordinate disclosure as appropriate.
 
 ## Scope
 
-Security issues in the distributed packages, command-line tools, APIs, and
-repository code are in scope as well as earendil operated infrastructure
-on `pi.dev`.
+Security issues in this fork's packages, command-line tools, APIs, and
+repository code are in scope. Upstream infrastructure on `pi.dev` is not
+operated by this fork.
 
 ## Out Of Scope
 
@@ -80,8 +78,7 @@ send credentials to an attacker-controlled endpoint, or otherwise change behavio
 is out of scope.
 
 When possible, include the exact affected path, package version or commit SHA,
-configuration, and a proof of concept against the latest release or latest
-`main`.  For dependency reports, include evidence that the shipped dependency is
+configuration, and a proof of concept against the latest `main`.  For dependency reports, include evidence that the shipped dependency is
 affected and that the issue is reachable through Pi.  For exposed-secret reports,
-include evidence that the credential is owned by Earendil or grants access to
-Earendil-operated infrastructure or services.
+include evidence that the credential is owned by the operator or grants access
+to the operator's infrastructure or services.
