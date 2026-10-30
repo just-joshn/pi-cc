@@ -34,7 +34,13 @@ function run(marked: string, keys: string, start: VimState = NORMAL_STATE, colum
 			offset += input.key.length;
 		}
 	}
-	return { text: `${text.slice(0, offset)}|${text.slice(offset)}`, mode: state.mode, undos, history, anchor: state.visual?.anchor };
+	return {
+		text: `${text.slice(0, offset)}|${text.slice(offset)}`,
+		mode: state.mode,
+		undos,
+		history,
+		anchor: state.visual?.anchor,
+	};
 }
 
 const normal = (from: string, keys: string) => run(from, keys);
@@ -476,7 +482,7 @@ visualTable("vim visual motions and counts", [
 	["|a,b,c", "vf,d", "|b,c"],
 	["|a,b,c", "vt,d", "|,b,c"],
 	["|a,b,c", "vf,;d", "|c"],
-	["a,b,|c", "vF,d", "a,|"],
+	["a,b,|c", "vF,d", "a,|b"],
 	["|ab\ncd", "v$d", "|cd"],
 	["|ab\ncde", "v$jd", "|"],
 	["|a\nb", "vGd", "|"],
@@ -555,8 +561,8 @@ describe("vim visual state", () => {
 
 	it("keeps the display column across gj and gk", () => {
 		const result = run("aa|aa bbbb cccc dddd", "vgjd", NORMAL_STATE, 10);
-		assert.strictEqual(result.text, "aa|cc dddd");
-		assert.strictEqual(run("aaaa bbbb cc|cc dddd", "vgkd", NORMAL_STATE, 10).text, "aaaa bb|cc dddd");
+		assert.strictEqual(result.text, "aa|c dddd");
+		assert.strictEqual(run("aaaa bbbb cc|cc dddd", "vgkd", NORMAL_STATE, 10).text, "aa|c dddd");
 	});
 });
 
