@@ -222,16 +222,16 @@ describe("vim insert mode", () => {
 			assert.strictEqual(result.mode, "normal");
 		});
 
-		it("o<Esc> leaves . opening another empty line below, in insert mode", () => {
+		it("o<Esc> leaves . opening another empty line below, back in normal mode", () => {
 			const result = run("|ab", "o<Esc>.");
 			assert.strictEqual(result.text, "ab\n\n|");
-			assert.strictEqual(result.mode, "insert");
+			assert.strictEqual(result.mode, "normal");
 		});
 
-		it("O<Esc> leaves . opening another empty line above, in insert mode", () => {
+		it("O<Esc> leaves . opening another empty line above, back in normal mode", () => {
 			const result = run("|ab", "O<Esc>.");
 			assert.strictEqual(result.text, "|\n\nab");
-			assert.strictEqual(result.mode, "insert");
+			assert.strictEqual(result.mode, "normal");
 		});
 
 		it("s<Esc> leaves . substituting again, in insert mode", () => {
@@ -246,10 +246,10 @@ describe("vim insert mode", () => {
 			assert.strictEqual(result.mode, "insert");
 		});
 
-		it("o with typed text repeats the open line plus the text, in insert mode", () => {
+		it("o with typed text repeats the open line plus the text, back in normal mode", () => {
 			const result = run("|ab", "oX<Esc>.");
 			assert.strictEqual(result.text, "ab\nX\n|X");
-			assert.strictEqual(result.mode, "insert");
+			assert.strictEqual(result.mode, "normal");
 		});
 
 		it("x then i<Esc> leaves . doing nothing", () => {
@@ -500,6 +500,9 @@ visualTable("vim visual transforms", [
 	["|a\nb", "V2>", "    |a\nb"],
 	["  |a", "V<", "|a"],
 	["a|b\ncd\nef", "vjJ", "ab| cd\nef"],
+	["|a\nb\nc\nd\ne\nf", "vjjJ<Esc>j.", "a b c\nd e| f"],
+	["|a\nb\nc\nd\ne\nf\ng\nh", "vjjjJ<Esc>j.", "a b c d\ne f g| h"],
+	["|a\nb\nc\nd", "vjJ<Esc>j.", "a b\nc| d"],
 	["|ab cd", "ywwvlp", "ab ab| "],
 	["|ab", "vlpd", "|"],
 ]);
