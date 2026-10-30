@@ -398,10 +398,14 @@ describe("policy tier", () => {
 		expect(gate.policy.allowedProviders).toBeUndefined();
 	});
 
-	test("a policy above the running version refuses and names the file", () => {
+	test("a policy above the running version refuses with the organization's wording", () => {
 		const gate = ccPolicyGate({ requiredMinimumVersion: "9.0.0" }, "1.4.0", MANAGED);
-		expect(gate.refusal).toContain(MANAGED);
-		expect(gate.refusal).toContain("above the running version");
+		expect(gate.refusal).toContain("older than the minimum version required by your organization (9.0.0)");
+	});
+
+	test("a policy below the running version refuses on the maximum", () => {
+		const gate = ccPolicyGate({ requiredMaximumVersion: "1.0.0" }, "1.4.0", MANAGED);
+		expect(gate.refusal).toContain("newer than the maximum version allowed by your organization (1.0.0)");
 	});
 
 	test("an unusable provider list refuses and names the file", () => {

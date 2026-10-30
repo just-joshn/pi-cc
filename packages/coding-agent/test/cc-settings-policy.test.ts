@@ -66,28 +66,49 @@ describe("exposed switches", () => {
 });
 
 describe("version gate", () => {
-	test("does nothing without requiredMinimumVersion", () => {
+	test("does nothing without a bound", () => {
 		expect(policyRefusal(EMPTY_CC_POLICY, "1.4.0")).toBeUndefined();
 	});
 
-	test("refuses when the requirement is above the running version", () => {
+	test("refuses a build older than the minimum with the organization's wording", () => {
 		const policy = { ...EMPTY_CC_POLICY, requiredMinimumVersion: "9.0.0" };
-		expect(policyRefusal(policy, "1.4.0")).toContain("above the running version");
+		const refusal = policyRefusal(policy, "1.4.0") ?? "";
+		expect(refusal).toContain("1.4.0 is older than the minimum version required by your organization (9.0.0).");
+		expect(refusal).toContain("update` may also work.");
 	});
 
-	test("allows a requirement the running version meets", () => {
+	test("allows a build that meets the minimum, boundary included", () => {
 		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.2.0" }, "1.4.0")).toBeUndefined();
 		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.4.0" }, "1.4.0")).toBeUndefined();
 	});
 
-	test("refuses a requirement that is not a version", () => {
-		const policy = { ...EMPTY_CC_POLICY, requiredMinimumVersion: "soon" };
-		expect(policyRefusal(policy, "1.4.0")).toContain("not a valid version");
+	test("refuses a build newer than the maximum with the organization's wording", () => {
+		const policy = { ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.3.0" };
+		const refusal = policyRefusal(policy, "1.4.0") ?? "";
+		expect(refusal).toContain("1.4.0 is newer than the maximum version allowed by your organization (1.3.0).");
+		expect(refusal).toContain("Your organization requires version 1.3.0 or older.");
 	});
 
-	test("keeps the policy readable when the requirement parses", () => {
-		const parsed = parseCcPolicy({ requiredMinimumVersion: "1.0.0" });
+	test("allows a build at or under the maximum", () => {
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.4.0" }, "1.4.0")).toBeUndefined();
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "2.0.0" }, "1.4.0")).toBeUndefined();
+	});
+
+	test("refuses when the band is empty, by whichever bound the build breaks", () => {
+		const policy = { ...EMPTY_CC_POLICY, requiredMinimumVersion: "3.0.0", requiredMaximumVersion: "2.0.0" };
+		expect(policyRefusal(policy, "1.4.0")).toContain("older than the minimum");
+		expect(policyRefusal(policy, "2.5.0")).toContain("older than the minimum");
+	});
+
+	test("ignores a bound that is not a version instead of locking the build out", () => {
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "soon" }, "1.4.0")).toBeUndefined();
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.3" }, "1.4.0")).toBeUndefined();
+	});
+
+	test("keeps both bounds readable when they parse", () => {
+		const parsed = parseCcPolicy({ requiredMinimumVersion: "1.0.0", requiredMaximumVersion: "2.0.0" });
 		if (parsed.kind !== "policy") throw new Error("expected a policy");
 		expect(parsed.policy.requiredMinimumVersion).toBe("1.0.0");
+		expect(parsed.policy.requiredMaximumVersion).toBe("2.0.0");
 	});
 });

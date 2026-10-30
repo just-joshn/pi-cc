@@ -1,9 +1,10 @@
 /**
- * The managed-policy tier. Two of its keys can stop a run: a provider set nothing can serve, and a
- * minimum version above this build. The rest are exposed for the permission, hook and MCP units.
+ * The managed-policy tier. Its keys that can stop a run are a provider set nothing can serve and a version
+ * band (`requiredMinimumVersion`, `requiredMaximumVersion`) this build falls outside. The rest are exposed for the permission, hook and MCP units.
  */
 
-import { coerce, lt, valid } from "semver";
+import { coerce, gt, lt, valid } from "semver";
+import { APP_NAME } from "../../../config.ts";
 
 export interface CcPolicy {
 	readonly allowedProviders: readonly string[] | undefined;
@@ -11,6 +12,7 @@ export interface CcPolicy {
 	readonly allowManagedPermissionRulesOnly: boolean;
 	readonly allowManagedMcpServersOnly: boolean;
 	readonly requiredMinimumVersion: string | undefined;
+	readonly requiredMaximumVersion: string | undefined;
 	readonly forceLoginMethod: string | undefined;
 }
 
@@ -20,6 +22,7 @@ export const EMPTY_CC_POLICY: CcPolicy = {
 	allowManagedPermissionRulesOnly: false,
 	allowManagedMcpServersOnly: false,
 	requiredMinimumVersion: undefined,
+	requiredMaximumVersion: undefined,
 	forceLoginMethod: undefined,
 };
 
@@ -51,21 +54,30 @@ export function parseCcPolicy(values: Readonly<Record<string, unknown>>): CcPoli
 	return { kind: "policy", policy: { ...readSwitches(values), allowedProviders: providers } };
 }
 
-/** The version gate. An unparsable requirement refuses rather than letting the run through. */
+/**
+ * The version gate. A bound that is not a version is ignored, as Claude Code ignores it, so a typo in a
+ * managed file cannot lock the fleet out. The refusal text is Claude Code's with this product's name.
+ */
 export function policyRefusal(policy: CcPolicy, version: string): string | undefined {
-	const minimum = policy.requiredMinimumVersion;
-	if (minimum === undefined) {
-		return undefined;
-	}
-	if (valid(minimum) === null) {
-		return `requiredMinimumVersion "${minimum}" is not a valid version`;
-	}
 	const running = coerce(version);
 	if (running === null) {
 		return undefined;
 	}
-	if (lt(running, minimum)) {
-		return `requiredMinimumVersion ${minimum} is above the running version ${version}`;
+	const minimum = policy.requiredMinimumVersion;
+	if (minimum !== undefined && valid(minimum) !== null && lt(running, minimum)) {
+		return (
+			`${APP_NAME} ${version} is older than the minimum version required by your organization (${minimum}).\n` +
+			`Update ${APP_NAME} using your organization's approved method, then try again. ` +
+			`If automatic updates are available, \`${APP_NAME} update\` may also work.`
+		);
+	}
+	const maximum = policy.requiredMaximumVersion;
+	if (maximum !== undefined && valid(maximum) !== null && gt(running, maximum)) {
+		return (
+			`${APP_NAME} ${version} is newer than the maximum version allowed by your organization (${maximum}).\n` +
+			`Your organization requires version ${maximum} or older. ` +
+			"Install an approved version using your organization's approved method."
+		);
 	}
 	return undefined;
 }
@@ -77,6 +89,8 @@ function readSwitches(values: Readonly<Record<string, unknown>>): Omit<CcPolicy,
 		allowManagedMcpServersOnly: values.allowManagedMcpServersOnly === true,
 		requiredMinimumVersion:
 			typeof values.requiredMinimumVersion === "string" ? values.requiredMinimumVersion : undefined,
+		requiredMaximumVersion:
+			typeof values.requiredMaximumVersion === "string" ? values.requiredMaximumVersion : undefined,
 		forceLoginMethod: typeof values.forceLoginMethod === "string" ? values.forceLoginMethod : undefined,
 	};
 }
