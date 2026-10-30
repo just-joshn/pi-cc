@@ -1,0 +1,40 @@
+{
+	"id": "tui/rejects-bad-prefers-reduced-motion",
+	"area": "tui",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "{\"prefersReducedMotion\": \"yes\", \"model\": \"claude-opus-4-5\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"contains": [
+				"did not load",
+				"(prefersReducedMotion): Expected boolean, but received string"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyExcludes": [
+					"claude-opus-4-5"
+				]
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,37 @@
+{
+	"id": "tui/accepted-values-load",
+	"area": "tui",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "{\"prefersReducedMotion\": true, \"maxProseWidth\": 80, \"timeFormat\": \"%H:%M\", \"timeZone\": \"Nowhere/Land\", \"tui\": \"fullscreen\", \"editorMode\": \"vim\", \"vimInsertModeRemaps\": {\"jj\": \"<Esc>\"}, \"axScreenReader\": true, \"model\": \"claude-opus-4-5\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"equals": ""
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-opus-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

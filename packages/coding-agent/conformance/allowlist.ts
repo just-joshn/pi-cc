@@ -66,6 +66,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--setting-sources",
 		"--bare",
 		"--safe-mode",
+		// P36b: renders flat text, so it only changes how an interactive session draws
+		"--ax-screen-reader",
 		// tool selection, which PR #7's cases pin
 		"--tools",
 		"--disallowedTools",
