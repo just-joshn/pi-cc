@@ -24,7 +24,7 @@ import {
 } from "../utils.ts";
 import type { Buffer } from "../vim/edits.ts";
 import { INSERT_STATE, type VimInput, type VimMode, type VimState, vimKey } from "../vim/engine.ts";
-import { BACKSPACE } from "../vim/motions.ts";
+import { pendingClass, routeSpecialKey } from "../vim/keys.ts";
 import { type PendingRemap, stepRemap, type VimConfig } from "../vim/remaps.ts";
 import { clampNormal } from "../vim/text.ts";
 import { visualBounds } from "../vim/visual.ts";
@@ -198,14 +198,6 @@ interface VimRuntime {
 	/** Undo stack depth when the current insert session began, so Escape can fold the session into one undo step. */
 	insertUndoDepth: number;
 }
-
-/** Normal-mode keys with no printable form that vim maps to a motion, by editor action. */
-const VIM_KEY_ACTIONS = [
-	["tui.editor.cursorLeft", "h"],
-	["tui.editor.cursorRight", "l"],
-	["tui.editor.deleteCharBackward", BACKSPACE],
-	["tui.editor.deleteCharForward", "x"],
-] as const;
 
 export class Editor implements Component, Focusable {
 	private state: EditorState = {
@@ -623,6 +615,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		if (this.vimDropsKey(data)) return;
 		const kb = getKeybindings();
 
 		// Handle character jump mode (awaiting next character to jump to)
@@ -2138,14 +2131,7 @@ export class Editor implements Component, Focusable {
 		if (vim.state.mode === "insert") return this.handleVimInsertInput(vim, data, isEscape);
 		if (isEscape) return this.applyVimInput(vim, { kind: "escape" });
 		const printable = this.vimPrintable(data);
-		if (printable === undefined && vim.state.mode === "visual") return this.handleVisualSpecialKey(vim, data);
-		if (printable === undefined) {
-			const key = parseKey(data);
-			// Claude Code hands Enter to the editor before its state machine sees it, with any command pending.
-			if (key === "enter") return false;
-			const routed = this.vimSpecialKey(vim, data);
-			return routed === undefined ? false : this.applyVimInput(vim, routed);
-		}
+		if (printable === undefined) return this.handleVimSpecialKey(vim, data);
 		// A read that carries several characters is typed one at a time.
 		let consumed = false;
 		for (const { segment } of graphemeSegmenter.segment(printable)) {
@@ -2160,52 +2146,21 @@ export class Editor implements Component, Focusable {
 		return data.length > 0 && !data.startsWith("\x1b") && !/[\x00-\x1f\x7f]/.test(data) ? data : undefined;
 	}
 
-	/** Claude Code routes Backspace and Delete into its machine only from idle, a count or an operator; every other
-	 * pending state keeps itself and the editor acts on the key (chunk-hz2c9q6k.js:1637-1654). */
-	private vimSpecialKey(vim: VimRuntime, data: string): VimInput | undefined {
-		const kb = getKeybindings();
-		const idle = vim.state.pending === "";
-		const pending = this.pendingKeyClass(vim.state.pending);
-		for (const [action, mapped] of VIM_KEY_ACTIONS) {
-			if (!kb.matches(data, action)) continue;
-			// Delete maps to x only from idle or an operator; Backspace from idle, a count or an operator.
-			if (mapped === "x" && pending !== "idle" && pending !== "operator") return undefined;
-			if (mapped === BACKSPACE && pending === "other") return undefined;
-			return { kind: "key", key: mapped };
-		}
-		if (!idle && kb.matches(data, "tui.editor.cursorUp")) return { kind: "key", key: "k" };
-		if (!idle && kb.matches(data, "tui.editor.cursorDown")) return { kind: "key", key: "j" };
-		return { kind: "other" };
+	/** Non-printable keys follow Claude Code's router (see `routeSpecialKey`). Returns whether vim consumed the key. */
+	private handleVimSpecialKey(vim: VimRuntime, data: string): boolean {
+		const visual = vim.state.mode === "visual";
+		const route = routeSpecialKey(parseKey(data), visual ? "visual" : "normal", pendingClass(vim.state.pending));
+		if (route.route === "key") return this.applyVimInput(vim, { kind: "key", key: route.key }) || visual;
+		if (route.route === "leave") return this.applyVimInput(vim, { kind: "other" }) || visual;
+		return visual;
 	}
 
-	/**
-	 * Claude Code's visual-mode key table (chunk-hz2c9q6k.js:1503-1535): arrows, Enter, Backspace and Delete become
-	 * motions from idle or a count and cancel any other pending command; Ctrl and Alt chords leave visual mode;
-	 * every other key is swallowed.
-	 */
-	private handleVisualSpecialKey(vim: VimRuntime, data: string): boolean {
-		const kb = getKeybindings();
-		const pending = this.pendingKeyClass(vim.state.pending);
-		const motion = pending === "idle" || pending === "count";
-		const mapped = (key: string, only = motion) => ({ kind: "key" as const, key: only ? key : "" });
-		const parsed = parseKey(data) ?? "";
-		let input: VimInput | undefined;
-		if (kb.matches(data, "tui.editor.cursorLeft")) input = mapped("h");
-		else if (kb.matches(data, "tui.editor.cursorRight")) input = mapped("l");
-		else if (kb.matches(data, "tui.editor.cursorUp")) input = mapped("k");
-		else if (kb.matches(data, "tui.editor.cursorDown") || parsed === "enter") input = mapped("j");
-		else if (kb.matches(data, "tui.editor.deleteCharBackward")) input = mapped(BACKSPACE);
-		else if (kb.matches(data, "tui.editor.deleteCharForward")) input = mapped("x", pending === "idle");
-		else if (/(^|\+)(ctrl|alt)\+/.test(parsed)) input = { kind: "other" };
-		if (input !== undefined) this.applyVimInput(vim, input);
-		return true;
-	}
-
-	private pendingKeyClass(pending: string): "idle" | "count" | "operator" | "other" {
-		if (pending === "") return "idle";
-		if (/^[1-9]\d*$/.test(pending)) return "count";
-		if (/^[dcy]\d*$/.test(pending)) return "operator";
-		return "other";
+	/** Keys Claude Code's normal mode drops without the editor acting on them: Tab, Home, End, and a Delete or Backspace
+	 * its pending command does not take. */
+	private vimDropsKey(data: string): boolean {
+		const vim = this.vim;
+		if (vim === undefined || vim.state.mode !== "normal" || this.vimPrintable(data) !== undefined) return false;
+		return routeSpecialKey(parseKey(data), "normal", pendingClass(vim.state.pending)).route === "drop";
 	}
 
 	private handleVimInsertInput(vim: VimRuntime, data: string, isEscape: boolean): boolean {
@@ -2239,7 +2194,7 @@ export class Editor implements Component, Focusable {
 		if (step.undo) this.undo();
 		if (step.buffer) this.setBuffer(step.buffer.text, step.buffer.offset);
 		else if (buffer !== undefined) this.setBuffer(buffer.text, buffer.offset);
-		if (step.state.mode === "normal") this.clampVimCursor();
+		if (step.state.mode === "normal" && !step.keepCursor) this.clampVimCursor();
 		if (before !== "insert" && step.state.mode === "insert") vim.insertUndoDepth = depth;
 		if (before === "insert" && step.state.mode === "normal") this.foldUndoSince(vim.insertUndoDepth);
 		this.tui.requestRender();

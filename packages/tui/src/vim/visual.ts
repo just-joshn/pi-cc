@@ -126,7 +126,12 @@ export function visualKey(
 	if (input.kind === "escape") {
 		return state.pending === "" ? leave(state, buffer) : step({ ...state, pending: "" });
 	}
-	if (input.kind === "other") return leave(state, buffer);
+	if (input.kind === "other") {
+		return {
+			...step({ ...state, mode: "normal", pending: "", visual: undefined, wanted: undefined }),
+			keepCursor: true,
+		};
+	}
 	const cancelled = { ...state, pending: "" };
 	const [, digits = "", letter = ""] = PENDING.exec(state.pending) ?? [];
 	const count = digits === "" ? undefined : Number(digits);
@@ -308,7 +313,9 @@ function shiftRows(text: string, first: number, last: number, dir: ">" | "<", co
 	return { buffer: { text: next, offset: lineOffset(next, first) + indentEnd(lines[first] ?? "") } };
 }
 
-/** J over the selected lines. Claude Code records it as a plain two-line join, whatever the selection. */
+/** J over the selected lines. Claude Code joins one fewer than the selected rows and records that many plus one
+ * (chunk-hz2c9q6k.js:351-362, 573-584), so `.` joins the same number of lines. A selection on the last row joins nothing
+ * and records two. */
 function join(state: VimState, visual: VisualState, buffer: Buffer): VimStep {
 	const { text, offset } = buffer;
 	const anchor = Math.min(visual.anchor, text.length);
@@ -316,7 +323,9 @@ function join(state: VimState, visual: VisualState, buffer: Buffer): VimStep {
 	const rows = text.slice(low, Math.max(anchor, offset)).split("\n").length;
 	const joined = joinLines({ text, offset: low }, rows);
 	const stay = visual.kind === "line" ? lineStart(text, low) : clampNormal(text, low);
-	return exit(state, joined ?? { buffer: { text, offset: stay } }, { keys: "2J", inserted: "" });
+	const below = text.split("\n").length - 1 - lineIndex(text, low);
+	const count = below === 0 ? 2 : Math.max(1, Math.min(rows - 1, below)) + 1;
+	return exit(state, joined ?? { buffer: { text, offset: stay } }, { keys: `${count}J`, inserted: "" });
 }
 
 /** `.` over a recorded span, at the cursor. Undefined when the span is empty, so nothing is replayed. */

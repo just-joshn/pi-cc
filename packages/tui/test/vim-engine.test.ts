@@ -259,8 +259,8 @@ describe("vim insert mode", () => {
 		});
 
 		it("a replay that opens insert keeps insert mode after more typing and Escape records only the new typing", () => {
-			const result = run("|ab", "o<Esc>.Z<Esc>");
-			assert.strictEqual(result.text, "ab\n\n|Z");
+			const result = run("|abc", "s<Esc>.Z<Esc>");
+			assert.strictEqual(result.text, "|Zc");
 			assert.strictEqual(result.mode, "normal");
 		});
 	});
@@ -302,11 +302,11 @@ describe("vim insert mode", () => {
 		assert.strictEqual(vimKey(cleared.state, { kind: "escape" }, { text: "a", offset: 0 }).passThrough, true);
 	});
 
-	it("other keys pass through in both modes and clear a pending command", () => {
+	it("other keys pass through in both modes and keep a pending command", () => {
 		const pending = vimKey(NORMAL_STATE, { kind: "key", key: "d" }, { text: "a", offset: 0 });
 		const other = vimKey(pending.state, { kind: "other" }, { text: "a", offset: 0 });
 		assert.strictEqual(other.passThrough, true);
-		assert.strictEqual(other.state.pending, "");
+		assert.strictEqual(other.state.pending, "d");
 		assert.strictEqual(vimKey(INSERT_STATE, { kind: "other" }, { text: "a", offset: 0 }).passThrough, true);
 	});
 });

@@ -51,7 +51,7 @@ describe("pending operator and count keys", () => {
 		const editor = createEditor();
 		press(editor, "abcdef<Esc>0");
 		assert.strictEqual(editor.handleVimInput("3", false), true);
-		assert.strictEqual(editor.handleVimInput("\x1b[3~", false), true);
+		key(editor, "\x1b[3~");
 		assert.strictEqual(marked(editor), "|abcdef");
 		press(editor, "x");
 		assert.strictEqual(marked(editor), "|def");
@@ -77,7 +77,7 @@ describe("pending operator and count keys", () => {
 		const editor = createEditor();
 		press(editor, "aibi<Esc>0");
 		assert.strictEqual(editor.handleVimInput("f", false), true);
-		assert.strictEqual(editor.handleVimInput("\x7f", false), true);
+		key(editor, "\x7f");
 		assert.strictEqual(editor.getText(), "aibi");
 		press(editor, "i");
 		assert.strictEqual(editor.getVimMode(), "normal");
@@ -136,16 +136,65 @@ const NORMAL_ROWS: readonly SpecialRow[] = [
 	{ name: "Delete idle deletes forward", text: "abcdef", pending: "0", key: "delete", probe: "", after: "|bcdef" },
 	{ name: "Delete after d cancels", text: "abcdef", pending: "0d", key: "delete", probe: "x", after: "|bcdef" },
 	{ name: "Delete after d2 cancels", text: "abcdef", pending: "0d2", key: "delete", probe: "x", after: "|bcdef" },
-	{ name: "Delete after a count keeps the count", text: "abcdef", pending: "03", key: "delete", probe: "x", after: "|def" },
+	{
+		name: "Delete after a count keeps the count",
+		text: "abcdef",
+		pending: "03",
+		key: "delete",
+		probe: "x",
+		after: "|def",
+	},
 	{ name: "Delete after f is swallowed", text: "abcdef", pending: "0f", key: "delete", probe: "c", after: "ab|cdef" },
 	{ name: "Delete after r is swallowed", text: "abcdef", pending: "0r", key: "delete", probe: "Z", after: "|Zbcdef" },
-	{ name: "Delete after g is swallowed", text: "abc\ndef", pending: "<Esc>G0g", key: "delete", probe: "g", after: "|abc\ndef" },
+	{
+		name: "Delete after g is swallowed",
+		text: "abc\ndef",
+		pending: "<Esc>G0g",
+		key: "delete",
+		probe: "g",
+		after: "|abc\ndef",
+	},
 	{ name: "Backspace idle moves left", text: "abcdef", pending: "$", key: "backspace", probe: "x", after: "abcd|f" },
-	{ name: "Backspace after a count moves left", text: "abcdef", pending: "$3", key: "backspace", probe: "x", after: "ab|def" },
-	{ name: "Backspace after d deletes left", text: "abcdef", pending: "$d", key: "backspace", probe: "", after: "abcd|f" },
-	{ name: "Backspace after d2 deletes two left", text: "abcdef", pending: "$d2", key: "backspace", probe: "", after: "abc|f" },
-	{ name: "Backspace after f is swallowed", text: "abcdef", pending: "0lf", key: "backspace", probe: "e", after: "abcd|ef" },
-	{ name: "Backspace after r is swallowed", text: "abcdef", pending: "0lr", key: "backspace", probe: "Z", after: "a|Zcdef" },
+	{
+		name: "Backspace after a count moves left",
+		text: "abcdef",
+		pending: "$3",
+		key: "backspace",
+		probe: "x",
+		after: "ab|def",
+	},
+	{
+		name: "Backspace after d deletes left",
+		text: "abcdef",
+		pending: "$d",
+		key: "backspace",
+		probe: "",
+		after: "abcd|f",
+	},
+	{
+		name: "Backspace after d2 deletes two left",
+		text: "abcdef",
+		pending: "$d2",
+		key: "backspace",
+		probe: "",
+		after: "abc|f",
+	},
+	{
+		name: "Backspace after f is swallowed",
+		text: "abcdef",
+		pending: "0lf",
+		key: "backspace",
+		probe: "e",
+		after: "abcd|ef",
+	},
+	{
+		name: "Backspace after r is swallowed",
+		text: "abcdef",
+		pending: "0lr",
+		key: "backspace",
+		probe: "Z",
+		after: "a|Zcdef",
+	},
 	{ name: "Tab idle is dropped", text: "abcdef", pending: "0", key: "tab", probe: "x", after: "|bcdef" },
 	{ name: "Tab keeps a pending d", text: "abcdef", pending: "$d", key: "tab", probe: "h", after: "abcd|f" },
 	{ name: "Home idle is dropped", text: "abcdef", pending: "", key: "home", probe: "x", after: "abcd|e" },
@@ -156,9 +205,23 @@ const NORMAL_ROWS: readonly SpecialRow[] = [
 	{ name: "Insert keeps a pending d", text: "abcdef", pending: "$d", key: "insert", probe: "h", after: "abcd|f" },
 	{ name: "F1 keeps a count", text: "abcdef", pending: "03", key: "f1", probe: "x", after: "|def" },
 	{ name: "Left after f is the find target", text: "abchef", pending: "0f", key: "left", probe: "x", after: "abc|ef" },
-	{ name: "Right after r is the replacement", text: "abcdef", pending: "0r", key: "right", probe: "", after: "|lbcdef" },
+	{
+		name: "Right after r is the replacement",
+		text: "abcdef",
+		pending: "0r",
+		key: "right",
+		probe: "",
+		after: "|lbcdef",
+	},
 	{ name: "Shift+Left idle moves left", text: "abcdef", pending: "", key: "shiftLeft", probe: "x", after: "abcd|f" },
-	{ name: "Shift+Right idle moves right", text: "abcdef", pending: "0", key: "shiftRight", probe: "x", after: "a|cdef" },
+	{
+		name: "Shift+Right idle moves right",
+		text: "abcdef",
+		pending: "0",
+		key: "shiftRight",
+		probe: "x",
+		after: "a|cdef",
+	},
 	{ name: "Ctrl+W keeps a pending d", text: "abc def", pending: "$d", key: "ctrlW", probe: "h", after: "abc|f" },
 	{ name: "Ctrl+A keeps a count", text: "abcdef", pending: "$3", key: "ctrlA", probe: "x", after: "|def" },
 ];
@@ -166,14 +229,78 @@ const NORMAL_ROWS: readonly SpecialRow[] = [
 const VISUAL_ROWS: readonly SpecialRow[] = [
 	{ name: "Tab keeps a count", text: "abcdef", pending: "0v3", key: "tab", probe: "ld", after: "|ef", mode: "normal" },
 	{ name: "Home is dropped", text: "abcdef", pending: "0vl", key: "home", probe: "d", after: "|cdef", mode: "normal" },
-	{ name: "Left after a count moves that far", text: "abcdef", pending: "$v2", key: "left", probe: "d", after: "ab|c", mode: "normal" },
-	{ name: "Left after f cancels the find", text: "abcdef", pending: "0vf", key: "left", probe: "d", after: "|bcdef", mode: "normal" },
-	{ name: "Backspace after r cancels the replace", text: "abcdef", pending: "0vr", key: "backspace", probe: "d", after: "|bcdef", mode: "normal" },
-	{ name: "Delete after a count cancels it", text: "abcdef", pending: "0v2", key: "delete", probe: "d", after: "|bcdef", mode: "normal" },
-	{ name: "Enter after a count moves down", text: "ab\ncd\nef", pending: "<Esc>ggv1", key: "enter", probe: "d", after: "|d\nef", mode: "normal" },
-	{ name: "Enter after i cancels the object", text: "ab\ncd", pending: "<Esc>ggvi", key: "enter", probe: "d", after: "|b\ncd", mode: "normal" },
-	{ name: "Shift+Right moves right", text: "abcdef", pending: "0v", key: "shiftRight", probe: "d", after: "|cdef", mode: "normal" },
-	{ name: "Ctrl+A leaves visual mode without snapping", text: "abcdef", pending: "0v$", key: "ctrlA", probe: "", after: "abcdef|", mode: "normal" },
+	{
+		name: "Left after a count moves that far",
+		text: "abcdef",
+		pending: "$v2",
+		key: "left",
+		probe: "d",
+		after: "ab|c",
+		mode: "normal",
+	},
+	{
+		name: "Left after f cancels the find",
+		text: "abcdef",
+		pending: "0vf",
+		key: "left",
+		probe: "d",
+		after: "|bcdef",
+		mode: "normal",
+	},
+	{
+		name: "Backspace after r cancels the replace",
+		text: "abcdef",
+		pending: "0vr",
+		key: "backspace",
+		probe: "d",
+		after: "|bcdef",
+		mode: "normal",
+	},
+	{
+		name: "Delete after a count cancels it",
+		text: "abcdef",
+		pending: "0v2",
+		key: "delete",
+		probe: "d",
+		after: "|bcdef",
+		mode: "normal",
+	},
+	{
+		name: "Enter after a count moves down",
+		text: "ab\ncd\nef",
+		pending: "<Esc>ggv1",
+		key: "enter",
+		probe: "d",
+		after: "|d\nef",
+		mode: "normal",
+	},
+	{
+		name: "Enter after i cancels the object",
+		text: "ab\ncd",
+		pending: "<Esc>ggvi",
+		key: "enter",
+		probe: "d",
+		after: "|b\ncd",
+		mode: "normal",
+	},
+	{
+		name: "Shift+Right moves right",
+		text: "abcdef",
+		pending: "0v",
+		key: "shiftRight",
+		probe: "d",
+		after: "|cdef",
+		mode: "normal",
+	},
+	{
+		name: "Ctrl+A leaves visual mode without snapping",
+		text: "abcdef",
+		pending: "0v$",
+		key: "ctrlA",
+		probe: "",
+		after: "abcdef|",
+		mode: "normal",
+	},
 ];
 
 describe("special keys by pending state", () => {
@@ -520,14 +647,14 @@ describe("Editor vim visual mode", () => {
 		assert.strictEqual(editor.getVimMode(), "visual");
 	});
 
-	it("Enter during a visual find searches for the newline", () => {
+	it("Enter during a visual find is the find target: the search finds no newline in the line, so nothing moves", () => {
 		const editor = createEditor();
 		editor.setText("ab\ncd");
 		press(editor, "<Esc>ggvf");
 		assert.strictEqual(editor.handleVimInput("\r", false), true);
 		assert.strictEqual(editor.getVimMode(), "visual");
 		press(editor, "d");
-		assert.strictEqual(editor.getText(), "cd");
+		assert.strictEqual(editor.getText(), "b\ncd");
 	});
 
 	it("Enter during a visual replace puts a newline in", () => {

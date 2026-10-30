@@ -101,6 +101,8 @@ export interface VimStep {
 	readonly history?: "up" | "down";
 	/** The key is not vim's: give it to the editor unchanged. */
 	readonly passThrough: boolean;
+	/** Leave the cursor where it is, even past the last character (a chord that ends visual mode). */
+	readonly keepCursor?: boolean;
 }
 
 export const INSERT_STATE: VimState = { mode: "insert", pending: "" };
@@ -557,8 +559,9 @@ function repeatChange(state: VimState, buffer: Buffer, count: number | undefined
 	if (change.keys !== "") {
 		const parsed = parse(change.keys);
 		if (parsed === undefined || parsed === "partial") return cancel(state);
-		// Claude Code keeps i/I/a/A records without their typed text, so . skips them; o, O and every
-		// insert-opening command record the bare change and . reruns it, staying in insert mode.
+		// Claude Code's i/I/a/A records carry no text, so . skips an empty one. Its o/O record an openLine whose
+		// replay inserts through the buffer without entering insert mode (chunk-hz2c9q6k.js:403, 1299-1312), so
+		// . ends in normal mode like those four. s, S and the change operators rerun and do stay in insert.
 		if (/^[iIaA]$/.test(change.keys) && change.inserted === "") return cancel(state);
 		const cmd = count !== undefined && countable(parsed) ? { ...parsed, count, opCount: undefined } : parsed;
 		const ran = execute(working, cmd, buffer, change.keys);
@@ -566,7 +569,7 @@ function repeatChange(state: VimState, buffer: Buffer, count: number | undefined
 		working = ran.state;
 		after = ran.buffer ?? buffer;
 		const typed = applyInserted(after, change.inserted);
-		if (/^[iIaA]$/.test(change.keys)) {
+		if (/^[iIaAoO]$/.test(change.keys)) {
 			return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, typed);
 		}
 		// A rerun that opened insert stays there, like Claude Code's replay; Escape then records only
@@ -651,7 +654,7 @@ export function vimKey(state: VimState, input: VimInput, buffer: Buffer): VimSte
 	if (state.mode === "insert") return insertKey(state, input, buffer);
 	if (state.visual !== undefined) return visualKey(state, state.visual, input, buffer, visualMotion);
 	if (input.kind === "escape") return { state: { ...state, pending: "" }, passThrough: state.pending === "" };
-	if (input.kind === "other") return { state: { ...state, pending: "" }, passThrough: true };
+	if (input.kind === "other") return { state, passThrough: true };
 	const here = { ...buffer, offset: clampNormal(buffer.text, buffer.offset) };
 	const history = historyStep(state, input.key, here.text, here.offset);
 	if (history !== undefined) return history;
