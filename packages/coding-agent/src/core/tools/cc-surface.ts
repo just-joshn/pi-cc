@@ -456,6 +456,16 @@ export function piToolName(name: string): string {
 	return modifier + (ccToolByDeclaredName(bare)?.pi ?? bare);
 }
 
+/** The name the model calls a pi tool by, for a surface that reports tool use the way Claude Code does. */
+export function declaredToolName(piName: string): string {
+	return ccTool(piName)?.name ?? piName;
+}
+
+/** The call the model made for a stored tool call: its own name and input, or the closest reconstruction. */
+export function modelCallOf(block: ToolCall): { name: string; arguments: JsonObject } {
+	return block.modelCall ?? reverseMap(block);
+}
+
 /** {@link piToolName} for a whole list. */
 export function piToolNames(names: readonly string[]): string[] {
 	return names.map(piToolName);

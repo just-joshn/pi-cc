@@ -1,0 +1,441 @@
+{
+	"id": "sdk/api-error-in-stream",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			},
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_e",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 5,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "stream error probe"
+						}
+					}
+				]
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-noauth",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": {
+									"$match": "^API Error: "
+								}
+							}
+						],
+						"error": "unknown"
+					}
+				},
+				{
+					"$ref": "cc-result-noauth",
+					"set": {
+						"is_error": true,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": {
+							"$match": "^API Error: "
+						},
+						"terminal_reason": "api_error",
+						"stop_reason": "stop_sequence",
+						"total_cost_usd": 0,
+						"modelUsage": {},
+						"model_usage_since_last_result": {},
+						"permission_denials": [],
+						"usage.input_tokens": 5
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

@@ -1,0 +1,40 @@
+{
+	"id": "sdk/max-turns-text-mode",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--max-turns",
+		"1"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"a.txt": "AAA\n",
+		"b.txt": "BBB\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "a.txt"
+					}
+				}
+			},
+			{
+				"text": "DONE"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": "Error: Reached max turns (1)"
+		}
+	},
+	"skip": []
+}

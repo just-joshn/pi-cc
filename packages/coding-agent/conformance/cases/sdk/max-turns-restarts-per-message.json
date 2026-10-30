@@ -1,0 +1,126 @@
+{
+	"id": "sdk/max-turns-restarts-per-message",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--max-turns",
+		"1"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"go\"}}",
+			"#sleep 1500",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"again\"}}"
+		]
+	},
+	"files": {
+		"a.txt": "AAA\n",
+		"b.txt": "BBB\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "a.txt"
+					}
+				}
+			},
+			{
+				"text": "DONE"
+			},
+			{
+				"text": "SECOND"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-tool-use",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_use",
+								"id": "toolu_conformance_0_0",
+								"name": "Read",
+								"input": {
+									"file_path": "a.txt"
+								}
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-user-tool-result",
+					"set": {
+						"message.content": [
+							{
+								"tool_use_id": "toolu_conformance_0_0",
+								"type": "tool_result",
+								"content": "1\tAAA\n2\t"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result-error",
+					"set": {
+						"subtype": "error_max_turns",
+						"terminal_reason": "max_turns",
+						"stop_reason": "tool_use",
+						"num_turns": 2,
+						"errors": [
+							"Reached maximum number of turns (1)"
+						],
+						"usage.input_tokens": 12,
+						"usage.output_tokens": 8
+					}
+				},
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "DONE"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"permission_denials": [],
+						"is_error": false,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "DONE",
+						"terminal_reason": "completed",
+						"stop_reason": "end_turn",
+						"result_index": 1
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

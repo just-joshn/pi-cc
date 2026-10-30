@@ -1,0 +1,30 @@
+{
+	"id": "sdk/input-format-coupling",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": null,
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "Error: --input-format=stream-json requires output-format=stream-json."
+		}
+	},
+	"skip": []
+}

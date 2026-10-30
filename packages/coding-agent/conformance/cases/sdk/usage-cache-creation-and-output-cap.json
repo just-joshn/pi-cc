@@ -1,0 +1,162 @@
+{
+	"id": "sdk/usage-cache-creation-and-output-cap",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--model",
+		"claude-sonnet-4-5",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_u0",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-sonnet-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 1000,
+								"cache_creation_input_tokens": 2000,
+								"cache_read_input_tokens": 3000,
+								"output_tokens": 1,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 1500,
+									"ephemeral_1h_input_tokens": 500
+								}
+							}
+						}
+					},
+					{
+						"type": "content_block_start",
+						"index": 0,
+						"content_block": {
+							"type": "text",
+							"text": ""
+						}
+					},
+					{
+						"type": "content_block_delta",
+						"index": 0,
+						"delta": {
+							"type": "text_delta",
+							"text": "U1"
+						}
+					},
+					{
+						"type": "content_block_stop",
+						"index": 0
+					},
+					{
+						"type": "message_delta",
+						"delta": {
+							"stop_reason": "end_turn",
+							"stop_sequence": null
+						},
+						"usage": {
+							"output_tokens": 400
+						}
+					},
+					{
+						"type": "message_stop"
+					}
+				]
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.id": "msg_u0",
+						"message.content": [
+							{
+								"type": "text",
+								"text": "U1"
+							}
+						],
+						"message.usage": {
+							"input_tokens": 1000,
+							"cache_creation_input_tokens": 2000,
+							"cache_read_input_tokens": 3000,
+							"output_tokens": 1,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 1500,
+								"ephemeral_1h_input_tokens": 500
+							}
+						}
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"permission_denials": [],
+						"is_error": false,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "U1",
+						"terminal_reason": "completed",
+						"stop_reason": "end_turn",
+						"modelUsage": {
+							"claude-sonnet-4-5": {
+								"inputTokens": 1000,
+								"outputTokens": 400,
+								"cacheReadInputTokens": 3000,
+								"cacheCreationInputTokens": 2000,
+								"webSearchRequests": 0,
+								"costUSD": "$number",
+								"contextWindow": 200000,
+								"maxOutputTokens": 32000,
+								"thinkingTokens": "$number",
+								"cacheCreationEphemeral5mInputTokens": 1500,
+								"cacheCreationEphemeral1hInputTokens": 500,
+								"canonicalModel": "claude-sonnet-4-5",
+								"provider": "firstParty",
+								"costBasis": "list"
+							}
+						},
+						"model_usage_since_last_result": {
+							"claude-sonnet-4-5": {
+								"inputTokens": 1000,
+								"outputTokens": 400,
+								"cacheReadInputTokens": 3000,
+								"cacheCreationInputTokens": 2000,
+								"webSearchRequests": 0,
+								"costUSD": "$number",
+								"contextWindow": 200000,
+								"maxOutputTokens": 32000,
+								"thinkingTokens": "$number",
+								"cacheCreationEphemeral5mInputTokens": 1500,
+								"cacheCreationEphemeral1hInputTokens": 500,
+								"canonicalModel": "claude-sonnet-4-5",
+								"provider": "firstParty",
+								"costBasis": "list"
+							}
+						}
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

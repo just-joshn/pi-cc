@@ -1,0 +1,98 @@
+{
+	"id": "sdk/control-set-model-errors-carry-the-model",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"control_request\", \"request_id\": \"r1\", \"request\": {\"subtype\": \"set_model\", \"model\": \"haiku\"}}",
+			"#sleep 800",
+			"{\"type\": \"control_request\", \"request_id\": \"r2\", \"request\": {\"subtype\": \"set_model\", \"model\": \"bogus-model-xyz\"}}",
+			"#sleep 800",
+			"{\"type\": \"control_request\", \"request_id\": \"r3\", \"request\": {\"subtype\": \"set_model\"}}",
+			"#sleep 800",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "A"
+			},
+			{
+				"text": "A"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"type": "control_response",
+					"response": {
+						"subtype": "success",
+						"request_id": "r1",
+						"response": {
+							"model": "$string"
+						}
+					}
+				},
+				{
+					"$ref": "cc-control-error-model",
+					"set": {
+						"response.request_id": "r2"
+					}
+				},
+				{
+					"type": "control_response",
+					"response": {
+						"subtype": "success",
+						"request_id": "r3",
+						"response": {
+							"model": "$string"
+						}
+					}
+				},
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "A"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"permission_denials": [],
+						"is_error": false,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "A",
+						"terminal_reason": "completed",
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

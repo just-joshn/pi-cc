@@ -1,0 +1,34 @@
+{
+	"type": "stream_event",
+	"event": {
+		"type": "message_delta",
+		"context_management": "$null",
+		"delta": {
+			"container": "$null",
+			"stop_details": "$null",
+			"stop_reason": "$null",
+			"stop_sequence": "$null"
+		},
+		"usage": {
+			"output_tokens_details": {
+				"thinking_tokens": "$number"
+			},
+			"cache_creation_input_tokens": "$number",
+			"cache_read_input_tokens": "$number",
+			"input_tokens": "$number",
+			"iterations": {
+				"$each": "$any"
+			},
+			"output_tokens": "$number",
+			"server_tool_use": {
+				"web_search_requests": "$number",
+				"web_fetch_requests": "$number"
+			},
+			"fallback_credit": "$null"
+		}
+	},
+	"session_id": "$uuid",
+	"parent_tool_use_id": "$null",
+	"uuid": "$uuid",
+	"api_message_id": "$string"
+}

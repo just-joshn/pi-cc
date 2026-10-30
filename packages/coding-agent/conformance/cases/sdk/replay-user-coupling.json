@@ -1,0 +1,28 @@
+{
+	"id": "sdk/replay-user-coupling",
+	"area": "sdk",
+	"argv": [
+		"--replay-user-messages",
+		"-p",
+		"hello",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": null,
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"equals": "Error: --replay-user-messages requires both --input-format=stream-json and --output-format=stream-json."
+		}
+	},
+	"skip": []
+}

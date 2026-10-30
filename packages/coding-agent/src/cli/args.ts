@@ -297,14 +297,10 @@ export function parseArgs(args: string[]): Args {
 		}
 	}
 
-	// Claude Code's --output-format selects the pi mode and implies print. Both JSON formats stream
-	// records, so neither may print pi's text mode. An explicit --mode wins over the implied mode.
-	if (result.mode === undefined) {
-		if (result.outputFormat === "json" || result.outputFormat === "stream-json") {
-			result.mode = "json";
-		} else if (result.outputFormat !== undefined) {
-			result.print = true;
-		}
+	// Claude Code's --output-format implies print. The json formats select the SDK host in main.ts, unless
+	// an explicit --mode keeps pi's own protocols.
+	if (result.mode === undefined && result.outputFormat !== undefined) {
+		result.print = true;
 	}
 
 	return result;

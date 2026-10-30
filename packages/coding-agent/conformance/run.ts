@@ -4,7 +4,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { ConformanceCase, FileSpec, StdinSpec } from "./case.ts";
@@ -27,6 +26,7 @@ import { startMockServer } from "./mock/messages.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
 import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, createClaudeSide, hashClaude } from "./sides/claude.ts";
 import { CLI_PATH, piCcSide } from "./sides/pi-cc.ts";
+import { writeStdin } from "./stdin.ts";
 
 type Verdict = "PASS" | "FAIL" | "SKIP" | "UNVERIFIED";
 
@@ -314,19 +314,38 @@ function runSandboxed(
 		child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
 		// A child that exits before reading stdin closes the pipe under us; that is not a case failure.
 		child.stdin.on("error", () => {});
-		writeStdin(child.stdin, stdin);
-		child.stdin.end();
+		let stdinFailure: unknown;
+		const stdinAbort = new AbortController();
+		const stdinDone = writeStdin(
+			child.stdin,
+			stdin,
+			() => Buffer.concat(stdout).toString("utf8"),
+			stdinAbort.signal,
+		).then(
+			() => child.stdin.end(),
+			(error: unknown) => {
+				stdinFailure = error;
+				if (child.pid !== undefined) killGroup(child.pid);
+			},
+		);
 		const timer = setTimeout(() => {
 			timedOut = true;
 			if (child.pid !== undefined) killGroup(child.pid);
 		}, timeoutMs);
 		child.on("error", (error) => {
+			stdinAbort.abort();
 			clearTimeout(timer);
 			reject(error);
 		});
 		child.on("close", async (code) => {
+			stdinAbort.abort();
+			await stdinDone;
 			clearTimeout(timer);
 			const survivors = child.pid === undefined ? false : await reap(child.pid, roots, startedAt);
+			if (stdinFailure !== undefined) {
+				reject(stdinFailure);
+				return;
+			}
 			resolve({
 				exitCode: code,
 				stdout: Buffer.concat(stdout).toString("utf8"),
@@ -434,15 +453,6 @@ function warnOnce(message: string): void {
 
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function writeStdin(stream: Writable, stdin: StdinSpec): void {
-	if (stdin === null) return;
-	if (stdin.kind === "text") {
-		stream.write(stdin.data);
-		return;
-	}
-	for (const line of stdin.lines) stream.write(`${line}\n`);
 }
 
 function skipReason(testCase: ConformanceCase, claudeAbsent: boolean): string | null {

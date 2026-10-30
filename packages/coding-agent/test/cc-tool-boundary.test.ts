@@ -202,7 +202,7 @@ describe("pi tool identity stays inside the process", () => {
 
 	it("records a model Read under pi's name, so compaction still sees the file", async () => {
 		const result = await probe({
-			argv: ["-p", "go", "--output-format", "stream-json", "--verbose"],
+			argv: ["-p", "go", "--mode", "json"],
 			files: { "a.ts": "export const n = 1;\n" },
 			turns: [{ tool_use: { name: "Read", input: { file_path: "a.ts" } } }],
 		});

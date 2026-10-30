@@ -1,0 +1,73 @@
+{
+	"id": "sdk/control-set-permission-mode-invalid",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"control_request\", \"request_id\": \"r1\", \"request\": {\"subtype\": \"set_permission_mode\", \"mode\": \"nonsense\"}}",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"type": "control_response",
+					"response": {
+						"subtype": "error",
+						"request_id": "r1",
+						"error": "Cannot set permission mode: must be one of acceptEdits, auto, bypassPermissions, default, dontAsk, plan",
+						"error_code": "invalid_mode"
+					}
+				},
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "PROBE_OK"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"is_error": false,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "PROBE_OK",
+						"terminal_reason": "completed",
+						"permission_denials": [],
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

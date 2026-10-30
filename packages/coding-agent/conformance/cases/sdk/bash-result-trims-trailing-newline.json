@@ -1,0 +1,104 @@
+{
+	"id": "sdk/bash-result-trims-trailing-newline",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi; echo err 1>&2",
+						"description": "echo"
+					}
+				}
+			},
+			{
+				"text": "DONE"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-tool-use",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_use",
+								"id": "toolu_conformance_0_0",
+								"name": "Bash",
+								"input": {
+									"command": "echo hi; echo err 1>&2",
+									"description": "echo"
+								}
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-user-tool-result",
+					"set": {
+						"message.content": [
+							{
+								"tool_use_id": "toolu_conformance_0_0",
+								"type": "tool_result",
+								"content": "hi\nerr",
+								"is_error": false
+							}
+						],
+						"tool_use_result": {
+							"stdout": "hi\nerr",
+							"stderr": "",
+							"interrupted": false,
+							"isImage": false,
+							"noOutputExpected": false
+						}
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "DONE"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"permission_denials": [],
+						"is_error": false,
+						"num_turns": 2,
+						"subtype": "success",
+						"result": "DONE",
+						"terminal_reason": "completed",
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

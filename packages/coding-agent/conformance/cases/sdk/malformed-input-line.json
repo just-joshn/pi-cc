@@ -1,0 +1,42 @@
+{
+	"id": "sdk/malformed-input-line",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"not json",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"contains": [
+				"Error parsing streaming input line (type=unknown, 8 chars): SyntaxError"
+			]
+		}
+	},
+	"skip": []
+}

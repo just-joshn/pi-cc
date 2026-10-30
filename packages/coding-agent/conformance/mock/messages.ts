@@ -70,7 +70,7 @@ export async function startMockServer(options: { turns: Turn[]; outDir: string }
 				response.writeHead(502, { "content-type": "application/json" }).end('{"error":"script exhausted"}');
 				return;
 			}
-			writeTurn(response, turn, turnIndex);
+			void writeTurn(response, turn, turnIndex);
 			turnIndex += 1;
 		});
 	});
@@ -93,21 +93,28 @@ function closeServer(server: Server): Promise<void> {
 	return new Promise((resolve) => server.close(() => resolve()));
 }
 
-function writeTurn(response: ServerResponse, turn: Turn, turnIndex: number): void {
+async function writeTurn(response: ServerResponse, turn: Turn, turnIndex: number): Promise<void> {
+	if ("error" in turn) {
+		response
+			.writeHead(turn.error.status, { "content-type": "application/json" })
+			.end(JSON.stringify(turn.error.body));
+		return;
+	}
 	response.writeHead(200, {
 		"content-type": "text/event-stream",
 		"cache-control": "no-cache",
 		connection: "keep-alive",
 	});
+	const events: [string, unknown][] = [];
 	const send = (event: string, data: unknown) => {
-		response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+		events.push([event, data]);
 	};
 	if ("sse" in turn) {
 		for (const frame of turn.sse) {
 			const object = frame as { type?: unknown };
 			send(typeof object.type === "string" ? object.type : "message", frame);
 		}
-		response.end();
+		await flush(response, events, turn.hold_ms);
 		return;
 	}
 	const blocks = "tool_uses" in turn ? turn.tool_uses : "tool_use" in turn ? [turn.tool_use] : null;
@@ -158,6 +165,15 @@ function writeTurn(response: ServerResponse, turn: Turn, turnIndex: number): voi
 		usage: { output_tokens: 8 },
 	});
 	send("message_stop", { type: "message_stop" });
+	await flush(response, events, turn.hold_ms);
+}
+
+/** Writes the events, stalling after the third when the turn holds, then ends the response. */
+async function flush(response: ServerResponse, events: [string, unknown][], holdMs: number | undefined): Promise<void> {
+	for (const [index, [event, data]] of events.entries()) {
+		response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+		if (index === 2 && holdMs !== undefined) await new Promise((resolve) => setTimeout(resolve, holdMs));
+	}
 	response.end();
 }
 

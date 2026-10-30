@@ -1,0 +1,42 @@
+{
+	"id": "sdk/malformed-user-wrong-role",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"assistant\", \"content\": \"x\"}}",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "A"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"contains": [
+				"Error: Expected message role 'user', got 'assistant'"
+			]
+		}
+	},
+	"skip": []
+}

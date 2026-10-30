@@ -1,0 +1,61 @@
+{
+	"type": "system",
+	"subtype": "init",
+	"cwd": "$string",
+	"session_id": "$uuid",
+	"tools": {
+		"$includes": [
+			"Bash",
+			"Edit",
+			"Read",
+			"Write"
+		]
+	},
+	"mcp_servers": {
+		"$each": {
+			"name": "$string",
+			"status": "$string"
+		}
+	},
+	"model": "$string",
+	"permissionMode": "$string",
+	"slash_commands": {
+		"$each": "$string"
+	},
+	"terminal_slash_commands": {
+		"$each": "$string"
+	},
+	"apiKeySource": "$string",
+	"claude_code_version": "$string",
+	"output_style": "$string",
+	"agents": {
+		"$each": "$string"
+	},
+	"skills": {
+		"$each": "$string"
+	},
+	"plugins": {
+		"$each": {
+			"name": "$string",
+			"path": "$string",
+			"source": "$string"
+		}
+	},
+	"capabilities": {
+		"$each": "$string"
+	},
+	"analytics_disabled": "$boolean",
+	"product_feedback_disabled": "$boolean",
+	"uuid": "$uuid",
+	"memory_paths": {
+		"auto": "$string"
+	},
+	"original_cwd": "$string",
+	"additional_directories": {
+		"$each": "$string"
+	},
+	"fast_mode_state": "$string",
+	"fast_mode_disabled_reason": "$string",
+	"per_turn_effort_active": "$boolean",
+	"view_mode": "$string"
+}

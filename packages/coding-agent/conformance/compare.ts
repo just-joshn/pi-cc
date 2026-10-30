@@ -15,6 +15,7 @@ import type { Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
 import { normalizeText, normalizeWhitespace } from "./normalize/stdout.ts";
+import { frameDiffs, shapeProblems } from "./shape.ts";
 
 export interface Observation {
 	timedOut: boolean;
@@ -116,12 +117,21 @@ function checkStdout(
 		checkJsonLines(spec, observation, diffs);
 		return;
 	}
+	if (spec.kind === "frames") {
+		diffs.push(...frameDiffs(spec.frames, observation.stdout, "stdout.frames"));
+		return;
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(normalizeWhitespace(observation.stdout));
 	} catch (error) {
 		diffs.push({ check: "stdout.json", expected: "one JSON record", actual: String(error) });
 		return;
+	}
+	if (spec.shape !== undefined) {
+		const problems = shapeProblems(spec.shape, parsed);
+		if (problems.length > 0)
+			diffs.push({ check: "stdout.json", expected: "document matches its shape", actual: problems.join("; ") });
 	}
 	const record = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
 	for (const key of spec.records ?? []) {

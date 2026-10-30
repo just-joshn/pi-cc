@@ -1,0 +1,34 @@
+{
+	"id": "sdk/max-turns-not-a-number",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--max-turns",
+		"abc"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "A"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "text",
+			"equals": ""
+		},
+		"stderr": {
+			"contains": [
+				"error: option '--max-turns <turns>' argument 'abc' is invalid. must be a number"
+			]
+		}
+	},
+	"skip": []
+}

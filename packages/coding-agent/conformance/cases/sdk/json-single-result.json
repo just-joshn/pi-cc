@@ -1,0 +1,37 @@
+{
+	"id": "sdk/json-single-result",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"hello",
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "json",
+			"shape": {
+				"$ref": "cc-result-json",
+				"set": {
+					"is_error": false,
+					"num_turns": 1,
+					"subtype": "success",
+					"result": "PROBE_OK"
+				}
+			}
+		}
+	},
+	"skip": []
+}

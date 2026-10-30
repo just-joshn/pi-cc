@@ -1,0 +1,94 @@
+{
+	"id": "sdk/replay-user-messages",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--replay-user-messages"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"one\"}}",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"two\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "A"
+			},
+			{
+				"text": "B"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-user-replay",
+					"set": {
+						"message.content": "one"
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "A"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"result": "A"
+					}
+				},
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-user-replay",
+					"set": {
+						"message.content": "two"
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "B"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"result": "B"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

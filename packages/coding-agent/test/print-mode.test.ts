@@ -118,7 +118,7 @@ describe("runPrintMode", () => {
 		});
 
 		expect(exitCode).toBe(0);
-		expect(session.prompt).toHaveBeenCalledWith("hello");
+		expect(session.prompt).toHaveBeenCalledWith("hello", { images: undefined });
 		expect(session.extensionRunner.emit).toHaveBeenCalledTimes(1);
 		expect(session.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
 	});

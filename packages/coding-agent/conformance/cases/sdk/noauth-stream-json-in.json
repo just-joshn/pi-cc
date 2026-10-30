@@ -1,0 +1,52 @@
+{
+	"id": "sdk/noauth-stream-json-in",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": null,
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init",
+					"set": {
+						"apiKeySource": "none"
+					}
+				},
+				{
+					"$ref": "cc-assistant-noauth"
+				},
+				{
+					"$ref": "cc-result-noauth",
+					"set": {
+						"is_error": true,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "Not logged in \u00b7 Please run /login",
+						"terminal_reason": "api_error",
+						"stop_reason": "stop_sequence",
+						"modelUsage": {}
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

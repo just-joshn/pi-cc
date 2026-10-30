@@ -1,0 +1,11 @@
+{
+	"type": "stream_event",
+	"event": {
+		"type": "content_block_stop",
+		"index": "$int"
+	},
+	"session_id": "$uuid",
+	"parent_tool_use_id": "$null",
+	"uuid": "$uuid",
+	"api_message_id": "$string"
+}

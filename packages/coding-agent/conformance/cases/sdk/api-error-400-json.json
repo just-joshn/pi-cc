@@ -1,0 +1,207 @@
+{
+	"id": "sdk/api-error-400-json",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "bad request probe"
+						}
+					}
+				}
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "json",
+			"shape": {
+				"$ref": "cc-result-json-noauth",
+				"set": {
+					"is_error": true,
+					"num_turns": 1,
+					"result": "API Error: 400 bad request probe",
+					"terminal_reason": "api_error",
+					"api_error_status": 400,
+					"stop_reason": "stop_sequence",
+					"total_cost_usd": 0,
+					"modelUsage": {},
+					"permission_denials": []
+				}
+			}
+		}
+	},
+	"skip": []
+}

@@ -1,0 +1,59 @@
+{
+	"id": "sdk/assistant-frame",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"hello",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "PROBE_OK"
+							}
+						],
+						"message.model": "claude-haiku-4-5",
+						"message.id": "msg_conformance_0"
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"is_error": false,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "PROBE_OK",
+						"terminal_reason": "completed",
+						"permission_denials": [],
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

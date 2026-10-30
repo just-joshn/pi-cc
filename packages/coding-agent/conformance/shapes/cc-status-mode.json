@@ -1,0 +1,8 @@
+{
+	"type": "system",
+	"subtype": "status",
+	"status": "$null",
+	"permissionMode": "$string",
+	"uuid": "$uuid",
+	"session_id": "$uuid"
+}

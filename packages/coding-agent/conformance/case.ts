@@ -5,20 +5,26 @@ import { isAbsolute, join } from "node:path";
 import { argvProblem, envProblem, unsetProblem } from "./allowlist.ts";
 import { toRegExp } from "./compare.ts";
 import { PROBES, type ProbeName, type SideName, VIOLATION_KINDS, type ViolationKind } from "./isolate.ts";
+import type { Shape } from "./shape.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
-export type Turn =
+type TurnBody =
 	| { text: string }
 	| { tool_use: { name: string; input: unknown } }
 	| { tool_uses: { name: string; input: unknown }[] }
-	| { sse: unknown[] };
+	| { sse: unknown[] }
+	| { error: { status: number; body: unknown } };
+
+/** `hold_ms` stalls a streamed turn: the mock pauses after the third event it writes, so a case can act mid-stream. */
+export type Turn = TurnBody & { hold_ms?: number };
 
 export type StdoutSpec =
 	| { kind: "text"; equals?: string; match?: string[]; normalize?: NormalizeRule[] }
 	| { kind: "help"; requireFlags?: string[]; requireCommands?: string[]; allowExtra?: boolean }
-	| { kind: "json"; records?: string[] }
-	| { kind: "jsonl"; minRecords?: number; records?: string[] };
+	| { kind: "json"; records?: string[]; shape?: Shape }
+	| { kind: "jsonl"; minRecords?: number; records?: string[] }
+	| { kind: "frames"; frames: Shape[] };
 
 export interface RequestSpec {
 	pathStartsWith?: string;
@@ -141,7 +147,8 @@ const CONTAINMENT_KEYS = ["kind", "path"];
 const SIDE_NAMES: readonly SideName[] = ["claude", "pi-cc"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
 const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
-const JSON_STDOUT_KEYS = ["kind", "records"];
+const JSON_STDOUT_KEYS = ["kind", "records", "shape"];
+const FRAMES_STDOUT_KEYS = ["kind", "frames"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
 const REQUEST_KEYS = [
@@ -161,7 +168,8 @@ const BODY_TEXT_KEYS = ["match", "notMatch"];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
-const TURN_KEYS = ["text", "tool_use", "tool_uses", "sse"] as const;
+const TURN_KEYS = ["text", "tool_use", "tool_uses", "sse", "error"] as const;
+const TURN_FIELDS = [...TURN_KEYS, "hold_ms"];
 const TOOL_USE_KEYS = ["name", "input"];
 
 export function loadCases(casesDir: string): ConformanceCase[] {
@@ -365,7 +373,18 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 	}
 	if (kind === "json") {
 		assertKnownKeys(object, JSON_STDOUT_KEYS, source, "compare.stdout");
-		return { kind, records: asOptionalStringArray(object.records, source, "compare.stdout.records") };
+		return {
+			kind,
+			records: asOptionalStringArray(object.records, source, "compare.stdout.records"),
+			shape: object.shape,
+		};
+	}
+	if (kind === "frames") {
+		assertKnownKeys(object, FRAMES_STDOUT_KEYS, source, "compare.stdout");
+		if (!Array.isArray(object.frames) || object.frames.length === 0) {
+			return fail(source, "compare.stdout.frames must be a non-empty array of shapes");
+		}
+		return { kind, frames: object.frames };
 	}
 	if (kind === "jsonl") {
 		assertKnownKeys(object, JSONL_STDOUT_KEYS, source, "compare.stdout");
@@ -477,21 +496,36 @@ function asTurns(value: unknown, source: string): Turn[] {
 	if (!Array.isArray(value)) fail(source, "model.turns must be an array");
 	return value.map((entry, index) => {
 		const field = `model.turns[${index}]`;
-		const object = asCheckedObject(entry, source, field, TURN_KEYS);
+		const object = asCheckedObject(entry, source, field, TURN_FIELDS);
 		const kinds = TURN_KEYS.filter((key) => object[key] !== undefined);
 		if (kinds.length !== 1) {
 			const found = kinds.length === 0 ? "none" : kinds.join(", ");
 			fail(source, `${field} must set exactly one of ${TURN_KEYS.join(", ")}, found ${found}`);
 		}
 		const kind = kinds[0];
-		if (kind === "text") return { text: asString(object.text, source, `${field}.text`) };
+		const holdMs = asOptionalInteger(object.hold_ms, source, `${field}.hold_ms`);
+		if (holdMs !== undefined && (holdMs < 0 || holdMs > MAX_TIMER_MS)) {
+			fail(source, `${field}.hold_ms must be between 0 and ${MAX_TIMER_MS}`);
+		}
+		const hold = holdMs === undefined ? {} : { hold_ms: holdMs };
+		if (kind === "error") {
+			if (object.hold_ms !== undefined) fail(source, `${field}.hold_ms does not apply to an error turn`);
+			const error = asCheckedObject(object.error, source, `${field}.error`, ["status", "body"]);
+			const status = asOptionalInteger(error.status, source, `${field}.error.status`);
+			if (status === undefined) fail(source, `${field}.error.status is required`);
+			return { error: { status, body: error.body } };
+		}
+		if (kind === "text") return { text: asString(object.text, source, `${field}.text`), ...hold };
 		if (kind === "sse") {
 			if (!Array.isArray(object.sse)) fail(source, `${field}.sse must be an array`);
-			return { sse: object.sse };
+			return { sse: object.sse, ...hold };
 		}
-		if (kind === "tool_use") return { tool_use: asToolUse(object.tool_use, source, `${field}.tool_use`) };
+		if (kind === "tool_use") return { tool_use: asToolUse(object.tool_use, source, `${field}.tool_use`), ...hold };
 		if (!Array.isArray(object.tool_uses)) fail(source, `${field}.tool_uses must be an array`);
-		return { tool_uses: object.tool_uses.map((toolUse) => asToolUse(toolUse, source, `${field}.tool_uses[]`)) };
+		return {
+			tool_uses: object.tool_uses.map((toolUse) => asToolUse(toolUse, source, `${field}.tool_uses[]`)),
+			...hold,
+		};
 	});
 }
 
@@ -510,7 +544,22 @@ function asStdin(value: unknown, source: string): StdinSpec {
 	}
 	if (kind === "stream-json") {
 		assertKnownKeys(object, ["kind", "lines"], source, "stdin");
-		return { kind, lines: asOptionalStringArray(object.lines, source, "stdin.lines") ?? [] };
+		const lines = asOptionalStringArray(object.lines, source, "stdin.lines") ?? [];
+		for (const line of lines) {
+			if (line.startsWith("#sleep ")) {
+				const value = line.slice("#sleep ".length);
+				if (!/^\d+$/.test(value) || Number(value) > MAX_TIMER_MS) {
+					fail(source, `stdin #sleep must be an integer between 0 and ${MAX_TIMER_MS}`);
+				}
+			} else if (line.startsWith("#waitfor ")) {
+				try {
+					new RegExp(line.slice("#waitfor ".length));
+				} catch {
+					fail(source, "stdin #waitfor must have a valid regular expression");
+				}
+			}
+		}
+		return { kind, lines };
 	}
 	return fail(source, `unknown stdin.kind "${kind}"`);
 }

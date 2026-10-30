@@ -68,6 +68,14 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--safe-mode",
 		// P36b: renders flat text, so it only changes how an interactive session draws
 		"--ax-screen-reader",
+		// P10: pi's own protocol selector, which a case uses to prove an explicit mode skips the SDK host
+		"--mode",
+		// P10: stream-json framing flags, which only change what the print host writes or echoes
+		"--include-partial-messages",
+		"--replay-user-messages",
+		// P10: the turn cap, and a negative value the cap's cases write after it
+		"--max-turns",
+		"-1",
 		// tool selection, which PR #7's cases pin
 		"--tools",
 		"--disallowedTools",
@@ -84,6 +92,12 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"abc",
 		"json",
 		"stream-json",
+		// the `--max-turns` values P10's cases write
+		"0",
+		"1",
+		"2",
+		// the `text` value of `--input-format` and `--output-format` in P10's coupling cases
+		"text",
 		// a value of `--model` in PR #6's family-alias case
 		"sonnet",
 		// a value of `--setting-sources` in PR #5's case

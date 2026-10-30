@@ -19,6 +19,7 @@ export interface CcFlags {
 	effort?: string;
 	jsonSchema?: unknown;
 	maxBudgetUsd?: number;
+	maxTurns?: number;
 	settingSources?: string;
 	systemPromptSnapshot?: string;
 	autocompact?: string;
@@ -74,6 +75,8 @@ interface CcFlagBase {
 	short?: string[];
 	choices?: { values: string[]; hard: true };
 	summary: string;
+	/** Claude Code accepts the flag but leaves it out of `--help`. */
+	hidden?: true;
 	status: "wired" | "accepted";
 	/**
 	 * Stores the value. Absent when pi's own branches already own the flag;
@@ -158,6 +161,13 @@ function validateMaxBudget(value: string): CcDiagnostic | undefined {
 	);
 }
 
+function validateMaxTurns(value: string): CcDiagnostic | undefined {
+	if (!Number.isNaN(Number(value))) {
+		return undefined;
+	}
+	return cliError(`option '--max-turns <turns>' argument '${value}' is invalid. must be a number`);
+}
+
 function validateJsonSchema(value: string): CcDiagnostic | undefined {
 	try {
 		JSON.parse(value);
@@ -192,6 +202,10 @@ function applyJsonSchema(value: CcValue, target: CcFlags): void {
 
 function applyMaxBudget(value: CcValue, target: CcFlags): void {
 	target.maxBudgetUsd = Number(value);
+}
+
+function applyMaxTurns(value: CcValue, target: CcFlags): void {
+	target.maxTurns = Number(value);
 }
 
 /** The Claude Code flag surface, in the order Claude Code prints it. */
@@ -444,7 +458,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "include-partial-messages",
 		arity: "boolean",
 		summary: "Include partial message chunks in the stream",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("includePartialMessages"),
 	},
 	{
@@ -453,7 +467,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "format",
 		choices: { values: ["text", "stream-json"], hard: true },
 		summary: "Prompt input format (text, stream-json)",
-		status: "accepted",
+		status: "wired",
 		apply: setString("inputFormat"),
 	},
 	{
@@ -473,6 +487,16 @@ export const CC_FLAGS: CcFlag[] = [
 		status: "accepted",
 		validate: validateMaxBudget,
 		apply: applyMaxBudget,
+	},
+	{
+		name: "max-turns",
+		arity: "value",
+		placeholder: "turns",
+		summary: "Maximum number of agentic turns in non-interactive mode",
+		hidden: true,
+		status: "wired",
+		validate: validateMaxTurns,
+		apply: applyMaxTurns,
 	},
 	{
 		name: "mcp-config",
@@ -592,7 +616,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "replay-user-messages",
 		arity: "boolean",
 		summary: "Echo stdin user messages on stdout",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("replayUserMessages"),
 	},
 	{
@@ -883,8 +907,10 @@ const CC_HELP_LABEL_WIDTH = 34;
  * the conformance help parser) can split the label from the text.
  */
 export function formatCcHelpSection(): string {
-	return CC_FLAGS.map((flag) => {
-		const label = formatCcFlagLabel(flag);
-		return `${label.padEnd(Math.max(CC_HELP_LABEL_WIDTH, label.length + 4))}${flag.summary}`;
-	}).join("\n");
+	return CC_FLAGS.filter((flag) => !flag.hidden)
+		.map((flag) => {
+			const label = formatCcFlagLabel(flag);
+			return `${label.padEnd(Math.max(CC_HELP_LABEL_WIDTH, label.length + 4))}${flag.summary}`;
+		})
+		.join("\n");
 }

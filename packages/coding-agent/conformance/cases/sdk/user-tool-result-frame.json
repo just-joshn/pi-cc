@@ -1,0 +1,94 @@
+{
+	"id": "sdk/user-tool-result-frame",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"Read the fixture file",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"tool_fixture.txt": "LINE_A\nLINE_B\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "tool_fixture.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-tool-use",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_use",
+								"id": "toolu_conformance_0_0",
+								"name": "Read",
+								"input": {
+									"file_path": "tool_fixture.txt"
+								}
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-user-tool-result",
+					"set": {
+						"message.content": [
+							{
+								"tool_use_id": "toolu_conformance_0_0",
+								"type": "tool_result",
+								"content": "1\tLINE_A\n2\tLINE_B\n3\t"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "PROBE_OK"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"is_error": false,
+						"num_turns": 2,
+						"subtype": "success",
+						"result": "PROBE_OK",
+						"terminal_reason": "completed",
+						"permission_denials": [],
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

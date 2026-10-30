@@ -101,6 +101,7 @@ import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
+import { STREAM_JSON_REQUIRES_VERBOSE, sdkFlagProblem, sdkOutputFormat } from "./modes/sdk/flags.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { captureStartupEnv, startupEnv } from "./utils/internal-env.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
@@ -246,6 +247,11 @@ function resolveAppMode(parsed: Args, stdinIsTTY: boolean, stdoutIsTTY: boolean)
 		return "print";
 	}
 	return "interactive";
+}
+
+/** Claude Code reports its ask-first mode as `default`; the flag spells it `manual`. */
+function sdkPermissionMode(flag: string | undefined): string {
+	return flag === undefined || flag === "manual" ? "default" : flag;
 }
 
 function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
@@ -838,6 +844,19 @@ export async function main(args: string[], options?: MainOptions) {
 
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
+	const sdkProblem = sdkFlagProblem({
+		mode: parsed.mode,
+		outputFormat: parsed.outputFormat,
+		inputFormat: parsed.inputFormat,
+		includePartialMessages: parsed.includePartialMessages,
+		replayUserMessages: parsed.replayUserMessages,
+	});
+	if (sdkProblem !== undefined) {
+		console.error(chalk.red(sdkProblem));
+		process.exit(1);
+	}
+	const sdkFormat = sdkOutputFormat(parsed);
+	const sdkStreamInput = sdkFormat !== undefined && parsed.inputFormat === "stream-json";
 
 	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
 
@@ -1129,7 +1148,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// Read piped stdin content (if any) - skip for RPC mode which uses stdin for JSON-RPC
 	let stdinContent: string | undefined;
-	if (appMode !== "rpc") {
+	if (appMode !== "rpc" && !sdkStreamInput) {
 		stdinContent = await readPipedStdin();
 		if (stdinContent !== undefined && appMode === "interactive") {
 			appMode = "print";
@@ -1159,8 +1178,18 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	time("createAgentSession");
 
-	if ((appMode === "print" || appMode === "json") && initialMessage === undefined && parsed.messages.length === 0) {
+	if (
+		(appMode === "print" || appMode === "json") &&
+		!sdkStreamInput &&
+		initialMessage === undefined &&
+		parsed.messages.length === 0
+	) {
 		console.error(chalk.red(PRINT_INPUT_REQUIRED_MESSAGE));
+		process.exit(1);
+	}
+
+	if (sdkFormat === "stream-json" && !parsed.verbose) {
+		console.error(chalk.red(STREAM_JSON_REQUIRES_VERBOSE));
 		process.exit(1);
 	}
 
@@ -1171,8 +1200,13 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	// Claude Code prints its not-logged-in line on stdout in text mode, where stdout is human output.
-	// A JSON mode carries records only, so it keeps pi's own path and reports the failure there.
-	if (appMode === "print" && model !== undefined && !modelRuntime.hasConfiguredAuth(model.provider)) {
+	// The SDK host reports the missing credential as frames, and pi's JSON mode reports it through pi's own path.
+	if (
+		appMode === "print" &&
+		sdkFormat === undefined &&
+		model !== undefined &&
+		!modelRuntime.hasConfiguredAuth(model.provider)
+	) {
 		writeRawStdout(`${NOT_LOGGED_IN_MESSAGE}\n`);
 		await flushRawStdout();
 		console.error(chalk.red(formatNoApiKeyFoundMessage(model.provider)));
@@ -1238,12 +1272,33 @@ export async function main(args: string[], options?: MainOptions) {
 		await interactiveMode.run();
 	} else {
 		printTimings();
-		const exitCode = await runPrintMode(runtime, {
-			mode: toPrintOutputMode(appMode),
+		const printOptions = {
 			messages: parsed.messages,
 			initialMessage,
 			initialImages,
-		});
+			maxTurns: parsed.maxTurns,
+		};
+		const exitCode = await runPrintMode(
+			runtime,
+			sdkFormat === undefined
+				? { ...printOptions, mode: toPrintOutputMode(appMode) }
+				: {
+						...printOptions,
+						mode: "sdk",
+						sdk: {
+							outputFormat: sdkFormat,
+							inputFormat: parsed.inputFormat === "stream-json" ? "stream-json" : "text",
+							verbose: parsed.verbose === true,
+							includePartial: parsed.includePartialMessages === true,
+							replayUser: parsed.replayUserMessages === true,
+							permissionMode: sdkPermissionMode(parsed.permissionMode),
+							maxTurns: parsed.maxTurns,
+							hasAuth: (provider) => modelRuntime.hasConfiguredAuth(provider),
+							input: process.stdin,
+							env: process.env,
+						},
+					},
+		);
 		stopThemeWatcher();
 		restoreStdout();
 		if (exitCode !== 0) {

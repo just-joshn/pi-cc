@@ -21,6 +21,7 @@ const SAMPLE_VALUES: Record<string, string> = {
 	effort: "low",
 	"json-schema": "{}",
 	"max-budget-usd": "1",
+	"max-turns": "1",
 	"session-id": SESSION_ID,
 	"setting-sources": "user,project",
 	tools: "read",
@@ -231,7 +232,7 @@ describe("table arity", () => {
 		]);
 		expect(result.outputFormat).toBe("json");
 		expect(result.permissionMode).toBe("plan");
-		expect(result.mode).toBe("json");
+		expect(result.print).toBe(true);
 	});
 
 	test("--resume takes an optional session reference and leaves the picker alone", () => {
@@ -267,10 +268,28 @@ describe("accepted flags", () => {
 });
 
 describe("Claude Code output format", () => {
-	test("maps --output-format onto the pi mode and print mode", () => {
-		expect(parseArgs(["--output-format", "json"]).mode).toBe("json");
-		expect(parseArgs(["--output-format", "stream-json"]).mode).toBe("json");
-		expect(parseArgs(["--output-format", "text"]).print).toBe(true);
+	test("implies print and leaves the pi mode to the SDK host", () => {
+		for (const format of ["json", "stream-json", "text"]) {
+			const result = parseArgs(["--output-format", format]);
+			expect(result.print).toBe(true);
+			expect(result.mode).toBeUndefined();
+		}
+	});
+
+	test("wires the stream-json flags without the unimplemented warning", () => {
+		const result = parseArgs([
+			"-p",
+			"--input-format",
+			"stream-json",
+			"--output-format",
+			"stream-json",
+			"--include-partial-messages",
+			"--replay-user-messages",
+		]);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.inputFormat).toBe("stream-json");
+		expect(result.includePartialMessages).toBe(true);
+		expect(result.replayUserMessages).toBe(true);
 	});
 
 	test("keeps an explicit pi mode over the mode the output format implies", () => {
@@ -301,14 +320,42 @@ describe("existing pi parsing", () => {
 	});
 });
 
+const listedFlags = CC_FLAGS.filter((flag) => !flag.hidden);
+
+describe("--max-turns", () => {
+	test("parses a number, negative and zero included", () => {
+		for (const [value, parsed] of [
+			["3", 3],
+			["0", 0],
+			["-1", -1],
+		] as const) {
+			const result = parseArgs(["-p", "hello", "--max-turns", value]);
+			expect(result.diagnostics).toEqual([]);
+			expect(result.maxTurns).toBe(parsed);
+		}
+	});
+
+	test("rejects a value that is not a number with Claude Code's message", () => {
+		const result = parseArgs(["-p", "hello", "--max-turns", "abc"]);
+		expect(result.diagnostics.map(render)).toEqual([
+			"error: option '--max-turns <turns>' argument 'abc' is invalid. must be a number",
+		]);
+		expect(result.maxTurns).toBeUndefined();
+	});
+
+	test("is accepted like Claude Code accepts it, but not listed in --help", () => {
+		expect(formatCcHelpSection()).not.toContain("--max-turns");
+	});
+});
+
 describe("table round-trip", () => {
-	test("the table covers 66 Claude Code flags", () => {
-		expect(CC_FLAGS).toHaveLength(66);
+	test("the table covers 66 listed Claude Code flags", () => {
+		expect(listedFlags).toHaveLength(66);
 	});
 
 	test("the arity buckets match Claude Code's help", () => {
 		const buckets: Record<string, number> = {};
-		for (const flag of CC_FLAGS) {
+		for (const flag of listedFlags) {
 			buckets[flag.arity] = (buckets[flag.arity] ?? 0) + 1;
 		}
 		expect(buckets).toEqual({ boolean: 27, value: 24, "optional-value": 8, variadic: 7 });
@@ -340,7 +387,7 @@ describe("table round-trip", () => {
 
 	test("every spelling appears in the generated help section", () => {
 		const section = formatCcHelpSection();
-		const missing = CC_FLAGS.flatMap((flag) =>
+		const missing = listedFlags.flatMap((flag) =>
 			[
 				`--${flag.name}`,
 				...(flag.aliases ?? []).map((alias) => `--${alias}`),
@@ -351,7 +398,7 @@ describe("table round-trip", () => {
 	});
 
 	test("the help section has one line per flag", () => {
-		expect(formatCcHelpSection().split("\n")).toHaveLength(CC_FLAGS.length);
+		expect(formatCcHelpSection().split("\n")).toHaveLength(listedFlags.length);
 	});
 
 	test("a help line is the padded flag spec followed by the summary", () => {
