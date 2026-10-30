@@ -11,7 +11,7 @@
 
 import type { IncomingHttpHeaders } from "node:http";
 import type { BodyTextSpec, CompareSpec, ContainmentSpec, FileSpec, HeaderValueSpec, StdoutSpec } from "./case.ts";
-import type { Violation } from "./isolate.ts";
+import type { SideName, Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
 import { normalizeText, normalizeWhitespace } from "./normalize/stdout.ts";
@@ -41,7 +41,15 @@ export interface Diff {
 
 const APP_NAMES = new Set(["claude", "pi", "pi-cc"]);
 
-export function compare(spec: CompareSpec, observation: Observation, context: NormalizeContext): Diff[] {
+export function compare(
+	spec: CompareSpec,
+	observation: Observation,
+	context: NormalizeContext,
+	side?: SideName,
+): Diff[] {
+	if (side === undefined && spec.requests?.some((request) => request.side !== undefined)) {
+		throw new Error("Side-specific request assertions require a side");
+	}
 	const diffs: Diff[] = [];
 	checkExit(spec, observation, diffs);
 	checkStdout(spec.stdout, observation, context, diffs);
@@ -49,7 +57,11 @@ export function compare(spec: CompareSpec, observation: Observation, context: No
 	checkFiles(spec.files, observation, diffs);
 	checkAbsent(observation, diffs);
 	checkContainment(spec.containment, observation, diffs);
-	checkRequests(spec.requests, observation, diffs);
+	checkRequests(
+		spec.requests?.filter((request) => request.side === undefined || request.side === side),
+		observation,
+		diffs,
+	);
 	return diffs;
 }
 

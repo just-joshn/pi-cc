@@ -34,6 +34,9 @@ export type StdoutSpec =
 	| { kind: "frames"; frames: Shape[] };
 
 export interface RequestSpec {
+	/** Side-specific assertions must name the approved deviation they cover. */
+	side?: SideName;
+	deviation?: string;
 	pathStartsWith?: string;
 	count?: number;
 	method?: string;
@@ -172,6 +175,8 @@ const FRAMES_STDOUT_KEYS = ["kind", "frames"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
 const REQUEST_KEYS = [
+	"side",
+	"deviation",
 	"pathStartsWith",
 	"count",
 	"method",
@@ -446,11 +451,17 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 	return value.map((entry, index) => {
 		const field = `compare.requests[${index}]`;
 		const object = asCheckedObject(entry, source, field, REQUEST_KEYS);
+		const side = asOptionalString(object.side, source, `${field}.side`);
+		const deviation = asOptionalString(object.deviation, source, `${field}.deviation`);
+		if (side !== undefined && side !== "claude" && side !== "pi-cc") fail(source, `${field}.side is unknown`);
+		if (side !== undefined && !deviation?.trim()) fail(source, `${field}.side requires a deviation`);
 		const body = object.bodyEquals;
 		if (body !== undefined) asObject(body, source, `${field}.bodyEquals`);
 		const method = asOptionalString(object.method, source, "method");
 		if (method !== undefined && method.trim().length === 0) fail(source, "method must not be empty");
 		return {
+			side,
+			deviation,
 			pathStartsWith: asOptionalString(object.pathStartsWith, source, "pathStartsWith"),
 			count: asOptionalNumber(object.count, source, "count"),
 			method,

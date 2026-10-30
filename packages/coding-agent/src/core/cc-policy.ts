@@ -1,6 +1,5 @@
 /** Every Claude Code versus pi decision for a run: effort, token cap, betas, fallback chain, autocompact, prompt snapshot. */
 
-import { createHash } from "node:crypto";
 import type { Api, CcWireProfile, Model } from "@earendil-works/pi-ai";
 import { type CcFlags, parseAutocompact } from "../cli/cc-flags.ts";
 
@@ -40,7 +39,6 @@ const DEFAULT_EFFORT: Readonly<Record<string, CcEffort>> = {
 
 /** The betas the pinned Claude Code sends on every request. */
 export const CC_AUTO_BETAS: readonly string[] = [
-	"claude-code-20250219",
 	"interleaved-thinking-2025-05-14",
 	"context-management-2025-06-27",
 	"per-turn-control-2026-07-01",
@@ -171,12 +169,6 @@ export function defaultEffort(model: Model<"anthropic-messages">, known: boolean
 	return DEFAULT_EFFORT[catalogKey(model.id)] ?? FALLBACK_EFFORT;
 }
 
-/** The first `system` block: the build and entrypoint, with a short fingerprint of both. */
-export function billingHeader(entrypoint: CcEntrypoint): string {
-	const fingerprint = createHash("sha256").update(`${CC_PARITY_VERSION}:${entrypoint}`).digest("hex").slice(0, 3);
-	return `x-anthropic-billing-header: cc_version=${CC_PARITY_VERSION}.${fingerprint}; cc_entrypoint=${entrypoint};`;
-}
-
 /**
  * The wire profile of one request, or undefined when the model is not on the Anthropic transport.
  * `known` is whether the model catalog carries the id.
@@ -193,7 +185,6 @@ export function ccWireProfile(
 	if (model.api !== "anthropic-messages") return undefined;
 	const effortModel = known && !supportsEffort(model as Model<"anthropic-messages">) ? undefined : model;
 	return {
-		billingHeader: billingHeader(policy.entrypoint),
 		maxTokens: capOverridden ? undefined : ccMaxTokens(model, known),
 		effort: effortModel && policy.effort,
 		defaultEffort: defaultEffort(model as Model<"anthropic-messages">, known),

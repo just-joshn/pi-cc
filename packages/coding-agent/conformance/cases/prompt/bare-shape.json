@@ -61,7 +61,55 @@
 						"around": 156,
 						"tolerance": 0.12
 					}
-				}
+				},
+				"side": "claude",
+				"deviation": "store/deviations.md, Client identity (P13, #20). Oracle retains observed client identification."
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system",
+							"content": [],
+							"output_config": {
+								"effort": "medium"
+							}
+						}
+					]
+				},
+				"bodyAt": {
+					"system.1.text": {
+						"match": [
+							"^CWD: [^\\n]+\\nDate: \\d{4}-\\d{2}-\\d{2}$"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.1.text": {
+						"around": 156,
+						"tolerance": 0.12
+					}
+				},
+				"side": "pi-cc",
+				"deviation": "store/deviations.md, Client identity (P13, #20). pi-cc never identifies as an Anthropic client.",
+				"bodyExcludes": [
+					"x-anthropic-billing-header:",
+					"You are Claude Code, Anthropic's official CLI for Claude."
+				]
 			}
 		]
 	},

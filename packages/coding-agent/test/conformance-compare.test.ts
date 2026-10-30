@@ -25,6 +25,20 @@ function checks(spec: CompareSpec, overrides: Partial<Observation> = {}): string
 	return compare(spec, observation(overrides), CONTEXT).map((diff) => diff.check);
 }
 
+describe("side-specific request assertions", () => {
+	test("keeps the oracle value and rejects client identity on pi-cc", () => {
+		const spec: CompareSpec = {
+			requests: [
+				{ side: "claude", deviation: "Client identity", count: 1 },
+				{ side: "pi-cc", deviation: "Client identity", count: 0 },
+			],
+		};
+		expect(compare(spec, observation(), CONTEXT, "pi-cc")).toEqual([]);
+		expect(compare(spec, observation(), CONTEXT, "claude").map((diff) => diff.check)).toEqual(["requests.count"]);
+		expect(() => compare(spec, observation(), CONTEXT)).toThrow(/require a side/);
+	});
+});
+
 describe("compare.files", () => {
 	test("passes when the declared file was written", () => {
 		expect(checks({ files: ["hook.log"] }, { workspaceBefore: new Map([["hook.log", "seeded"]]) })).toEqual([]);

@@ -199,7 +199,7 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 	identity?: ClientIdentity;
 	/**
 	 * Claude Code wire profile. Present, the Anthropic transport splits the leading prompt into the
-	 * billing, identity and working `system` blocks, places `SystemMessage.context` as a system-role
+	 * identity and working `system` blocks, places `SystemMessage.context` as a system-role
 	 * message after the first user message, and sends `effort` directly with no effort markers.
 	 * Other transports ignore it.
 	 */
@@ -226,8 +226,6 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 
 /** The request-level choices of the Claude Code wire shape, decided by the caller. */
 export interface CcWireProfile {
-	/** First `system` block, sent uncached. */
-	billingHeader: string;
 	/** Effort the operator asked for, which beats everything else. */
 	effort?: "low" | "medium" | "high" | "xhigh" | "max";
 	/** Effort of the model when nothing else chooses one. Omitted for a model without effort control. */

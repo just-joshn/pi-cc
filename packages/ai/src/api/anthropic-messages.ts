@@ -10,7 +10,6 @@ import type {
 	Api,
 	AssistantMessage,
 	CacheRetention,
-	CcWireProfile,
 	ImageContent,
 	Message,
 	Model,
@@ -112,9 +111,6 @@ function getCacheControl(
 		cacheControl: { type: "ephemeral", ...(ttl && { ttl }) },
 	};
 }
-
-// Stealth mode: Mimic Claude Code's tool naming exactly
-const claudeCodeVersion = "2.1.280";
 
 // Claude Code 2.x tool names (canonical casing)
 // Source: https://cchistory.mariozechner.at/data/prompts-2.1.11.md
@@ -1034,7 +1030,7 @@ function createTransport(
 		};
 	}
 
-	// OAuth: Bearer auth, Claude Code identity headers instead of the client identity.
+	// OAuth changes authentication, not the client identity.
 	if (apiKey && isOAuthToken(apiKey)) {
 		return {
 			transport: createAnthropicTransport({
@@ -1042,11 +1038,10 @@ function createTransport(
 				fetch,
 				authHeaders: async (): Promise<ProviderHeaders> => ({ authorization: `Bearer ${apiKey}` }),
 				headers: mergeHeaders(
+					getIdentityHeaders(model, identity),
 					{
 						accept: "application/json",
 						"anthropic-dangerous-direct-browser-access": "true",
-						"user-agent": `claude-cli/${claudeCodeVersion}`,
-						"x-app": "cli",
 					},
 					model.headers,
 					optionsHeaders,
@@ -1121,7 +1116,7 @@ function getBetaFeatures(
 	}
 
 	const features: string[] = [];
-	if (isOAuthToken) features.push("claude-code-20250219", OAUTH_API_BETA);
+	if (isOAuthToken) features.push(OAUTH_API_BETA);
 	if (shouldUseFineGrainedToolStreamingBeta(model, context)) features.push(FINE_GRAINED_TOOL_STREAMING_BETA);
 	if (
 		model.reasoning &&
@@ -1215,26 +1210,9 @@ function buildParams(
 		...(betaFeatures.length > 0 ? { betas: betaFeatures } : {}),
 	};
 
-	// For OAuth tokens, we MUST include Claude Code identity
 	if (ccWire) {
-		params.system = ccSystemBlocks(ccWire, initialSystemMessage, cacheControl);
-	} else if (isOAuthToken) {
-		params.system = [
-			{
-				type: "text",
-				text: "You are Claude Code, Anthropic's official CLI for Claude.",
-				...(cacheControl ? { cache_control: cacheControl } : {}),
-			},
-		];
-		if (initialSystemText) {
-			params.system.push({
-				type: "text",
-				text: sanitizeSurrogates(initialSystemText),
-				...(cacheControl ? { cache_control: cacheControl } : {}),
-			});
-		}
+		params.system = ccSystemBlocks(initialSystemMessage, cacheControl);
 	} else if (initialSystemText) {
-		// Add cache control to system prompt for non-OAuth tokens
 		params.system = [
 			{
 				type: "text",
@@ -1339,34 +1317,29 @@ function buildParams(
 }
 
 /**
- * The Claude Code `system` shape: an uncached billing line, then the identity block and the working
- * block (working text and, when the record has one, its session-specific part). A head without that
- * split folds into the one block it has.
+ * Keeps the prompt blocks and cache markers in order, without client attribution.
+ * A head without the identity/working split folds into its one block.
  */
 function ccSystemBlocks(
-	ccWire: CcWireProfile,
 	head: SystemMessage | undefined,
 	cacheControl: AnthropicCacheControl | undefined,
 ): AnthropicTextBlock[] {
-	const block = (text: string, cached: boolean): AnthropicTextBlock => ({
+	const block = (text: string): AnthropicTextBlock => ({
 		type: "text",
 		text: sanitizeSurrogates(text),
-		...(cached && cacheControl ? { cache_control: cacheControl } : {}),
+		...(cacheControl ? { cache_control: cacheControl } : {}),
 	});
-	const blocks = [block(ccWire.billingHeader, false)];
+	const blocks: AnthropicTextBlock[] = [];
 	if (!head) return blocks;
 	const identity = head.sections?.identity;
 	const working = head.sections?.working;
 	if (typeof identity === "string" && typeof working === "string") {
 		const dynamic = head.sections?.dynamic;
-		blocks.push(
-			block(identity, true),
-			block(typeof dynamic === "string" ? `${working}\n\n${dynamic}` : working, true),
-		);
+		blocks.push(block(identity), block(typeof dynamic === "string" ? `${working}\n\n${dynamic}` : working));
 		return blocks;
 	}
 	const text = getSystemMessageText({ ...head, context: undefined });
-	if (text.length > 0) blocks.push(block(text, true));
+	if (text.length > 0) blocks.push(block(text));
 	return blocks;
 }
 

@@ -459,14 +459,11 @@ function streamCustomAnthropic(
 				"content-type": "application/json",
 				"anthropic-version": "2023-06-01",
 				"anthropic-dangerous-direct-browser-access": "true",
-				"anthropic-beta": isOAuth
-					? `claude-code-20250219,oauth-2025-04-20,${betaFeatures.join(",")}`
-					: betaFeatures.join(","),
+				"anthropic-beta": isOAuth ? `oauth-2025-04-20,${betaFeatures.join(",")}` : betaFeatures.join(","),
 				...(isOAuth
 					? {
 							authorization: `Bearer ${apiKey}`,
-							"user-agent": "claude-cli/2.1.2 (external, cli)",
-							"x-app": "cli",
+							"user-agent": "pi/custom-provider-anthropic",
 						}
 					: { "x-api-key": apiKey }),
 			};
@@ -479,23 +476,7 @@ function streamCustomAnthropic(
 				stream: true,
 			};
 
-			// System prompt with Claude Code identity for OAuth
-			if (isOAuth) {
-				params.system = [
-					{
-						type: "text",
-						text: "You are Claude Code, Anthropic's official CLI for Claude.",
-						cache_control: { type: "ephemeral" },
-					},
-				];
-				if (systemPrompt) {
-					params.system.push({
-						type: "text",
-						text: sanitizeSurrogates(systemPrompt),
-						cache_control: { type: "ephemeral" },
-					});
-				}
-			} else if (systemPrompt) {
+			if (systemPrompt) {
 				params.system = [
 					{
 						type: "text",

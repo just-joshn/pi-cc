@@ -23,7 +23,17 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(385);
+		expect(cases.length).toBe(386);
+	});
+
+	test("requires a known side and a deviation for side-specific request assertions", () => {
+		const request = (value: Record<string, unknown>) => ({ ...MINIMAL_CASE, compare: { requests: [value] } });
+		expect(
+			loadOne(request({ side: "pi-cc", deviation: "store/deviations.md, Client identity" })).compare.requests?.[0]
+				.side,
+		).toBe("pi-cc");
+		expect(() => loadOne(request({ side: "unknown", deviation: "reason" }))).toThrow(/side is unknown/);
+		expect(() => loadOne(request({ side: "pi-cc" }))).toThrow(/requires a deviation/);
 	});
 
 	test("rejects a misspelled compare key", () => {

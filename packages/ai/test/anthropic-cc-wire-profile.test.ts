@@ -32,7 +32,6 @@ const model: Model<"anthropic-messages"> = {
 };
 
 const ccWire: CcWireProfile = {
-	billingHeader: "x-anthropic-billing-header: cc_version=1.0.0.abc; cc_entrypoint=sdk-cli;",
 	effort: "medium",
 	levelChosen: false,
 	extraBetas: ["extra-beta-1"],
