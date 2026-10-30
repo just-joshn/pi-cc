@@ -509,17 +509,31 @@ function repeatChange(state: VimState, buffer: Buffer, count: number | undefined
 	if (change.keys !== "") {
 		const parsed = parse(change.keys);
 		if (parsed === undefined || parsed === "partial") return cancel(state);
-		if (/^[iIaAoO]$/.test(change.keys) && change.inserted === "") return cancel(state);
+		// Claude Code keeps i/I/a/A records without their typed text, so . skips them; o, O and every
+		// insert-opening command record the bare change and . reruns it, staying in insert mode.
+		if (/^[iIaA]$/.test(change.keys) && change.inserted === "") return cancel(state);
 		const cmd = count !== undefined && countable(parsed) ? { ...parsed, count, opCount: undefined } : parsed;
 		const ran = execute(working, cmd, buffer, change.keys);
 		if (ran.state.mode !== "insert") return step({ ...ran.state, lastChange: change }, ran.buffer);
 		working = ran.state;
 		after = ran.buffer ?? buffer;
+		const typed = applyInserted(after, change.inserted);
+		if (/^[iIaA]$/.test(change.keys)) {
+			return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, typed);
+		}
+		// A rerun that opened insert stays there, like Claude Code's replay; Escape then records only
+		// what is typed next.
+		return step({ ...working, insert: { start: typed.offset, before: typed.text, keys: "" }, lastChange: change }, typed);
 	}
-	const text = after.text.slice(0, after.offset) + change.inserted + after.text.slice(after.offset);
-	const end = after.offset + change.inserted.length;
-	const offset = end > lineStart(text, end) ? prevUnit(text, end) : end;
-	return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, { text, offset });
+	return step({ ...working, mode: "normal", insert: undefined, lastChange: change }, applyInserted(after, change.inserted));
+}
+
+/** Inserts the recorded typing at the insert point; the cursor rests before its last character. */
+function applyInserted(after: Buffer, inserted: string): Buffer {
+	const text = after.text.slice(0, after.offset) + inserted + after.text.slice(after.offset);
+	const end = after.offset + inserted.length;
+	const offset = inserted !== "" && end > lineStart(text, end) ? prevUnit(text, end) : end;
+	return { text, offset };
 }
 
 /** Escape in insert mode: back to normal, one character left, and the typed text saved for `.`. */
