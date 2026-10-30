@@ -1,0 +1,70 @@
+{
+	"id": "perm/validation-precedes-permission-opus",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "a"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "b.txt",
+						"old_string": "zzz",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "b.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"String to replace not found in file",
+				"Claude requested permissions to write to [^ ]*b\\.txt, but you haven't granted it yet\\."
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyMatch": [
+					"String to replace not found in file",
+					"Claude requested permissions to write to [^ ]*b\\.txt, but you haven't granted it yet\\."
+				]
+			}
+		]
+	},
+	"skip": []
+}

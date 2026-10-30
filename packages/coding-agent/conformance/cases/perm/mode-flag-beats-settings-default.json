@@ -1,0 +1,61 @@
+{
+	"id": "perm/mode-flag-beats-settings-default",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"acceptEdits",
+		"--settings",
+		"{\"permissions\":{\"defaultMode\":\"dontAsk\"}}",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File created successfully at: a.txt"
+			]
+		},
+		"files": [
+			"a.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyMatch": [
+					"File created successfully at: a.txt"
+				]
+			}
+		]
+	},
+	"skip": []
+}

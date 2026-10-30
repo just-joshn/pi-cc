@@ -463,7 +463,6 @@ const SUBTRACTED: string[][] = [
 	["doctor"],
 	["--mcp-config", "probe"],
 	["--agents=probe"],
-	["--dangerously-skip-permissions"],
 	["--print"],
 	["probe"],
 	["--add-dir", "."],

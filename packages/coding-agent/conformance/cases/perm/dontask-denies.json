@@ -1,0 +1,95 @@
+{
+	"id": "perm/dontask-denies",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"dontAsk",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "a\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch t.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "ls"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "/etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "b.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Permission to use Write has been denied because Claude Code is running in don't ask mode\\. IMPORTANT: You \\*may\\* attempt",
+				"Permission to use Bash has been denied because Claude Code is running in don't ask mode",
+				"Permission to use Read has been denied because Claude Code is running in don't ask mode"
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 6,
+				"bodyMatch": [
+					"Permission to use Write has been denied because Claude Code is running in don't ask mode\\. IMPORTANT: You \\*may\\* attempt",
+					"Permission to use Bash has been denied because Claude Code is running in don't ask mode",
+					"Permission to use Read has been denied because Claude Code is running in don't ask mode"
+				]
+			}
+		]
+	},
+	"skip": []
+}
