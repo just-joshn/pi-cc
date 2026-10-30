@@ -13,14 +13,31 @@ import { canonicalPath, isInside } from "./paths.ts";
 
 export interface Word {
 	readonly text: string;
-	/** An unquoted `*`, `?` or `[`. */
-	readonly glob: boolean;
 }
+
+/** What the line has set a variable to by the time a command runs: its text, or `null` when unknowable. */
+export type Variables = ReadonlyMap<string, string | null>;
 
 export interface SimpleCommand {
 	readonly words: readonly Word[];
 	/** The command as written, for the messages that quote it. */
 	readonly text: string;
+	/** Values Claude Code can follow here, empty when something in the line stops it following any. */
+	readonly variables: Variables;
+	/** Variables an earlier command in the line gave a non-empty literal value, wherever they were set. */
+	readonly assigned: ReadonlySet<string>;
+}
+
+/** Substitutions counted across a line, nested and quoted ones included. */
+export interface Tally {
+	substitutions: number;
+}
+
+export interface ScanOptions {
+	readonly depth?: number;
+	readonly tally?: Tally;
+	/** What an enclosing line had set, for a script it hands to a shell or `eval`. */
+	readonly inherited?: Pick<SimpleCommand, "variables" | "assigned">;
 }
 
 const SUBSTITUTION = "__CMDSUB__";
@@ -30,32 +47,283 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const MAX_DEPTH = 4;
 
+const DECLARATIONS = new Set(["export", "local", "readonly", "declare", "typeset"]);
+const LOOPS = new Set(["for", "select"]);
+const OPENERS = new Set(["if", "while", "until", ...LOOPS]);
+const CLOSERS = new Set(["fi", "done"]);
+/** Variables Claude Code reads in double quotes without knowing the value. */
+const ALWAYS_SET = new Set([
+	"HOME",
+	"PWD",
+	"OLDPWD",
+	"USER",
+	"LOGNAME",
+	"SHELL",
+	"PATH",
+	"HOSTNAME",
+	"UID",
+	"EUID",
+	"PPID",
+	"RANDOM",
+	"SECONDS",
+	"LINENO",
+	"TMPDIR",
+	"BASH_VERSION",
+	"BASHPID",
+	"SHLVL",
+	"HISTFILE",
+	"IFS",
+]);
+const UNSAFE_WORD = /[ \t\n*?[]/;
+export const MAX_SUBSTITUTIONS = 64;
+
+/**
+ * The variables Claude Code follows through a line, to read what `rm -rf $X` removes.
+ *
+ * It follows only a plain `NAME=value` (or one after `export`, `local`, `readonly`, `declare`, `typeset`)
+ * made before any command has run, and gives up on a name the moment its value could differ: a second
+ * value, a `||` or `&` list, a pipeline stage, a branch or loop body, `unset`, `read`, a `for` variable.
+ * A subshell keeps what it sets to itself. It gives up on the whole line when it meets a construct it
+ * cannot read: a substitution, `${...}`, a group, `case`, a function, `$'...'`, or a variable it does
+ * not hold a value for.
+ */
+class Tracker {
+	untrackable = false;
+	variables: Variables = new Map();
+	assigned: ReadonlySet<string> = new Set();
+	/** Set once a subshell stands at the top of the line, where Claude Code reads each part on its own. */
+	private subshelled = false;
+	private commands = 0;
+	private compound = 0;
+	private orList = false;
+	private inPipeline = false;
+	private pipelineStart: Variables = this.variables;
+	private stageAssigned = new Set<string>();
+	private readonly frames: {
+		variables: Variables;
+		pipelineStart: Variables;
+		orList: boolean;
+		inPipeline: boolean;
+		commands: number;
+		compound: number;
+	}[] = [];
+
+	constructor(inherited?: Pick<SimpleCommand, "variables" | "assigned">) {
+		if (inherited) {
+			this.variables = inherited.variables;
+			this.assigned = inherited.assigned;
+			this.pipelineStart = this.variables;
+			this.commands = 1;
+		}
+	}
+
+	/** Whether a command ran inside the line's own top-level subshell, so what came before it does not reach it. */
+	get depth(): number {
+		return this.frames.length;
+	}
+
+	get topLevelSubshell(): boolean {
+		return this.subshelled;
+	}
+
+	/** A `$NAME` the scanner met, in or out of double quotes. */
+	reference(name: string, quoted: boolean): void {
+		if (name === "HOME") return;
+		const value = this.variables.get(name);
+		if (typeof value === "string") {
+			if (quoted || !UNSAFE_WORD.test(value)) return;
+		} else if (quoted && (value === null || ALWAYS_SET.has(name) || /^(?:[0-9]+|[?$!#-])$/.test(name))) return;
+		this.untrackable = true;
+	}
+
+	command(words: readonly Word[]): void {
+		const texts = words.map((word) => word.text);
+		let first = 0;
+		for (; first < texts.length; first++) {
+			const head = texts[first] as string;
+			if (OPENERS.has(head)) this.compound++;
+			else if (CLOSERS.has(head)) this.compound = Math.max(0, this.compound - 1);
+			else if (head === "case" || head === "{" || head === "}" || head === "function") this.untrackable = true;
+			if (LOOPS.has(head)) {
+				this.forget(texts[first + 1]);
+				return;
+			}
+			if (!KEYWORDS.has(head)) break;
+		}
+		const rest = texts.slice(first);
+		if (rest.length === 0) return;
+		if (rest.every((text) => ASSIGNMENT.test(text))) {
+			for (const text of rest) this.assign(text);
+			return;
+		}
+		const head = basename(rest[0] as string);
+		if (DECLARATIONS.has(head)) {
+			for (const text of rest.slice(1)) if (ASSIGNMENT.test(text)) this.assign(text);
+		} else if (head === "unset" || head === "read") {
+			for (const text of rest.slice(1)) if (!text.startsWith("-")) this.forget(text);
+		}
+		this.commands++;
+	}
+
+	separator(operator: string): void {
+		if (operator === "&") this.untrackable = true;
+		if (operator === "(") {
+			this.frames.push({
+				variables: this.variables,
+				pipelineStart: this.pipelineStart,
+				orList: this.orList,
+				inPipeline: this.inPipeline,
+				commands: this.commands,
+				compound: this.compound,
+			});
+			if (this.frames.length > 1) this.untrackable = true;
+			else if (this.frames.length === 1) {
+				this.subshelled = true;
+				this.variables = new Map();
+				this.commands = 0;
+				this.compound = 0;
+			}
+			this.orList = false;
+			this.inPipeline = false;
+			this.pipelineStart = this.variables;
+			this.stageAssigned = new Set();
+			return;
+		}
+		if (operator === "|" || operator === "|&") {
+			this.leavePipeline(true);
+			this.inPipeline = true;
+			return;
+		}
+		this.leavePipeline(operator === "&");
+		this.inPipeline = false;
+		if (operator === ")") {
+			const frame = this.frames.pop();
+			if (frame) {
+				this.variables = frame.variables;
+				this.commands = frame.commands;
+				this.compound = frame.compound;
+				this.orList = frame.orList;
+				this.inPipeline = frame.inPipeline;
+				this.pipelineStart = frame.pipelineStart;
+			}
+		} else if (operator === "||") {
+			this.orList = true;
+		} else if (this.orList && (operator === ";" || operator === "\n")) {
+			this.variables = new Map([...this.variables.keys()].map((name) => [name, null]));
+			this.orList = false;
+		}
+		this.pipelineStart = this.variables;
+		this.stageAssigned = new Set();
+	}
+
+	/** Names set in the stages of a pipeline, or before a `&`, are unknowable after it. */
+	private leavePipeline(force: boolean): void {
+		if (!force && !this.inPipeline) return;
+		const merged = new Map(this.pipelineStart);
+		for (const name of this.stageAssigned) merged.set(name, null);
+		this.pipelineStart = merged;
+		this.variables = merged;
+		this.stageAssigned = new Set();
+	}
+
+	private forget(name: string | undefined): void {
+		if (name === undefined || !this.variables.has(name)) return;
+		const next = new Map(this.variables);
+		next.delete(name);
+		this.variables = next;
+	}
+
+	private assign(text: string): void {
+		const equals = text.indexOf("=");
+		const name = text.slice(0, equals);
+		const value = this.expanded(text.slice(equals + 1));
+		this.stageAssigned.add(name);
+		if (this.inPipeline) return;
+		const known = this.variables.get(name);
+		const tracked = this.commands === 0 && this.compound === 0;
+		const next = new Map(this.variables);
+		if (!tracked) next.set(name, null);
+		else if (known === undefined) next.set(name, value);
+		else next.set(name, known === value ? value : null);
+		this.variables = next;
+		if (tracked && value !== null) this.assigned = new Set(this.assigned).add(name);
+	}
+
+	/** A value with the variables it names put in, or `null` when one of them is not a known text. */
+	private expanded(value: string): string | null {
+		if (value === "") return null;
+		let known = true;
+		const text = value.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name: string) => {
+			const found = this.variables.get(name);
+			if (typeof found !== "string") known = false;
+			return found ?? "";
+		});
+		return known && !text.includes("$") ? text : null;
+	}
+}
+
 /** Every simple command in a line, nested ones included, with substitutions replaced by a marker. */
-export function simpleCommands(line: string, depth = 0): SimpleCommand[] {
-	const commands: SimpleCommand[] = [];
-	if (depth > MAX_DEPTH) return commands;
+export function simpleCommands(line: string, options: ScanOptions = {}): SimpleCommand[] {
+	const depth = options.depth ?? 0;
+	const tally = options.tally ?? { substitutions: 0 };
+	const commands: {
+		words: Word[];
+		text: string;
+		variables: Variables;
+		assigned: ReadonlySet<string>;
+		top: boolean;
+	}[] = [];
+	const nestedCommands: SimpleCommand[] = [];
+	if (depth > MAX_DEPTH) return nestedCommands;
+	const tracker = new Tracker(options.inherited);
 	let words: Word[] = [];
 	let text = "";
-	let glob = false;
 	let started = false;
+	let brace = -1;
 	let commandStart = 0;
 	const endWord = (): void => {
-		if (started) words.push({ text, glob });
+		if (started) words.push({ text });
 		text = "";
-		glob = false;
 		started = false;
+		brace = -1;
 	};
-	const endCommand = (index: number): void => {
+	const endCommand = (index: number, operator: string): void => {
 		endWord();
 		const source = line.slice(commandStart, index).trim();
-		if (words.length > 0) commands.push({ words, text: source });
+		if (words.length > 0) {
+			commands.push({
+				words,
+				text: source,
+				variables: tracker.variables,
+				assigned: tracker.assigned,
+				top: tracker.depth === 0,
+			});
+			tracker.command(words);
+		}
+		tracker.separator(operator);
 		words = [];
-		commandStart = index + 1;
+		commandStart = index + operator.length;
 	};
-	const nested = (inner: string): void => {
-		commands.push(...simpleCommands(inner, depth + 1));
+	const nested = (inner: string, counted = true): void => {
+		nestedCommands.push(...simpleCommands(inner, { depth: depth + 1, tally }));
+		if (counted) {
+			tally.substitutions++;
+			tracker.untrackable = true;
+		}
 		text += SUBSTITUTION;
 		started = true;
+	};
+	const dollar = (at: number, quoted: boolean): void => {
+		const after = line[at + 1];
+		if (after === "{") {
+			tracker.untrackable = true;
+			if (/[ \t\n|]/.test(line[at + 2] ?? "")) tally.substitutions++;
+		} else if (after === "'") {
+			tracker.untrackable = true;
+		} else {
+			const found = /^\$(?:([A-Za-z_][A-Za-z0-9_]*)|([0-9@*?$!#-]))/.exec(line.slice(at, at + 256));
+			if (found) tracker.reference((found[1] ?? found[2]) as string, quoted);
+		}
 	};
 	let index = 0;
 	while (index < line.length) {
@@ -81,13 +349,14 @@ export function simpleCommands(line: string, depth = 0): SimpleCommand[] {
 					index += 2;
 				} else if (inner === "$" && line[index + 1] === "(") {
 					const end = matching(line, index + 1);
-					nested(line.slice(index + 2, end));
+					nested(line.slice(index + 2, end), line[index + 2] !== "(");
 					index = end + 1;
 				} else if (inner === "`") {
 					const end = closingBacktick(line, index);
 					nested(line.slice(index + 1, end));
 					index = end + 1;
 				} else {
+					if (inner === "$") dollar(index, true);
 					text += inner;
 					index++;
 				}
@@ -95,7 +364,7 @@ export function simpleCommands(line: string, depth = 0): SimpleCommand[] {
 			index++;
 		} else if (char === "$" && next === "(") {
 			const end = matching(line, index + 1);
-			nested(line.slice(index + 2, end));
+			nested(line.slice(index + 2, end), line[index + 2] !== "(");
 			index = end + 1;
 		} else if (char === "`") {
 			const end = closingBacktick(line, index);
@@ -106,7 +375,7 @@ export function simpleCommands(line: string, depth = 0): SimpleCommand[] {
 			nested(line.slice(index + 2, end));
 			index = end + 1;
 		} else if (char === "<" || char === ">") {
-			index = skipRedirection(line, index);
+			index = skipRedirection(line, index, tally);
 			endWord();
 		} else if (char === "#" && !started) {
 			const newline = line.indexOf("\n", index);
@@ -115,17 +384,28 @@ export function simpleCommands(line: string, depth = 0): SimpleCommand[] {
 			endWord();
 			index++;
 		} else if (";&|\n()".includes(char)) {
-			endCommand(index);
-			index++;
+			const operator =
+				next === char && (char === "&" || char === "|") ? char + char : char === "|" && next === "&" ? "|&" : char;
+			endCommand(index, operator);
+			index += operator.length;
 		} else {
-			if (char === "*" || char === "?" || char === "[") glob = true;
+			if (char === "$") dollar(index, false);
+			else if (char === "{") brace = text.length;
+			else if (char === "}" && brace !== -1 && /,|\.\./.test(text.slice(brace))) tracker.untrackable = true;
 			text += char;
 			started = true;
 			index++;
 		}
 	}
-	endCommand(line.length);
-	return commands;
+	endCommand(line.length, "");
+	const none: Variables = new Map();
+	return [
+		...commands.map(({ top, ...command }) => ({
+			...command,
+			variables: tracker.untrackable || (top && tracker.topLevelSubshell) ? none : command.variables,
+		})),
+		...nestedCommands,
+	];
 }
 
 /** The index of the `)` that closes the `(` at `open`. */
@@ -150,7 +430,7 @@ function closingBacktick(line: string, open: number): number {
 }
 
 /** Past a redirection operator and its target word, and past a here-document's body. */
-function skipRedirection(line: string, start: number): number {
+function skipRedirection(line: string, start: number, tally: Tally): number {
 	let index = start;
 	while (line[index] === "<" || line[index] === ">" || line[index] === "&" || line[index] === "|") index++;
 	const heredoc = line.slice(start, index).startsWith("<<") && !line.slice(start, index).startsWith("<<<");
@@ -161,9 +441,12 @@ function skipRedirection(line: string, start: number): number {
 	const delimiter = word.replace(/^["']|["']$/g, "");
 	const newline = line.indexOf("\n", index);
 	if (newline === -1 || delimiter === "") return index;
-	const body = new RegExp(`^\\t*${delimiter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*$`, "m").exec(
-		line.slice(newline + 1),
-	);
+	const rest = line.slice(newline + 1);
+	const body = new RegExp(`^\\t*${delimiter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*$`, "m").exec(rest);
+	if (word === delimiter && !word.includes("\\")) {
+		const text = body === null ? rest : rest.slice(0, body.index);
+		tally.substitutions += (text.match(/\$\((?!\()|(?<!\\)`[^`]*`/g) ?? []).length;
+	}
 	return body === null ? line.length : newline + 1 + body.index + body[0].length;
 }
 
@@ -197,10 +480,18 @@ export interface RemovalScope {
 export interface Removal {
 	readonly command: "rm" | "rmdir";
 	readonly message: string;
+	/** A target that expands from a variable the shell may leave empty. Claude Code reports it before it counts substitutions. */
+	readonly emptyVariable?: true;
 }
 
 export function dangerousRemoval(line: string, scope: RemovalScope): Removal | undefined {
-	return dangerousIn(simpleCommands(line), scope, 0);
+	const tally: Tally = { substitutions: 0 };
+	const found = dangerousIn(simpleCommands(line, { tally }), scope, 0);
+	if (tally.substitutions <= MAX_SUBSTITUTIONS || found?.emptyVariable) return found;
+	return {
+		command: "rm",
+		message: `This command contains ${tally.substitutions} command substitutions \u2014 too many to analyze for catastrophic removals. This requires explicit approval.`,
+	};
 }
 
 function dangerousIn(commands: readonly SimpleCommand[], scope: RemovalScope, depth: number): Removal | undefined {
@@ -210,11 +501,14 @@ function dangerousIn(commands: readonly SimpleCommand[], scope: RemovalScope, de
 		const head = basename(words[0]?.text ?? "");
 		if (head === "cd" || head === "pushd") changedDirectory = true;
 		if (head === "rm" || head === "rmdir") {
-			const found = inspectRemoval(head, words.slice(1), command.text, changedDirectory, scope);
+			const found = inspectRemoval(head, words.slice(1), command, changedDirectory, scope);
 			if (found) return found;
 		} else if (depth < MAX_DEPTH) {
 			const script = inlineScript(head, words);
-			const found = script === undefined ? undefined : dangerousIn(simpleCommands(script), scope, depth + 1);
+			const found =
+				script === undefined
+					? undefined
+					: dangerousIn(simpleCommands(script, { inherited: command }), scope, depth + 1);
 			if (found) return found;
 		}
 	}
@@ -284,7 +578,7 @@ const NO_AUTO_ALLOW = "This requires explicit approval and cannot be auto-allowe
 function inspectRemoval(
 	command: string,
 	args: readonly Word[],
-	text: string,
+	line: SimpleCommand,
 	changedDirectory: boolean,
 	scope: RemovalScope,
 ): Removal | undefined {
@@ -302,9 +596,10 @@ function inspectRemoval(
 				message: `Dangerous rm operation detected: the target is the output of a command substitution (\`$(...)\` or backticks) and cannot be checked before the command runs. ${NO_AUTO_ALLOW}\n\nRun the substitution on its own first, then remove the literal paths it prints.`,
 			};
 		}
-		const emptied = operand.text.replace(/(.)(?:__CMDSUB__(?:(?!\.\.)[/*.])*)+((?:\/\.\.)*)\/*$/, "$1$2");
-		for (const candidate of emptied === operand.text ? [operand] : [{ ...operand, text: emptied }, operand]) {
-			const found = inspectOperand(command, candidate, text, recursive, flags, changedDirectory, scope);
+		const target = { ...operand, text: followed(operand.text, line.variables) };
+		const emptied = target.text.replace(/(.)(?:__CMDSUB__(?:(?!\.\.)[/*.])*)+((?:\/\.\.)*)\/*$/, "$1$2");
+		for (const candidate of emptied === target.text ? [target] : [{ ...target, text: emptied }, target]) {
+			const found = inspectOperand(command, candidate, line, recursive, flags, changedDirectory, scope);
 			if (found) return found;
 		}
 	}
@@ -314,13 +609,13 @@ function inspectRemoval(
 function inspectOperand(
 	command: string,
 	operand: Word,
-	text: string,
+	line: SimpleCommand,
 	recursive: boolean,
 	flags: readonly string[],
 	changedDirectory: boolean,
 	scope: RemovalScope,
 ): Removal | undefined {
-	const variable = variableTarget(command, operand.text, text, scope);
+	const variable = variableTarget(command, operand.text, line, scope);
 	if (variable) return variable;
 	const written = expand(operand.text, scope);
 	const absolute = isAbsolute(written) ? normalize(written) : resolve(scope.cwd, written);
@@ -331,7 +626,7 @@ function inspectOperand(
 		if (cut !== stem) stem = /[\\/]/.test(cut) ? normalize(cut).replace(/(.)\/$/, "$1") : cut;
 	}
 	const stripped = stem !== absolute;
-	const wildcard = operand.glob && stripped;
+	const wildcard = stripped;
 	if (wildcard && !isAbsolute(written) && /[\\/]\*$/.test(absolute) && changedDirectory) {
 		return refusal(
 			command,
@@ -440,12 +735,26 @@ function isCriticalPath(path: string, home: string): boolean {
 }
 
 /** A target that starts with a variable the shell may leave empty, which would remove `/` or a top-level directory. */
-function variableTarget(command: string, target: string, text: string, scope: RemovalScope): Removal | undefined {
+function variableTarget(
+	command: string,
+	target: string,
+	line: SimpleCommand,
+	scope: RemovalScope,
+): Removal | undefined {
+	const text = line.text;
 	const child = VARIABLE_ROOT_CHILD.exec(target);
 	const rooted = child === null && VARIABLE_ROOT.test(target);
 	if (child === null && !rooted) return undefined;
 	const names = child === null ? variableNames(target) : [(child[1] ?? child[2]) as string];
-	if (names.some((name) => NORMALLY_SET.has(name.toUpperCase()) || (scope.env[name] ?? "") !== "")) return undefined;
+	if (
+		names.some(
+			(name) =>
+				NORMALLY_SET.has(name.toUpperCase()) ||
+				(child !== null && line.assigned.has(name)) ||
+				(scope.env[name] ?? "") !== "",
+		)
+	)
+		return undefined;
 	const rootChild = child === null ? undefined : (child[3] as string);
 	const joined = names.map((name) => `$${name}`).join(" or ");
 	const rewritten = target.replace(
@@ -463,8 +772,18 @@ function variableTarget(command: string, target: string, text: string, scope: Re
 			: "This check does not fire on a target that cannot expand to a top-level directory";
 	return {
 		command: command as Removal["command"],
+		emptyVariable: true,
 		message: `Dangerous ${command} operation detected in \`${text}\`. The target '${target}' is a shell variable expansion: when ${joined} is unset or empty it ${becomes}${NO_AUTO_ALLOW}\n\n${doesNotFire}: ${advice}.`,
 	};
+}
+
+/** `$NAME` put in as the value Claude Code followed the line to give it. */
+function followed(text: string, variables: Variables): string {
+	if (variables.size === 0) return text;
+	return text.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name: string) => {
+		const value = variables.get(name);
+		return typeof value === "string" ? value : match;
+	});
 }
 
 function variableNames(target: string): string[] {

@@ -184,16 +184,23 @@ describe("a removal target an earlier assignment in the line makes dangerous", (
 		"X=/usr; echo x | rm -rf $X",
 		"X=/usr; rm -rf $X | cat",
 		"(X=/usr; rm -rf $X)",
-		"X=/usr; (rm -rf $X)",
 		"X=/usr; echo $((1 + 1)); rm -rf $X",
 		"X=/usr; echo $HOME; rm -rf $X",
 		`X=/usr; echo 'a${brace("Y")}'; rm -rf $X`,
 		"X=/usr; true || rm -rf $X",
 		"X=/usr; bash -c 'rm -rf $X'",
 		"X=/usr; echo hi && sudo rm -rf $X",
+		"X=/usr; rm -rf $X; X=/lib",
 	])("refuses %s", (command) => {
 		const found = removal(command);
 		expect(found?.message, command).toContain("would remove a critical system directory");
+	});
+
+	it("still reports a braced variable followed by a slash, which Claude Code does not follow", () => {
+		for (const value of ["/", "/usr", "/tmp/scratch"]) {
+			const found = removal(`X=${value}; rm -rf ${brace("X")}/`);
+			expect(found?.message, value).toContain("is a shell variable expansion");
+		}
 	});
 
 	it("names the expanded target, as Claude Code does", () => {
@@ -205,6 +212,11 @@ describe("a removal target an earlier assignment in the line makes dangerous", (
 
 	it.each([
 		"(X=/usr); rm -rf $X",
+		"X=/usr; (rm -rf $X)",
+		"X=/usr; (true); rm -rf $X",
+		"(X=/usr; (rm -rf $X))",
+		"X=/usr; echo a & rm -rf $X",
+		"X=/usr; echo a{b,c}; rm -rf $X",
 		"X=/usr || true; rm -rf $X",
 		"true || X=/usr; rm -rf $X",
 		"X=/usr | cat; rm -rf $X",
@@ -235,7 +247,6 @@ describe("a removal target an earlier assignment in the line makes dangerous", (
 		"X=/usr; case a in a) rm -rf $X;; esac",
 		"X=/usr; f() { :; }; rm -rf $X",
 		'X="/ usr"; rm -rf $X',
-		"X=/usr; rm -rf $X; X=/lib",
 		"X=/tmp/scratch; rm -rf $X",
 		"X=/tmp/scratch; rm -rf $X/",
 	])("lets %s through, because Claude Code cannot follow the variable there", (command) => {
