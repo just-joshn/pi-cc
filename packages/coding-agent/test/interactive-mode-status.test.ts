@@ -643,6 +643,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 				resourceLoader: {
 					getPathMetadata: () => new Map(),
 					getAgentsFiles: () => ({ agentsFiles: options.contextFiles ?? [] }),
+					getMemory: () => ({ files: [], autoMemoryDir: undefined }),
 					getSystemPromptSource: () => options.systemPromptSource,
 					getAppendSystemPromptSources: () => options.appendSystemPromptSources ?? [],
 					getSkills: () => ({

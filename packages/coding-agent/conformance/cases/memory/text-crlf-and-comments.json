@@ -1,0 +1,41 @@
+{
+	"id": "memory/text-crlf-and-comments",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "A1\r\nA2\r\n\r\nA3\r\n",
+		"CLAUDE.local.md": "L1\r\n<!-- c -->\r\nL2\r\n",
+		".claude/rules/r.md": "---\r\ndescription: x\r\n---\r\nR1\r\nR2\r\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md (\\([^\\n]*\\)):\\n\\nA1\\r\\nA2\\r\\n\\r\\nA3\\n\\nContents of [^\\n]*/workspace/\\.claude/rules/r\\.md \\1:\\n\\nR1\\r\\nR2\\n\\nContents of [^\\n]*/workspace/CLAUDE\\.local\\.md \\([^\\n]*\\):\\n\\nL1\\nL2\\n</system-reminder>$"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,52 @@
+{
+	"id": "memory/agents-md-mode-claude-md",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/settings.json": "{\"pluginConfigs\": {\"cc-plugin-agents-md@builtin\": {\"options\": {\"instructionFiles\": \"claude-md\"}}}}\n",
+		"AGENTS.md": "AG_ROOT\n",
+		"CLAUDE.local.md": "LOC_C @AGENTS.md\n",
+		".claude/AGENTS.md": "AG_DOT\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.local\\.md (\\([^\\n]*\\)):\\n\\nLOC_C @AGENTS\\.md\\n\\nContents of [^\\n]*/workspace/AGENTS\\.md \\1:\\n\\nAG_ROOT\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"AG_DOT"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"AG_DOT"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

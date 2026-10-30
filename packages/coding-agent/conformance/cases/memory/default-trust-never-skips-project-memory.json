@@ -1,0 +1,56 @@
+{
+	"id": "memory/default-trust-never-skips-project-memory",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/settings.json": "{\"defaultProjectTrust\": \"never\"}\n",
+		"$CONFIG/CLAUDE.md": "USER_T\n",
+		"CLAUDE.md": "PROJ_T\n",
+		"AGENTS.md": "AG_T\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/config/CLAUDE\\.md \\([^\\n]*\\):\\n\\nUSER_T\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"PROJ_T",
+							"AG_T"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"PROJ_T",
+							"AG_T"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "pi's project trust store and defaultProjectTrust have no Claude Code counterpart; claude -p loads project memory without a trust decision"
+	}
+}

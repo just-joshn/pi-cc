@@ -1,0 +1,55 @@
+{
+	"id": "memory/parent-walk",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "ROOT_W\n",
+		".claude/CLAUDE.md": "  \n",
+		"CLAUDE.local.md": "ROOT_LOCAL\n",
+		"a/CLAUDE.md": "A_W\n",
+		"a/CLAUDE.local.md": "A_LOCAL\n",
+		"a/.claude/rules/r.md": "A_RULE\n",
+		"a/.claude/rules/z/deep.md": "A_RULE_DEEP\n",
+		"a/.claude/rules/b.txt": "A_RULE_TXT\n",
+		"a/b/CLAUDE.md": "B_W\n",
+		"a/b/.claude/CLAUDE.md": "B_DOT\n",
+		"a/b/.claude/rules/a.md": "B_RULE_A\n",
+		"a/b/.claude/rules/B.md": "B_RULE_BIG\n"
+	},
+	"cwd": "a/b",
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nROOT_W[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.local\\.md \\([^\\n]*\\):\\n\\nROOT_LOCAL[\\s\\S]*Contents of [^\\n]*/workspace/a/CLAUDE\\.md \\([^\\n]*\\):\\n\\nA_W[\\s\\S]*Contents of [^\\n]*/workspace/a/\\.claude/rules/z/deep\\.md \\([^\\n]*\\):\\n\\nA_RULE_DEEP[\\s\\S]*Contents of [^\\n]*/workspace/a/\\.claude/rules/r\\.md \\([^\\n]*\\):\\n\\nA_RULE[\\s\\S]*Contents of [^\\n]*/workspace/a/CLAUDE\\.local\\.md \\([^\\n]*\\):\\n\\nA_LOCAL[\\s\\S]*Contents of [^\\n]*/workspace/a/b/CLAUDE\\.md \\([^\\n]*\\):\\n\\nB_W[\\s\\S]*Contents of [^\\n]*/workspace/a/b/\\.claude/CLAUDE\\.md \\([^\\n]*\\):\\n\\nB_DOT[\\s\\S]*Contents of [^\\n]*/workspace/a/b/\\.claude/rules/B\\.md \\([^\\n]*\\):\\n\\nB_RULE_BIG[\\s\\S]*Contents of [^\\n]*/workspace/a/b/\\.claude/rules/a\\.md \\([^\\n]*\\):\\n\\nB_RULE_A"
+						],
+						"notMatch": [
+							"A_RULE_TXT",
+							"workspace/\\.claude/CLAUDE\\.md"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

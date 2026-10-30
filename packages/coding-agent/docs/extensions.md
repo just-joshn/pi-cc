@@ -624,7 +624,7 @@ pi.on("before_agent_start", async (event, ctx) => {
   //   .sections - custom XML-wrapped sections keyed by tag name
   //   .appendSystemPrompt - text from --append-system-prompt flags
   //   .cwd - working directory
-  //   .contextFiles - AGENTS.md files and other loaded context files
+  //   .contextFiles - the agent directory's context file (project memory is not listed)
   //   .skills - loaded skills
 
   return {

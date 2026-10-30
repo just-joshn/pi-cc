@@ -1,0 +1,44 @@
+{
+	"id": "memory/auto-memory-path",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "PROJ\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"system": {
+						"match": [
+							"/config/projects/-[A-Za-z0-9-]*-workspace/memory/"
+						]
+					},
+					"messages.0.content.0.text": {
+						"notMatch": [
+							"MEMORY\\.md \\("
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

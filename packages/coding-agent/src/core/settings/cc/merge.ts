@@ -11,6 +11,7 @@ import { CC_SETTINGS_ORDER, type CcSettings, type CcSettingsDocument, type CcSet
 export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy: CcPolicy): CcSettings {
 	const values: Record<string, unknown> = {};
 	const sources = new Map<string, CcSettingsSource>();
+	const pluginOptions: Record<string, Record<string, unknown>> = {};
 
 	for (const source of CC_SETTINGS_ORDER) {
 		for (const document of documents) {
@@ -21,6 +22,9 @@ export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy
 				const next = key === "env" ? ccAdmitRepoEnv(source, raw) : raw;
 				values[key] = mergeValue(key, values[key], next);
 				sources.set(key, source);
+			}
+			if (PLUGIN_OPTION_SOURCES.has(source)) {
+				mergePluginOptions(pluginOptions, document.values.pluginConfigs);
 			}
 		}
 	}
@@ -34,6 +38,7 @@ export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy
 		policy,
 		values,
 		sources,
+		pluginOptions,
 	};
 }
 
@@ -75,6 +80,20 @@ function applyPolicyStage(
 		if (!(key in defined)) {
 			delete values[key];
 			sources.delete(key);
+		}
+	}
+}
+
+// Claude Code reads `pluginConfigs.<id>.options` from these tiers only; a repo cannot set a plugin's options.
+const PLUGIN_OPTION_SOURCES: ReadonlySet<CcSettingsSource> = new Set(["user", "flag", "policy"]);
+
+function mergePluginOptions(target: Record<string, Record<string, unknown>>, pluginConfigs: unknown): void {
+	if (!isJsonObject(pluginConfigs)) {
+		return;
+	}
+	for (const [id, config] of Object.entries(pluginConfigs)) {
+		if (isJsonObject(config) && isJsonObject(config.options)) {
+			target[id] = { ...target[id], ...config.options };
 		}
 	}
 }

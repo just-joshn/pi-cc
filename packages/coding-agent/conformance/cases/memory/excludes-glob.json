@@ -1,0 +1,49 @@
+{
+	"id": "memory/excludes-glob",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/settings.json": "{\"claudeMdExcludes\": [\"**/CLAUDE.local.md\", \"$WORKSPACE/.claude/rules/**\", \"$CONFIG/CLAUDE.md\", \"**/dropped-import.md\"]}\n",
+		"$CONFIG/CLAUDE.md": "USER_DROP\n",
+		"CLAUDE.md": "PROJ_KEEP @dropped-import.md @kept-import.md\n",
+		"dropped-import.md": "IMPORT_DROP\n",
+		"kept-import.md": "IMPORT_KEEP\n",
+		"CLAUDE.local.md": "LOCAL_DROP\n",
+		".claude/rules/r.md": "RULE_DROP\n",
+		".claude/CLAUDE.md": "DOTCLAUDE_KEEP\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nPROJ_KEEP[\\s\\S]*Contents of [^\\n]*/workspace/kept-import\\.md \\([^\\n]*\\):\\n\\nIMPORT_KEEP[\\s\\S]*Contents of [^\\n]*/workspace/\\.claude/CLAUDE\\.md \\([^\\n]*\\):\\n\\nDOTCLAUDE_KEEP\\n</system-reminder>"
+						],
+						"notMatch": [
+							"_DROP"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

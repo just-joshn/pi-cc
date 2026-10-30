@@ -162,7 +162,15 @@ async function probeClaude(runRoot: string): Promise<ClaudeIdentity | null> {
 	const roots = createRoots(runRoot, ".claude-probe", "claude");
 	const profilePath = join(roots.out, "profile.sb");
 	writeFileSync(profilePath, renderProfile({ roots, executableRoots: [hashed.path], port: null }));
-	const probe = await runSandboxed(profilePath, [hashed.path, "--version"], roots, baseEnv(roots, null), null, 30_000);
+	const probe = await runSandboxed(
+		profilePath,
+		[hashed.path, "--version"],
+		roots.workspace,
+		roots,
+		baseEnv(roots, null),
+		null,
+		30_000,
+	);
 	const banner = probe.exitCode === 0 ? probe.stdout.trim() : null;
 	return {
 		...hashed,
@@ -212,8 +220,10 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		for (const key of testCase.unset) delete env[key];
 		for (const [key, value] of Object.entries(testCase.env)) env[key] = expandPlaceholders(value, roots, mockUrl);
 
+		const cwd = testCase.cwd === undefined ? roots.workspace : join(roots.workspace, testCase.cwd);
+		mkdirSync(cwd, { recursive: true });
 		const workspaceBefore = hashTree(roots.workspace);
-		const result = await runSandboxed(profilePath, argv, roots, env, testCase.stdin, testCase.timeout_ms);
+		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
 		const workspaceAfter = hashTree(takeWorkspace(roots), expectedFilePaths(testCase));
 		const violations: Violation[] = [...workspaceAfter.violations];
 		if (result.survivors) violations.push({ kind: "survivor", path: null });
@@ -283,6 +293,7 @@ function summarize(result: ProcessResult, requests: RecordedRequest[]) {
 function runSandboxed(
 	profilePath: string,
 	argv: string[],
+	cwd: string,
 	roots: Roots,
 	env: Record<string, string>,
 	stdin: StdinSpec,
@@ -291,7 +302,7 @@ function runSandboxed(
 	return new Promise((resolve, reject) => {
 		const startedAt = Date.now();
 		const child = spawn(SANDBOX_EXEC, ["-f", profilePath, ...argv], {
-			cwd: roots.workspace,
+			cwd,
 			env,
 			detached: true,
 			stdio: ["pipe", "pipe", "pipe"],

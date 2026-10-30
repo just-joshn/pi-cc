@@ -1,0 +1,55 @@
+{
+	"id": "memory/agents-md-nested-mode-both",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/settings.json": "{\"pluginConfigs\": {\"cc-plugin-agents-md@builtin\": {\"options\": {\"instructionFiles\": \"claude-md-and-agents-md\"}}}}\n",
+		"CLAUDE.md": "CL_ROOT\n",
+		"sub/AGENTS.md": "AG_SUB\n",
+		"sub/x.txt": "x\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_uses": [
+					{
+						"name": "Read",
+						"input": {
+							"file_path": "sub/x.txt"
+						}
+					}
+				]
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"Contents of [^\\n]*/workspace/sub/AGENTS\\.md:\\\\n\\\\nAG_SUB"
+						],
+						"notMatch": [
+							"(AG_SUB[\\s\\S]*){2}"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

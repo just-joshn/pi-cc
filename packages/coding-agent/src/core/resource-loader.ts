@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { detectCapabilities, getTerminalColorMode, type TerminalColorMode } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -25,6 +26,7 @@ import type {
 	LoadExtensionsResult,
 } from "./extensions/types.ts";
 import { findGitPaths } from "./footer-data-provider.ts";
+import { discoverMemory, type MemorySnapshot, resolveMemoryLocation } from "./memory/discover.ts";
 import {
 	DefaultPackageManager,
 	type PackageInstallFailure,
@@ -183,6 +185,8 @@ export interface ResourceLoader {
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
+	/** Claude Code memory (the project's CLAUDE.md and AGENTS.md files, rules, auto memory) found by the last reload. */
+	getMemory(): MemorySnapshot;
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
 	getAppendSystemPrompt(): string[];
@@ -300,6 +304,17 @@ export function loadProjectContextFiles(options: {
 	return contextFiles;
 }
 
+export interface MemorySettings {
+	readonly values: Readonly<Record<string, unknown>>;
+	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+	readonly settingSources: readonly string[] | undefined;
+	/**
+	 * pi's decided trust for the project: `--approve`/`--no-approve`, a stored decision, or
+	 * `defaultProjectTrust` set to always or never. Undefined when pi would ask, and the session's trust applies.
+	 */
+	readonly trustDecision?: boolean;
+}
+
 export interface DefaultResourceLoaderOptions {
 	cwd: string;
 	agentDir: string;
@@ -317,6 +332,10 @@ export interface DefaultResourceLoaderOptions {
 	noPromptTemplates?: boolean;
 	noThemes?: boolean;
 	noContextFiles?: boolean;
+	/** Load no Claude Code memory. `noContextFiles` implies it. */
+	noMemory?: boolean;
+	/** The merged Claude Code settings values and `--setting-sources`, read at each reload. */
+	memorySettings?: () => MemorySettings;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
@@ -357,6 +376,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private noPromptTemplates: boolean;
 	private noThemes: boolean;
 	private noContextFiles: boolean;
+	private noMemory: boolean;
+	private memorySettings: () => MemorySettings;
 	private systemPromptSource?: string;
 	private appendSystemPromptSource?: string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
@@ -386,6 +407,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private themes: Theme[];
 	private themeDiagnostics: ResourceDiagnostic[];
 	private agentsFiles: Array<{ path: string; content: string }>;
+	private memory: MemorySnapshot;
 	private systemPrompt?: string;
 	private systemPromptSourcePath?: string;
 	private appendSystemPrompt: string[];
@@ -423,6 +445,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.noPromptTemplates = options.noPromptTemplates ?? false;
 		this.noThemes = options.noThemes ?? false;
 		this.noContextFiles = options.noContextFiles ?? false;
+		this.noMemory = options.noMemory ?? false;
+		this.memorySettings =
+			options.memorySettings ?? (() => ({ values: {}, pluginOptions: {}, settingSources: undefined }));
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
 		this.extensionsOverride = options.extensionsOverride;
@@ -441,6 +466,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.themes = [];
 		this.themeDiagnostics = [];
 		this.agentsFiles = [];
+		this.memory = { files: [], autoMemoryDir: undefined };
 		this.appendSystemPrompt = [];
 		this.appendSystemPromptSourcePaths = [];
 		this.lastSkillPaths = [];
@@ -471,6 +497,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> } {
 		return { agentsFiles: this.agentsFiles };
+	}
+
+	getMemory(): MemorySnapshot {
+		return this.memory;
 	}
 
 	getSystemPrompt(): string | undefined {
@@ -674,16 +704,33 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}
 		}
 
-		const agentsFiles = {
-			agentsFiles: this.noContextFiles
-				? []
-				: loadProjectContextFiles({
-						cwd: this.cwd,
-						agentDir: this.agentDir,
-					}),
-		};
+		// The project tree's instruction files are Claude Code memory (core/memory); only the agent
+		// directory keeps a pi context file.
+		const globalContextFile = this.noContextFiles ? null : loadContextFileFromDir(resolvePath(this.agentDir));
+		const agentsFiles = { agentsFiles: globalContextFile ? [globalContextFile] : [] };
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+
+		const memorySettings = this.memorySettings();
+		const memory = discoverMemory(
+			resolveMemoryLocation({
+				cwd: this.cwd,
+				home: homedir(),
+				env: process.env,
+				platform: process.platform,
+				values: memorySettings.values,
+				pluginOptions: memorySettings.pluginOptions,
+				settingSources: memorySettings.settingSources,
+				projectTrusted: memorySettings.trustDecision ?? this.settingsManager.isProjectTrusted(),
+				disabled: this.noContextFiles || this.noMemory,
+			}),
+		);
+		// A context file the system prompt already carries is not sent again as memory.
+		const inSystemPrompt = new Set(this.agentsFiles.map((file) => canonicalizePath(file.path)));
+		this.memory = {
+			...memory,
+			files: memory.files.filter((file) => !inSystemPrompt.has(canonicalizePath(file.path))),
+		};
 
 		const systemPromptSource = this.systemPromptSource ?? this.discoverSystemPromptFile();
 		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");

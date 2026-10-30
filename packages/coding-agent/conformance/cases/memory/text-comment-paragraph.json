@@ -1,0 +1,43 @@
+{
+	"id": "memory/text-comment-paragraph",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "ZZ_A\n\n<!-- c -->\n\nZZ_B\n",
+		"CLAUDE.local.md": "<!-- s -->\n\nL1\n\n<!-- e -->\n",
+		"sub/CLAUDE.md": "Q1\r\n\r\n<!-- c -->\r\n\r\nQ2\r\n",
+		"sub/x/CLAUDE.md": "M1\n\n<!-- a -->\n\n<!-- b -->\n\nM2\n\n\n<!-- c -->\n\n\n\nM3\n"
+	},
+	"cwd": "sub/x",
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nZZ_A\\n\\nZZ_B\\n\\nContents of [^\\n]*/workspace/CLAUDE\\.local\\.md \\([^\\n]*\\):\\n\\nL1\\n\\nContents of [^\\n]*/workspace/sub/CLAUDE\\.md \\([^\\n]*\\):\\n\\nQ1\\n\\nQ2\\n\\nContents of [^\\n]*/workspace/sub/x/CLAUDE\\.md \\([^\\n]*\\):\\n\\nM1\\n\\nM2\\n\\n\\nM3\\n</system-reminder>$"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

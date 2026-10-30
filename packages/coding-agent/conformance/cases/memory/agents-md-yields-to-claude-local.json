@@ -1,0 +1,50 @@
+{
+	"id": "memory/agents-md-yields-to-claude-local",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"AGENTS.md": "AG_ROOT\n",
+		"CLAUDE.local.md": "LOCAL_Y\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/workspace/CLAUDE\\.local\\.md (\\([^\\n]*\\)):\\n\\nLOCAL_Y\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"AG_"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"AG_"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

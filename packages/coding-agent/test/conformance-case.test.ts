@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(160);
+		expect(cases.length).toBe(204);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -138,6 +138,40 @@ describe("loadCases", () => {
 			expect(() => loadOne({ ...MINIMAL_CASE, timeout_ms: value })).toThrow(/timeout_ms must be at most 2147483647/);
 		}
 		expect(loadOne({ ...MINIMAL_CASE, timeout_ms: 2 ** 31 - 1 }).timeout_ms).toBe(2 ** 31 - 1);
+	});
+});
+
+describe("memory case fields", () => {
+	test("loads a workspace-relative cwd and refuses one that leaves the workspace", () => {
+		expect(loadOne({ ...MINIMAL_CASE, cwd: "a/b" }).cwd).toBe("a/b");
+		expect(loadOne(MINIMAL_CASE).cwd).toBeUndefined();
+		for (const cwd of ["", "/tmp", "../up", "a/../../up", "$HOME"]) {
+			expect(() => loadOne({ ...MINIMAL_CASE, cwd })).toThrow(/cwd must be a relative path inside the workspace/);
+		}
+	});
+
+	test("loads bodyAt patterns and a request index", () => {
+		const loaded = loadOne({
+			...MINIMAL_CASE,
+			compare: {
+				requests: [{ index: 1, bodyAt: { "messages.0.content.0.text": { match: ["A"], notMatch: ["B"] } } }],
+			},
+		});
+		expect(loaded.compare.requests?.[0]).toMatchObject({
+			index: 1,
+			bodyAt: { "messages.0.content.0.text": { match: ["A"], notMatch: ["B"] } },
+		});
+	});
+
+	test("refuses a bodyAt entry that asserts nothing, an empty path segment, a bad pattern, or a fractional index", () => {
+		const request = (entry: Record<string, unknown>) => ({ ...MINIMAL_CASE, compare: { requests: [entry] } });
+		expect(() => loadOne(request({ bodyAt: { system: {} } }))).toThrow(/must set match or notMatch/);
+		expect(() => loadOne(request({ bodyAt: { "messages..0": { match: ["x"] } } }))).toThrow(/empty path segment/);
+		expect(() => loadOne(request({ bodyAt: { system: { match: ["("] } } }))).toThrow(/invalid pattern/);
+		expect(() => loadOne(request({ bodyAt: { system: { mtch: ["x"] } } }))).toThrow(/unknown key "mtch"/);
+		expect(() => loadOne(request({ index: 0.5, bodyAt: { system: { match: ["x"] } } }))).toThrow(
+			/must be an integer/,
+		);
 	});
 });
 

@@ -1,0 +1,63 @@
+{
+	"id": "memory/discovery-order",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/CLAUDE.md": "USER_MEMO_D\n",
+		"$CONFIG/rules/u.md": "USER_RULE_D\n",
+		"$HOME/.claude/CLAUDE.md": "HOME_DOT_CLAUDE_D\n",
+		"CLAUDE.md": "PROJECT_MEMO_D\n",
+		".claude/CLAUDE.md": "DOTCLAUDE_MEMO_D\n",
+		".claude/rules/r.md": "RULE_MEMO_D\n",
+		"CLAUDE.local.md": "LOCAL_MEMO_D\n",
+		"$CONFIG/settings.json": "{\"autoMemoryDirectory\": \"$TMP/am\"}\n",
+		"$TMP/am/MEMORY.md": "AUTO_MEMO_D\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"^<system-reminder>\\n",
+							"</system-reminder>$",
+							"Contents of [^\\n]*/config/CLAUDE\\.md \\([^\\n]*\\):\\n\\nUSER_MEMO_D[\\s\\S]*Contents of [^\\n]*/config/rules/u\\.md \\([^\\n]*\\):\\n\\nUSER_RULE_D[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nPROJECT_MEMO_D[\\s\\S]*Contents of [^\\n]*/workspace/\\.claude/CLAUDE\\.md \\([^\\n]*\\):\\n\\nDOTCLAUDE_MEMO_D[\\s\\S]*Contents of [^\\n]*/workspace/\\.claude/rules/r\\.md \\([^\\n]*\\):\\n\\nRULE_MEMO_D[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.local\\.md \\([^\\n]*\\):\\n\\nLOCAL_MEMO_D[\\s\\S]*Contents of [^\\n]*/tmp/am/MEMORY\\.md \\([^\\n]*\\):\\n\\nAUTO_MEMO_D\n</system-reminder>"
+						],
+						"notMatch": [
+							"HOME_DOT_CLAUDE_D",
+							"Reply with exactly PROBE_OK"
+						]
+					},
+					"messages.0.content.-1.text": {
+						"match": [
+							"^Reply with exactly PROBE_OK$"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"_MEMO_D|_RULE_D"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

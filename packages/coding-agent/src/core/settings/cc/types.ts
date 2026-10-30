@@ -20,6 +20,8 @@ export interface CcSettings {
 	readonly values: Readonly<Record<string, unknown>>;
 	/** Which tier supplied the winning value, per key. Feeds the report and later units. */
 	readonly sources: ReadonlyMap<string, CcSettingsSource>;
+	/** `pluginConfigs.<id>.options` per plugin id, merged over the user, flag and policy tiers. */
+	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 export type CcSettingsFailure =

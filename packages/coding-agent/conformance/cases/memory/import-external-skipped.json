@@ -1,0 +1,52 @@
+{
+	"id": "memory/import-external-skipped",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"CLAUDE.md": "TOP @sib.md @proj/in.md\n",
+		"sib.md": "SIBLING_X\n",
+		"proj/in.md": "INSIDE_X\n",
+		"proj/CLAUDE.md": "P @../outside.md @~/homefile.md @in.md\n",
+		"outside.md": "OUTSIDE_X\n",
+		"$HOME/homefile.md": "HOMEFILE_X\n",
+		"$CONFIG/CLAUDE.md": "U @$WORKSPACE/user-import.md\n",
+		"user-import.md": "USER_IMPORT_X\n"
+	},
+	"cwd": "proj",
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/config/CLAUDE\\.md \\([^\\n]*\\):\\n\\nU [\\s\\S]*Contents of [^\\n]*/workspace/user-import\\.md \\([^\\n]*\\):\\n\\nUSER_IMPORT_X[\\s\\S]*Contents of [^\\n]*/workspace/CLAUDE\\.md \\([^\\n]*\\):\\n\\nTOP [\\s\\S]*Contents of [^\\n]*/workspace/proj/in\\.md \\([^\\n]*\\):\\n\\nINSIDE_X[\\s\\S]*Contents of [^\\n]*/workspace/proj/CLAUDE\\.md \\([^\\n]*\\):\\n\\nP "
+						],
+						"notMatch": [
+							"SIBLING_X",
+							"OUTSIDE_X",
+							"HOMEFILE_X"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

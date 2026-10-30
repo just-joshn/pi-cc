@@ -223,3 +223,53 @@ describe("compare.requests body patterns", () => {
 		expect(checks(spec, { requests })).toEqual(["requests.bodyMatch", "requests.bodyNotMatch"]);
 	});
 });
+
+describe("compare.requests bodyAt", () => {
+	const request = (index: number, text: string) => ({
+		index,
+		path: "/v1/messages",
+		method: "POST",
+		headers: {},
+		body: {
+			system: [{ type: "text", text: "prompt" }],
+			messages: [{ role: "user", content: [{ type: "text", text }] }],
+		},
+	});
+	const requests = [request(0, "first MEMO"), request(1, "second")];
+
+	test("reads the last matched request by default and a chosen one by index", () => {
+		const at = { "messages.0.content.0.text": { match: ["^second$"] } };
+		expect(checks({ requests: [{ bodyAt: at }] }, { requests })).toEqual([]);
+		expect(checks({ requests: [{ index: 0, bodyAt: at }] }, { requests })).toEqual(["requests.bodyAt"]);
+		expect(
+			checks(
+				{ requests: [{ index: -2, bodyAt: { "messages.-1.content.0.text": { match: ["MEMO"] } } }] },
+				{ requests },
+			),
+		).toEqual([]);
+	});
+
+	test("tests a non-string value as JSON and fails match and notMatch on a path that leads nowhere", () => {
+		expect(
+			checks(
+				{ requests: [{ bodyAt: { system: { match: ['"text":"prompt"'], notMatch: ["MEMO"] } } }] },
+				{ requests },
+			),
+		).toEqual([]);
+		expect(checks({ requests: [{ bodyAt: { "messages.3.content": { match: ["x"] } } }] }, { requests })).toEqual([
+			"requests.bodyAt",
+		]);
+		expect(checks({ requests: [{ bodyAt: { "messages.3.content": { notMatch: ["x"] } } }] }, { requests })).toEqual([
+			"requests.bodyAt",
+		]);
+		expect(checks({ requests: [{ index: 5, bodyAt: { system: { notMatch: ["MEMO"] } } }] }, { requests })).toEqual([
+			"requests.bodyAt",
+		]);
+	});
+
+	test("fails when no request matched", () => {
+		expect(checks({ requests: [{ bodyAt: { system: { match: ["x"] } } }] }, { requests: [] })).toEqual([
+			"requests.bodyAt",
+		]);
+	});
+});

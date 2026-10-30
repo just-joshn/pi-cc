@@ -1,0 +1,60 @@
+{
+	"id": "memory/memory-mode-managed-only",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/settings.json": "{\"autoMemoryDirectory\": \"$TMP/am\", \"pluginConfigs\": {\"cc-plugin-agents-md@builtin\": {\"options\": {\"instructionFiles\": \"managed-only\"}}}}\n",
+		"$TMP/am/MEMORY.md": "AM_KEPT\n",
+		"$CONFIG/CLAUDE.md": "USER_M\n",
+		"CLAUDE.md": "PROJ_M\n",
+		"CLAUDE.local.md": "LOCAL_M\n",
+		"AGENTS.md": "AG_M\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"^<system-reminder>\\n[^\\n]*\\n\\nContents of [^\\n]*/tmp/am/MEMORY\\.md \\([^\\n]*\\):\\n\\nAM_KEPT\\n</system-reminder>$"
+						]
+					},
+					"messages": {
+						"notMatch": [
+							"USER_M",
+							"PROJ_M",
+							"LOCAL_M",
+							"AG_M"
+						]
+					},
+					"system": {
+						"notMatch": [
+							"USER_M",
+							"PROJ_M",
+							"LOCAL_M",
+							"AG_M"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

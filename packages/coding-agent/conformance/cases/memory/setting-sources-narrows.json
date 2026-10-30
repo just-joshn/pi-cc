@@ -1,0 +1,49 @@
+{
+	"id": "memory/setting-sources-narrows",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--setting-sources",
+		"user"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"$CONFIG/CLAUDE.md": "USER_S\n",
+		"CLAUDE.md": "PROJECT_S\n",
+		".claude/rules/r.md": "RULE_S\n",
+		"CLAUDE.local.md": "LOCAL_S\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"Contents of [^\\n]*/config/CLAUDE\\.md \\([^\\n]*\\):\\n\\nUSER_S\\n</system-reminder>"
+						],
+						"notMatch": [
+							"PROJECT_S",
+							"RULE_S",
+							"LOCAL_S"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}
