@@ -16,12 +16,29 @@ None of these gates the OpenTelemetry export below. Claude Code 2.1.312 behaves 
 
 ## Upstream network calls
 
-pi-cc makes no call to hosts its upstream project owns unless asked. These are off by default and come on only with `PI_CC_ALLOW_UPSTREAM_NETWORK=1`, and never under the gates above.
+pi-cc contacts no host its upstream project owns unless you ask. Every call is listed here, and nothing runs at startup against any of these hosts.
 
-- The pi.dev model catalog refresh.
-- The GitHub release download of `fd` and `rg`. Install them with your package manager.
+Off by default. These come on only with `PI_CC_ALLOW_UPSTREAM_NETWORK=1`, and never while a reporting gate above is set.
 
-The install-count ping to pi.dev needs `enableInstallTelemetry` (or `PI_TELEMETRY=1`) and respects the gates. `/share`, `/bug` uploads, and the model client run only when you invoke them.
+| Call | Host |
+|---|---|
+| Model catalog refresh | `pi.dev` |
+| `fd` and `rg` download | `github.com` |
+
+Without the switch, `grep` and `find` fail with a message that says downloads are off when `rg` or `fd` is not installed. Install them with your package manager or set the switch.
+
+Off unless configured. The install-count ping to `pi.dev` needs `enableInstallTelemetry` (or `PI_TELEMETRY=1`) and respects the gates. The startup version check and `update` read only the feed in `PI_CC_UPDATE_FEED_URL`, so with no feed they send nothing. A managed install updates from `PI_INSTALLER_API_BASE`, with no default.
+
+Only when you invoke the command.
+
+| Command | Host |
+|---|---|
+| `/share` | the Radius gateway (`radius.pi.dev`), `gh` for gists |
+| `/bug` upload | the Radius gateway |
+| `/llama` model search | `huggingface.co` |
+| Model requests | the provider you configured |
+
+MCP OAuth hands your authorization server a client metadata URL on `pi.dev`. pi-cc makes no request to it. The changelog and announcement are links shown as text.
 
 ## OpenTelemetry export to your own collector
 

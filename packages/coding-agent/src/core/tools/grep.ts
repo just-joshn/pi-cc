@@ -4,7 +4,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";
-import { ensureTool } from "../../utils/tools-manager.ts";
+import { ensureTool, toolUnavailableMessage } from "../../utils/tools-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { grepRenderers } from "./renderers/grep.ts";
@@ -118,7 +118,7 @@ export function createGrepToolDefinition(
 					try {
 						const rgPath = await ensureTool("rg");
 						if (!rgPath) {
-							settle(() => reject(new Error("ripgrep (rg) is not available and could not be downloaded")));
+							settle(() => reject(new Error(toolUnavailableMessage("rg"))));
 							return;
 						}
 

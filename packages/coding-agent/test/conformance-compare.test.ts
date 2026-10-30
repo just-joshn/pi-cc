@@ -185,4 +185,17 @@ describe("compare.requests", () => {
 			),
 		).toEqual(["requests.headers"]);
 	});
+
+	test("bodyExcludes passes on a body without the text and fails on one with it", () => {
+		const spec: CompareSpec = { requests: [{ pathStartsWith: "/v1/messages", bodyExcludes: ["secret"] }] };
+		expect(checks(spec, { requests: [posted] })).toEqual([]);
+		expect(checks(spec, { requests: [{ ...posted, body: { model: "secret" } }] })).toEqual(["requests.bodyExcludes"]);
+	});
+
+	test("bodyExcludes fails when no request matched, like bodyIncludes", () => {
+		const excludes: CompareSpec = { requests: [{ pathStartsWith: "/v1/logs", bodyExcludes: ["secret"] }] };
+		const includes: CompareSpec = { requests: [{ pathStartsWith: "/v1/logs", bodyIncludes: ["secret"] }] };
+		expect(checks(excludes, { requests: [posted] })).toEqual(["requests.bodyExcludes"]);
+		expect(checks(includes, { requests: [posted] })).toEqual(["requests.bodyIncludes"]);
+	});
 });

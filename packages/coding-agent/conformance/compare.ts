@@ -292,7 +292,13 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 			}
 		}
 		for (const text of request.bodyExcludes ?? []) {
-			if (bodies.some((body) => body.includes(text))) {
+			if (matched.length === 0) {
+				diffs.push({
+					check: "requests.bodyExcludes",
+					expected: `no body contains ${text}`,
+					actual: "no matching request",
+				});
+			} else if (bodies.some((body) => body.includes(text))) {
 				diffs.push({ check: "requests.bodyExcludes", expected: `no body contains ${text}`, actual: "found" });
 			}
 		}

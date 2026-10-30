@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { autoUpdateState } from "../src/cli/update-gates.ts";
 import { SETTINGS_DEFAULTS } from "../src/core/settings-defaults.ts";
 import {
 	bugCommandDisabledReason,
+	nonessentialTrafficDisabled,
 	outboundReportingDisabled,
 	upstreamNetworkAllowed,
 } from "../src/core/telemetry/gates.ts";
@@ -26,6 +28,15 @@ describe("outboundReportingDisabled", () => {
 		expect(outboundReportingDisabled({ DO_NOT_TRACK: "0" })).toBe(false);
 		expect(outboundReportingDisabled({ DISABLE_TELEMETRY: "" })).toBe(false);
 		expect(outboundReportingDisabled({ DISABLE_TELEMETRY: "0" })).toBe(true);
+	});
+
+	it("counts the nonessential-traffic gate as set for any non-empty raw value, as the update gate does", () => {
+		for (const value of ["1", "0", "false", " "]) {
+			const env = { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: value };
+			expect(nonessentialTrafficDisabled(env)).toBe(true);
+			expect(autoUpdateState(env).kind).toBe("disabled");
+		}
+		expect(nonessentialTrafficDisabled({ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "" })).toBe(false);
 	});
 });
 
