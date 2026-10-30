@@ -53,6 +53,9 @@ export const CC_AUTO_BETAS: readonly string[] = [
 /** Effort used for a model with effort control that the table does not list. */
 const FALLBACK_EFFORT: CcEffort = "high";
 
+/** Consecutive failed requests after which a model hands over to the next one of the fallback chain. */
+export const CC_FAILURES_PER_MODEL = 3;
+
 export interface CcPolicy {
 	entrypoint: CcEntrypoint;
 	/** `--effort`, already validated by the flag table. */

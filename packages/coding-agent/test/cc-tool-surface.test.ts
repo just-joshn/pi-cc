@@ -132,7 +132,8 @@ describe("Claude Code tool surface", () => {
 			{
 				role: "system",
 				content: "",
-				context: "# Environment\n\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)",
+				context:
+					"# Environment\n\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)",
 				timestamp: 1,
 			},
 		]);

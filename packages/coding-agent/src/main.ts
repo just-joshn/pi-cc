@@ -455,20 +455,20 @@ function validateForkFlags(parsed: Args): void {
 
 /** Read `--system-prompt-file` and `--append-system-prompt-file` into the prompt fields, verbatim. */
 function applyPromptFiles(parsed: Args): void {
-	const read = (path: string, flag: string): string => {
+	const read = (path: string, label: string): string => {
 		try {
 			return readFileSync(path, "utf8");
 		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			console.error(chalk.red(`Error: ${flag} could not read ${path}: ${reason}`));
+			const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+			console.error(chalk.red(`Error: ${label} ${missing ? "not found" : "could not be read"}: ${path}`));
 			process.exit(1);
 		}
 	};
 	if (parsed.systemPromptFile !== undefined) {
-		parsed.systemPrompt = read(parsed.systemPromptFile, "--system-prompt-file");
+		parsed.systemPrompt = read(parsed.systemPromptFile, "System prompt file");
 	}
 	for (const path of parsed.appendSystemPromptFile ?? []) {
-		parsed.appendSystemPrompt = [...(parsed.appendSystemPrompt ?? []), read(path, "--append-system-prompt-file")];
+		parsed.appendSystemPrompt = [...(parsed.appendSystemPrompt ?? []), read(path, "Append system prompt file")];
 	}
 }
 

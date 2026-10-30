@@ -100,7 +100,7 @@ describe("AgentSession Claude Code prompt record", () => {
 		const modelRegistry = await createModelRegistry(authStorage, tempDir);
 		await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
 		settingsManager.applyOverrides({
-			retry: { enabled: true, maxRetries: 3, baseDelayMs: 1, maxAgentDelayMs: 1000 },
+			retry: { enabled: true, maxRetries: 3, baseDelayMs: 1, maxAgentDelayMs: 5 },
 		});
 		const loader = {
 			...createTestResourceLoader(),
@@ -170,11 +170,11 @@ describe("AgentSession Claude Code prompt record", () => {
 		expect(getCurrentSystemMessage(session.messages)?.sections?.dynamic).toContain("# This session");
 	});
 
-	it("walks the fallback chain on each failed attempt and returns to the primary on the next turn", async () => {
+	it("hands over to the next fallback model after three failed requests and returns to the primary on the next turn", async () => {
 		const { requests } = await createSession({
 			append: { current: [] },
 			flags: { fallbackModel: "claude-probe-fb-one,claude-probe-fb-two" },
-			failures: 2,
+			failures: 6,
 		});
 
 		await session.prompt("one");
@@ -182,9 +182,33 @@ describe("AgentSession Claude Code prompt record", () => {
 
 		expect(requests.map((request) => request.model.id)).toEqual([
 			"claude-opus-5-5",
+			"claude-opus-5-5",
+			"claude-opus-5-5",
+			"claude-probe-fb-one",
+			"claude-probe-fb-one",
 			"claude-probe-fb-one",
 			"claude-probe-fb-two",
 			"claude-opus-5-5",
+		]);
+	});
+
+	it("keeps retrying the last model of the chain", async () => {
+		const { requests } = await createSession({
+			append: { current: [] },
+			flags: { fallbackModel: "claude-probe-fb-one" },
+			failures: 6,
+		});
+
+		await session.prompt("one");
+
+		expect(requests.map((request) => request.model.id)).toEqual([
+			"claude-opus-5-5",
+			"claude-opus-5-5",
+			"claude-opus-5-5",
+			"claude-probe-fb-one",
+			"claude-probe-fb-one",
+			"claude-probe-fb-one",
+			"claude-probe-fb-one",
 		]);
 	});
 

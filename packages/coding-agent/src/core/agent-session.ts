@@ -64,7 +64,7 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { generateBugReportSummary } from "./bug-report.ts";
 import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
-import { type CcPolicy, compactionWindow } from "./cc-policy.ts";
+import { CC_FAILURES_PER_MODEL, type CcPolicy, compactionWindow } from "./cc-policy.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -408,6 +408,7 @@ export class AgentSession {
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	private readonly _ccPolicy: CcPolicy | undefined;
 	private _ccFallbackStep = 0;
+	private _ccStepFailures = 0;
 	private _thinkingLevelChosen: boolean;
 
 	// Event subscription state
@@ -818,9 +819,9 @@ export class AgentSession {
 	}
 
 	/**
-	 * The model of a request under `--fallback-model`. Every retry after a failed response moves one
-	 * step down the chain, a response that completes keeps the step for the rest of the turn, and a
-	 * new user turn starts at the primary again.
+	 * The model of a request under `--fallback-model`. A model that fails three requests in a row hands
+	 * over to the next one in the chain, the last one keeps retrying, and a new user turn starts at the
+	 * primary again.
 	 */
 	private _applyCcFallback(
 		primary: Model<any>,
@@ -830,10 +831,17 @@ export class AgentSession {
 		const chain = this._ccPolicy?.fallbackModels ?? [];
 		if (chain.length === 0) return primary;
 		if (failed) {
-			this._ccFallbackStep = Math.min(this._ccFallbackStep + 1, chain.length);
+			this._ccStepFailures++;
+			if (this._ccStepFailures >= CC_FAILURES_PER_MODEL && this._ccFallbackStep < chain.length) {
+				this._ccFallbackStep++;
+				this._ccStepFailures = 0;
+			}
 		} else {
 			const lastResponse = messages.findLastIndex((message) => message.role === "assistant");
-			if (messages.slice(lastResponse + 1).some((message) => message.role === "user")) this._ccFallbackStep = 0;
+			if (messages.slice(lastResponse + 1).some((message) => message.role === "user")) {
+				this._ccFallbackStep = 0;
+				this._ccStepFailures = 0;
+			}
 		}
 		if (this._ccFallbackStep === 0) return primary;
 		return resolveAnthropicCcModel(this._modelRuntime, chain[this._ccFallbackStep - 1]) ?? primary;
@@ -4057,7 +4065,13 @@ export class AgentSession {
 
 		this._retryAttempt++;
 
-		if (this._retryAttempt > settings.maxRetries) {
+		// A fallback chain gives every model its failed requests and the last one a retry budget of its own.
+		const chainLength = this._ccPolicy?.fallbackModels.length ?? 0;
+		const maxRetries =
+			chainLength === 0
+				? settings.maxRetries
+				: Math.max(settings.maxRetries, CC_FAILURES_PER_MODEL * (chainLength + 1));
+		if (this._retryAttempt > maxRetries) {
 			// Preserve the completed attempt count so post-run handling can emit the final failure.
 			this._retryAttempt--;
 			return false;
@@ -4068,7 +4082,7 @@ export class AgentSession {
 		this._emit({
 			type: "auto_retry_start",
 			attempt: this._retryAttempt,
-			maxAttempts: settings.maxRetries,
+			maxAttempts: maxRetries,
 			delayMs,
 			errorMessage: message.errorMessage || "Unknown error",
 		});
