@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { APP_NAME } from "../src/config.ts";
 import { CC_KNOWN_PROVIDERS, EMPTY_CC_POLICY, parseCcPolicy, policyRefusal } from "../src/core/settings/cc/policy.ts";
 
 describe("allowedProviders", () => {
@@ -87,6 +88,34 @@ describe("version gate", () => {
 		const refusal = policyRefusal(policy, "1.4.0") ?? "";
 		expect(refusal).toContain("1.4.0 is newer than the maximum version allowed by your organization (1.3.0).");
 		expect(refusal).toContain("Your organization requires version 1.3.0 or older.");
+		expect(refusal.endsWith(`\`${APP_NAME} install <version>\` may also work.`)).toBe(true);
+	});
+
+	test("a prerelease sorts below its release on the minimum, as semver without coercion does", () => {
+		const policy = { ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.4.0" };
+		expect(policyRefusal(policy, "1.4.0-rc.1")).toContain("1.4.0-rc.1 is older than the minimum version");
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.4.0-rc.1" }, "1.4.0-rc.1")).toBeUndefined();
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.4.0-rc.1" }, "1.4.0")).toBeUndefined();
+	});
+
+	test("a prerelease is under the maximum of its release and over the maximum of an earlier prerelease", () => {
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.4.0" }, "1.4.0-rc.1")).toBeUndefined();
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.4.0-rc.1" }, "1.4.0-rc.2")).toContain(
+			"is newer than the maximum version",
+		);
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.4.0-rc.1" }, "1.4.0")).toContain(
+			"is newer than the maximum version",
+		);
+	});
+
+	test("build metadata does not order versions", () => {
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.4.0+b" }, "1.4.0+a")).toBeUndefined();
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMaximumVersion: "1.4.0+a" }, "1.4.0+b")).toBeUndefined();
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "1.4.1" }, "1.4.0+b")).toContain("older");
+	});
+
+	test("a running version that is not semver is not gated", () => {
+		expect(policyRefusal({ ...EMPTY_CC_POLICY, requiredMinimumVersion: "9.0.0" }, "dev")).toBeUndefined();
 	});
 
 	test("allows a build at or under the maximum", () => {

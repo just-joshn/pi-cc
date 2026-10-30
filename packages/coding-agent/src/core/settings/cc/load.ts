@@ -98,7 +98,7 @@ export function ccPolicyGate(
 ): { readonly policy: CcPolicy; readonly refusal: string | undefined } {
 	const parsed = parseCcPolicy(values);
 	if (parsed.kind === "refusal") {
-		return { policy: EMPTY_CC_POLICY, refusal: `${path}: ${parsed.message}` };
+		return { policy: EMPTY_CC_POLICY, refusal: `Error: ${path}: ${parsed.message}` };
 	}
 	const gated = policyRefusal(parsed.policy, version);
 	return { policy: parsed.policy, refusal: gated };

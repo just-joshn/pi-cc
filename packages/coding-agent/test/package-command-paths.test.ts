@@ -685,6 +685,20 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 			expect(process.exitCode).toBeUndefined();
 		});
 
+		it("DISABLE_UPDATES=0 does not disable update", async () => {
+			vi.stubEnv("DISABLE_UPDATES", "0");
+			vi.stubEnv("PI_CC_UPDATE_FEED_URL", undefined);
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+			vi.spyOn(console, "error").mockImplementation(() => {});
+
+			await runPackageCommandDirectly(["update"]);
+
+			expect(logSpy.mock.calls.map(([message]) => String(message)).join("\n")).not.toContain(
+				"disabled by your administrator",
+			);
+			expect(process.exitCode).toBe(1);
+		});
+
 		it("update --models still runs with no feed", async () => {
 			vi.stubEnv("PI_CC_UPDATE_FEED_URL", undefined);
 			vi.spyOn(console, "log").mockImplementation(() => {});

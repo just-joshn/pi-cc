@@ -3,7 +3,7 @@
  * band (`requiredMinimumVersion`, `requiredMaximumVersion`) this build falls outside. The rest are exposed for the permission, hook and MCP units.
  */
 
-import { coerce, gt, lt, valid } from "semver";
+import { gt, lt, valid } from "semver";
 import { APP_NAME } from "../../../config.ts";
 
 export interface CcPolicy {
@@ -59,7 +59,7 @@ export function parseCcPolicy(values: Readonly<Record<string, unknown>>): CcPoli
  * managed file cannot lock the fleet out. The refusal text is Claude Code's with this product's name.
  */
 export function policyRefusal(policy: CcPolicy, version: string): string | undefined {
-	const running = coerce(version);
+	const running = valid(version);
 	if (running === null) {
 		return undefined;
 	}
@@ -76,7 +76,7 @@ export function policyRefusal(policy: CcPolicy, version: string): string | undef
 		return (
 			`${APP_NAME} ${version} is newer than the maximum version allowed by your organization (${maximum}).\n` +
 			`Your organization requires version ${maximum} or older. ` +
-			"Install an approved version using your organization's approved method."
+			`Install an approved version using your organization's approved method. \`${APP_NAME} install <version>\` may also work.`
 		);
 	}
 	return undefined;

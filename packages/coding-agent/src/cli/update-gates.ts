@@ -28,16 +28,21 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 const TRUTHY = new Set(["1", "true", "yes", "on"]);
 
+/** Claude Code's boolean env reading: only these spellings are true, so `0` and `false` leave a gate open. */
+function isTruthy(value: string | undefined): boolean {
+	return TRUTHY.has((value ?? "").trim().toLowerCase());
+}
+
 /**
  * Whether the startup check may run. The first variable set wins, in Claude Code's order. Manual
  * `update` ignores these except `DISABLE_UPDATES`, as Claude Code's does.
  */
 export function autoUpdateState(env: Env): AutoUpdateState {
-	if (env.DISABLE_UPDATES) return { kind: "disabled", envVar: "DISABLE_UPDATES" };
-	if (TRUTHY.has((env.DISABLE_AUTOUPDATER ?? "").toLowerCase())) {
+	if (isTruthy(env.DISABLE_UPDATES)) return { kind: "disabled", envVar: "DISABLE_UPDATES" };
+	if (isTruthy(env.DISABLE_AUTOUPDATER)) {
 		return { kind: "disabled", envVar: "DISABLE_AUTOUPDATER" };
 	}
-	if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
+	if (isTruthy(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)) {
 		return { kind: "disabled", envVar: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" };
 	}
 	return { kind: "enabled" };
@@ -51,7 +56,7 @@ export function startupCheckFeed(env: Env): string | undefined {
 
 /** Where `update` gets a release, which an administrator's `DISABLE_UPDATES` overrides. */
 export function selfUpdateSource(env: Env): SelfUpdateSource {
-	if (env.DISABLE_UPDATES) return { kind: "admin-disabled" };
+	if (isTruthy(env.DISABLE_UPDATES)) return { kind: "admin-disabled" };
 	const url = configuredFeed(env);
 	return url === undefined ? { kind: "no-feed" } : { kind: "feed", url };
 }
