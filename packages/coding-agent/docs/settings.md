@@ -170,3 +170,23 @@ The built-in extensions are named `builtin:mcp`, `builtin:llama.cpp`, `builtin:c
 | `enableInstallTelemetry` | boolean | `false` | Enable anonymous install/update reporting and selected provider attribution headers. Off by default in pi-cc, and forced off by `DISABLE_TELEMETRY`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, or `DO_NOT_TRACK`. Does not control update checks. |
 | `enableAnalytics` | boolean | `false` | Opt in to analytics data sharing. Currently used only by the experimental first-run setup. |
 | `warnings.anthropicExtraUsage` | boolean | `true` | Warn when Anthropic subscription authentication may use paid extra usage. |
+
+## Claude Code terminal settings
+
+When a run reads Claude Code settings (`~/.claude/settings.json`, `CLAUDE_CONFIG_DIR`, the project tiers once trusted, `--settings`, managed policy), interactive mode applies these keys. With none of them set, the interface is unchanged.
+
+| Setting | Effect |
+|---------|--------|
+| `editorMode` | `"vim"` turns on vim editing in the prompt. It starts in insert mode and shows `-- INSERT --`. `"normal"` or an invalid value leaves the normal editor. |
+| `vimInsertModeRemaps` | Insert-mode key sequences that return to normal mode, such as `{"jj": "<Esc>"}`. Each key is exactly two printable characters typed within one second, and `<Esc>` is the only target. Read from managed policy, `--settings` and the user file only. |
+| `tui` | `"fullscreen"` uses the alternate-screen renderer and `"default"` the main-screen one. `--tui-mode` wins over it, and it wins over pi's saved `tuiMode`. It applies when interactive mode starts. |
+| `prefersReducedMotion` | The working, retry, compaction and branch-summary indicators show one still frame instead of animating. |
+| `maxProseWidth` | Integer of at least 40. Paragraphs, headings, lists and blockquotes in assistant messages wrap at this width. Tables and code blocks keep the full width. |
+| `timeFormat`, `timeZone` | Clock text in the session tree timestamps and the crash notice. `timeFormat` is `"auto"` (pi's own rendering), `"12-hour"`, `"24-hour"`, `"24-hour-utc"` (`18:05Z`) or a strftime pattern (any value containing `%`). A pattern replaces the whole timestamp. An unknown `timeZone` uses the system zone. |
+| `axScreenReader`, `--ax-screen-reader`, `CLAUDE_AX_SCREEN_READER` | Screen reader mode: no animated indicators, no rule lines around the prompt or between sections. The flag wins over the variable, which wins over the setting. The setting is read from managed policy, `--settings` and the user file only. |
+
+A value of the wrong type for `tui`, `timeFormat`, `timeZone`, `prefersReducedMotion` or `axScreenReader` makes the file fail to load and names the key on stderr. A wrong `editorMode`, `maxProseWidth` or `vimInsertModeRemaps` is dropped without a message.
+
+### Vim mode
+
+Normal-mode motions are `h l space backspace j k w b e W B E 0 ^ $ % G gg gj gk` and `f F t T` with `;` and `,`. Operators `d c y` take motions, text objects (`i` or `a` plus `w W " ' \` ( ) b [ ] { } B < >`), find motions, or their doubled form, with counts up to 10000. Other commands are `x s S D C Y p P J r ~ u . >> << i I a A o O`. Visual mode (`v`, `V`) is not implemented.
