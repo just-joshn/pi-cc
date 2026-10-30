@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { APP_NAME } from "../src/config.ts";
 import { CC_KNOWN_PROVIDERS, EMPTY_CC_POLICY, parseCcPolicy, policyRefusal } from "../src/core/settings/cc/policy.ts";
 
 describe("allowedProviders", () => {
@@ -88,7 +87,7 @@ describe("version gate", () => {
 		const refusal = policyRefusal(policy, "1.4.0") ?? "";
 		expect(refusal).toContain("1.4.0 is newer than the maximum version allowed by your organization (1.3.0).");
 		expect(refusal).toContain("Your organization requires version 1.3.0 or older.");
-		expect(refusal.endsWith(`\`${APP_NAME} install <version>\` may also work.`)).toBe(true);
+		expect(refusal.endsWith("using your organization's approved method.")).toBe(true);
 	});
 
 	test("a prerelease sorts below its release on the minimum, as semver without coercion does", () => {

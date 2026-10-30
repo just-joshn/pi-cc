@@ -34,7 +34,8 @@ function isTruthy(value: string | undefined): boolean {
 }
 
 /**
- * Whether the startup check may run. The first variable set wins, in Claude Code's order. Manual
+ * Whether the startup check may run. The first variable set wins, in Claude Code's order. The traffic
+ * variable counts as set for any non-empty raw value, `0` and whitespace included. Manual
  * `update` ignores these except `DISABLE_UPDATES`, as Claude Code's does.
  */
 export function autoUpdateState(env: Env): AutoUpdateState {
@@ -42,7 +43,7 @@ export function autoUpdateState(env: Env): AutoUpdateState {
 	if (isTruthy(env.DISABLE_AUTOUPDATER)) {
 		return { kind: "disabled", envVar: "DISABLE_AUTOUPDATER" };
 	}
-	if (isTruthy(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)) {
+	if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
 		return { kind: "disabled", envVar: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" };
 	}
 	return { kind: "enabled" };

@@ -76,7 +76,7 @@ export function policyRefusal(policy: CcPolicy, version: string): string | undef
 		return (
 			`${APP_NAME} ${version} is newer than the maximum version allowed by your organization (${maximum}).\n` +
 			`Your organization requires version ${maximum} or older. ` +
-			`Install an approved version using your organization's approved method. \`${APP_NAME} install <version>\` may also work.`
+			`Install an approved version using your organization's approved method.`
 		);
 	}
 	return undefined;

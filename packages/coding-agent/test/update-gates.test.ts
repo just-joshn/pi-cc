@@ -31,7 +31,7 @@ describe("autoUpdateState", () => {
 	});
 
 	test("every gate reads Claude Code's truthy set, so 0 and false leave updates on", () => {
-		for (const name of ["DISABLE_UPDATES", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]) {
+		for (const name of ["DISABLE_UPDATES", "DISABLE_AUTOUPDATER"]) {
 			for (const value of ["0", "false", "no", "off", ""]) {
 				expect(autoUpdateState({ [name]: value })).toEqual({ kind: "enabled" });
 			}
@@ -45,6 +45,16 @@ describe("autoUpdateState", () => {
 				url: FEED,
 			});
 		}
+	});
+
+	test("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC disables on any non-empty raw value, as Claude Code does", () => {
+		for (const value of ["1", "0", "false", "no", "off", " ", "anything"]) {
+			expect(autoUpdateState({ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: value })).toEqual({
+				kind: "disabled",
+				envVar: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+			});
+		}
+		expect(autoUpdateState({ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "" })).toEqual({ kind: "enabled" });
 	});
 
 	test("names the first variable set, in Claude Code's order", () => {
