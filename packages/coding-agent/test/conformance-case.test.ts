@@ -175,6 +175,24 @@ describe("memory case fields", () => {
 	});
 });
 
+describe("bodyLength loading", () => {
+	const request = (entry: Record<string, unknown>) => ({ ...MINIMAL_CASE, compare: { requests: [entry] } });
+
+	test("loads a length window", () => {
+		const loaded = loadOne(request({ bodyLength: { "system.2.text": { around: 5914, tolerance: 0.1 } } }));
+
+		expect(loaded.compare.requests?.[0].bodyLength).toEqual({ "system.2.text": { around: 5914, tolerance: 0.1 } });
+	});
+
+	test("refuses a missing target, a bad tolerance and an empty path segment", () => {
+		expect(() => loadOne(request({ bodyLength: { system: {} } }))).toThrow(/around must be a positive number/);
+		expect(() => loadOne(request({ bodyLength: { system: { around: 5, tolerance: 2 } } }))).toThrow(
+			/tolerance must be between 0 and 1/,
+		);
+		expect(() => loadOne(request({ bodyLength: { "system..0": { around: 5 } } }))).toThrow(/empty path segment/);
+	});
+});
+
 describe("turn shapes", () => {
 	test("rejects a turn that sets two kinds", () => {
 		expect(() =>
@@ -433,7 +451,6 @@ const SUBTRACTED: string[][] = [
 	["auto-mode", "critique"],
 	["logs"],
 	["doctor"],
-	["high"],
 	["--mcp-config", "probe"],
 	["--agents=probe"],
 	["--dangerously-skip-permissions"],

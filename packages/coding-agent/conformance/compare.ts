@@ -304,6 +304,23 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				);
 			}
 		}
+		if (request.bodyLength !== undefined) {
+			const index = request.index ?? -1;
+			const record = matched.at(index);
+			for (const [path, spec] of Object.entries(request.bodyLength)) {
+				const text = record === undefined ? undefined : bodyText(record.body, path);
+				const tolerance = spec.tolerance ?? DEFAULT_LENGTH_TOLERANCE;
+				const low = Math.floor(spec.around * (1 - tolerance));
+				const high = Math.ceil(spec.around * (1 + tolerance));
+				if (text === undefined || text.length < low || text.length > high) {
+					diffs.push({
+						check: "requests.bodyLength",
+						expected: `request ${index} ${path} is ${low} to ${high} characters`,
+						actual: text === undefined ? "absent" : `${text.length} characters`,
+					});
+				}
+			}
+		}
 		const bodies = matched.map((record) => serializeBody(record.body));
 		for (const text of request.bodyIncludes ?? []) {
 			if (!bodies.some((body) => body.includes(text))) {
@@ -353,6 +370,8 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 		}
 	}
 }
+
+const DEFAULT_LENGTH_TOLERANCE = 0.15;
 
 function serializeBody(body: unknown): string {
 	return typeof body === "string" ? body : JSON.stringify(body);

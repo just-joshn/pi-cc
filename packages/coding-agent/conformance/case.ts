@@ -54,8 +54,19 @@ export interface RequestSpec {
 	 * it was sent. A string value is tested as is, anything else as its JSON.
 	 */
 	bodyAt?: Record<string, BodyTextSpec>;
+	/**
+	 * Lengths keyed by the same dotted body paths, checked on the same request as `bodyAt`. The text at
+	 * the path must be within `tolerance` (default 15 percent) of `around`, so a case pins the size of a
+	 * prompt block, which two clean-room texts can only match in length.
+	 */
+	bodyLength?: Record<string, BodyLengthSpec>;
 	/** Which matched request `bodyAt` reads. Negative counts from the end; the default is the last. */
 	index?: number;
+}
+
+export interface BodyLengthSpec {
+	around: number;
+	tolerance?: number;
 }
 
 export interface BodyTextSpec {
@@ -169,9 +180,11 @@ const REQUEST_KEYS = [
 	"bodyMatch",
 	"bodyNotMatch",
 	"bodyAt",
+	"bodyLength",
 	"index",
 ];
 const BODY_TEXT_KEYS = ["match", "notMatch"];
+const BODY_LENGTH_KEYS = ["around", "tolerance"];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -445,6 +458,7 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 			bodyMatch: asOptionalStringArray(object.bodyMatch, source, `${field}.bodyMatch`),
 			bodyNotMatch: asOptionalStringArray(object.bodyNotMatch, source, `${field}.bodyNotMatch`),
 			bodyAt: asBodyAt(object.bodyAt, source, `${field}.bodyAt`),
+			bodyLength: asBodyLength(object.bodyLength, source, `${field}.bodyLength`),
 			index: asOptionalInteger(object.index, source, `${field}.index`),
 		};
 	});
@@ -470,6 +484,26 @@ function asBodyAt(value: unknown, source: string, field: string): Record<string,
 			}
 		}
 		specs[path] = { match, notMatch };
+	}
+	return specs;
+}
+
+function asBodyLength(value: unknown, source: string, field: string): Record<string, BodyLengthSpec> | undefined {
+	if (value === undefined) return undefined;
+	const object = asObject(value, source, field);
+	const specs: Record<string, BodyLengthSpec> = {};
+	for (const [path, entry] of Object.entries(object)) {
+		if (path.length === 0 || path.split(".").some((segment) => segment.length === 0)) {
+			fail(source, `${field} has an empty path segment in "${path}"`);
+		}
+		const spec = asCheckedObject(entry, source, `${field}.${path}`, BODY_LENGTH_KEYS);
+		const around = asOptionalNumber(spec.around, source, `${field}.${path}.around`);
+		const tolerance = asOptionalNumber(spec.tolerance, source, `${field}.${path}.tolerance`);
+		if (around === undefined || around <= 0) fail(source, `${field}.${path}.around must be a positive number`);
+		if (tolerance !== undefined && (tolerance <= 0 || tolerance >= 1)) {
+			fail(source, `${field}.${path}.tolerance must be between 0 and 1`);
+		}
+		specs[path] = { around, tolerance };
 	}
 	return specs;
 }

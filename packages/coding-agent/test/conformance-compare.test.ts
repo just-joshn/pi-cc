@@ -238,6 +238,34 @@ describe("compare.requests body patterns", () => {
 	});
 });
 
+describe("compare.requests bodyLength", () => {
+	const requests = [
+		{
+			index: 0,
+			path: "/v1/messages",
+			method: "POST",
+			headers: {},
+			body: { system: [{ type: "text", text: "x".repeat(100) }] },
+		},
+	];
+
+	test("passes a length within the default 15 percent window and fails one outside it", () => {
+		const within = { requests: [{ bodyLength: { "system.0.text": { around: 110 } } }] };
+		const outside = { requests: [{ bodyLength: { "system.0.text": { around: 130 } } }] };
+
+		expect(checks(within, { requests })).toEqual([]);
+		expect(checks(outside, { requests })).toEqual(["requests.bodyLength"]);
+	});
+
+	test("takes a tolerance and fails a path that leads nowhere", () => {
+		const tight = { requests: [{ bodyLength: { "system.0.text": { around: 110, tolerance: 0.05 } } }] };
+		const missing = { requests: [{ bodyLength: { "system.2.text": { around: 100 } } }] };
+
+		expect(checks(tight, { requests })).toEqual(["requests.bodyLength"]);
+		expect(checks(missing, { requests })).toEqual(["requests.bodyLength"]);
+	});
+});
+
 describe("compare.requests bodyAt", () => {
 	const request = (index: number, text: string) => ({
 		index,
