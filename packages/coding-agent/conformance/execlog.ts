@@ -17,7 +17,9 @@ const TRUE = "/usr/bin/true";
 const PREDICATE = 'sender == "Sandbox" AND eventMessage CONTAINS "allow process-exec"';
 const SENTINEL_PROFILE =
 	"(version 1)(deny default)(allow process-exec* (with report))(allow process-fork)(allow sysctl-read)(allow file-read*)";
-const LINE = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d{3})\b.*Sandbox: .*?\((\d+)\) allow process-exec\*/;
+const EXEC = /^Sandbox: .*?\((\d+)\) allow process-exec\*/;
+/** `YYYY-MM-DD HH:MM:SS.ffffff-0700`, whose offset keeps the reading independent of the harness's own time zone. */
+const STAMP = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d\.\d{3})\d*([+-]\d\d)(\d\d)$/;
 const START_DEADLINE_MS = 15_000;
 const CATCH_UP_DEADLINE_MS = 5_000;
 const POLL_MS = 10;
@@ -33,7 +35,7 @@ export interface ExecLog {
 /** Starts the stream and returns once it is delivering, or null when it never does. */
 export async function startExecLog(): Promise<ExecLog | null> {
 	const executed = new Map<number, number>();
-	const stream = spawn(LOG, ["stream", "--predicate", PREDICATE, "--style", "compact"], {
+	const stream = spawn(LOG, ["stream", "--predicate", PREDICATE, "--style", "ndjson"], {
 		stdio: ["ignore", "pipe", "ignore"],
 	});
 	const stop = () => stream.kill("SIGKILL");
@@ -44,11 +46,8 @@ export async function startExecLog(): Promise<ExecLog | null> {
 		const lines = (pending + chunk).split("\n");
 		pending = lines.pop() ?? "";
 		for (const line of lines) {
-			const fields = LINE.exec(line);
-			if (fields === null) continue;
-			const [, year, month, day, hour, minute, second, millisecond, pid] = fields;
-			const at = new Date(+year, +month - 1, +day, +hour, +minute, +second, +millisecond).getTime();
-			executed.set(Number.parseInt(pid, 10), at);
+			const event = parseEvent(line);
+			if (event !== null) executed.set(event.pid, event.at);
 		}
 	});
 	stream.on("error", () => {});
@@ -80,4 +79,20 @@ export async function startExecLog(): Promise<ExecLog | null> {
 	}
 	log.close();
 	return null;
+}
+
+function parseEvent(line: string): { pid: number; at: number } | null {
+	if (!line.startsWith("{")) return null;
+	let event: { eventMessage?: unknown; timestamp?: unknown };
+	try {
+		event = JSON.parse(line);
+	} catch {
+		return null;
+	}
+	if (typeof event.eventMessage !== "string" || typeof event.timestamp !== "string") return null;
+	const exec = EXEC.exec(event.eventMessage);
+	const stamp = STAMP.exec(event.timestamp);
+	if (exec === null || stamp === null) return null;
+	const at = Date.parse(`${stamp[1]}T${stamp[2]}${stamp[3]}:${stamp[4]}`);
+	return Number.isNaN(at) ? null : { pid: Number.parseInt(exec[1], 10), at };
 }
