@@ -550,16 +550,10 @@ describe("containment declarations", () => {
 		).toThrow(/must be relative to the workspace, without "\.\."/);
 	});
 
-	test("rejects a path on a survivor, which is a process", () => {
+	test.each(["survivor", "unreaped", "workspace-unmovable"])("rejects a path on %s, which names no path", (kind) => {
 		expect(() =>
-			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "survivor", path: "late.txt" }] } }),
-		).toThrow(/is a process, not a path/);
-	});
-
-	test("rejects a path on an unreaped process, which is also not a path", () => {
-		expect(() =>
-			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "unreaped", path: "late.txt" }] } }),
-		).toThrow(/is a process, not a path/);
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind, path: "late.txt" }] } }),
+		).toThrow(/is a process or the whole workspace, not a path/);
 	});
 
 	test("rejects a misspelled key", () => {

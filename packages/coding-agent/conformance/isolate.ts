@@ -193,6 +193,7 @@ export const VIOLATION_KINDS = [
 	"unreadable",
 	"survivor",
 	"unreaped",
+	"workspace-unmovable",
 ] as const;
 
 export type ViolationKind = (typeof VIOLATION_KINDS)[number];
@@ -254,26 +255,21 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
 }
 
 /**
- * Moves the workspace out of the side's write grant before the harness reads it, and returns where it
- * now lives. A process that outlived the side can then neither add nor change a file in the tree the
- * harness hashes, because the profile grants writes only under `roots.root`. A workspace that no longer
- * exists is scanned where the case expected it, which reports it as unreadable.
+ * Moves the workspace out of the side's write grant, then hashes it where it landed. A process that
+ * outlived the side can then neither add nor change a file in the tree the harness hashes, because the
+ * profile grants writes only under `roots.root`. A workspace the side removed is scanned in place and
+ * reports as unreadable. Any other failed move reports `workspace-unmovable` and reads nothing, because
+ * the tree is still inside the side's reach.
  */
-function takeWorkspace(roots: Roots): string {
+export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan {
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
 	try {
 		renameSync(roots.workspace, snapshot);
-		return snapshot;
-	} catch {
-		// The workspace could not be moved out of the side's reach, so scan a path that cannot exist
-		// rather than a tree the side can still write. That reports as unreadable, which fails the case.
-		return join(dirname(roots.root), `snapshot-${roots.side}-unavailable`);
+	} catch (error) {
+		if (errorCode(error) === "ENOENT") return hashTree(roots.workspace, wanted);
+		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
 	}
-}
-
-/** Hashes the workspace after moving it out of the side's reach. */
-export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan {
-	return hashTree(takeWorkspace(roots), wanted);
+	return hashTree(snapshot, wanted);
 }
 
 /** The paths that exist, where a dangling link counts as present: the side tried to create something. */

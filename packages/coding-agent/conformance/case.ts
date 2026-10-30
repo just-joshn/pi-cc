@@ -319,8 +319,12 @@ function asContainmentSpecs(value: unknown, source: string): ContainmentSpec[] |
 			fail(source, `${field}.kind "${kind}" is not a violation kind (${VIOLATION_KINDS.join(", ")})`);
 		}
 		const path = asOptionalString(object.path, source, `${field}.path`);
-		if (kind === "survivor" || kind === "unreaped") {
-			if (path !== undefined) fail(source, `${field}.path is a process, not a path, so it cannot be named`);
+		if (kind === "survivor" || kind === "unreaped" || kind === "workspace-unmovable") {
+			if (path !== undefined)
+				fail(
+					source,
+					`${field}.path is a process or the whole workspace, not a path in the tree, so it cannot be named`,
+				);
 			return { kind: kind as ViolationKind };
 		}
 		if (path === undefined && (kind === "escaping-symlink" || kind === "dangling-symlink")) {
