@@ -426,21 +426,39 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 		expect(spawnSync("/bin/kill", ["-0", String(pid)]).status).not.toBe(0);
 	});
 
-	test.skipIf(!darwin)(
-		"the tree is hashed only after nothing holds it, so a writer cannot change the digest",
-		async () => {
-			const roots = sideRoots();
-			startFileHolder(roots, "while :; do echo x >&3; /bin/sleep 0.02; done");
-			await delay(300);
+	test("a chain that left the root and holds nothing there is reported, not passed in silence", async () => {
+		const roots = sideRoots();
+		const hop = join(roots.tmp, "hop.sh");
+		const log = join(roots.tmp, "gen.log");
+		writeFileSync(
+			hop,
+			`cd /\n[ -e ${join(roots.root, "stop")} ] && exit 0\necho x >> ${log}\n/bin/sh ${hop} &\nexit 0\n`,
+		);
+		const chain = spawn("/bin/sh", [hop], { cwd: roots.workspace, detached: true, stdio: "ignore" });
+		chain.unref();
+		strayPids.push(chain.pid ?? 0);
+		await delay(200);
 
-			const scan = await scanWorkspace(roots, ["held.log"]);
-			const hashed = scan.entries.get("held.log");
-			await delay(300);
+		const scan = await scanWorkspace(roots, []);
+		const afterScan = readFileSync(log, "utf8").length;
+		await delay(300);
 
-			const snapshot = join(dirname(roots.root), "snapshot-claude", "held.log");
-			expect(createHash("sha256").update(readFileSync(snapshot)).digest("hex")).toBe(hashed);
-		},
-	);
+		const stillRunning = readFileSync(log, "utf8").length !== afterScan;
+		expect(stillRunning && !scan.violations.some((violation) => violation.kind === "unreaped")).toBe(false);
+	});
+
+	test("the tree is hashed only after nothing holds it, so a writer cannot change the digest", async () => {
+		const roots = sideRoots();
+		startFileHolder(roots, "while :; do echo x >&3; /bin/sleep 0.02; done");
+		await delay(300);
+
+		const scan = await scanWorkspace(roots, ["held.log"]);
+		const hashed = scan.entries.get("held.log");
+		await delay(300);
+
+		const snapshot = join(dirname(roots.root), "snapshot-claude", "held.log");
+		expect(createHash("sha256").update(readFileSync(snapshot)).digest("hex")).toBe(hashed);
+	});
 });
 
 // /etc/claude-code does not exist here, so the rule form is proven on /private/etc/hosts, which does.
