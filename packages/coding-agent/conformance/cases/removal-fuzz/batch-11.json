@@ -1,0 +1,243 @@
+{
+	"id": "removal-fuzz/batch-11",
+	"area": "removal-fuzz",
+	"argv": [
+		"-p",
+		"Run permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--dangerously-skip-permissions",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n",
+		"sub/seed.txt": "SUB\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_uses": [
+					{
+						"name": "Bash",
+						"input": {
+							"command": "{ typeset X=\"*\"; rmdir '$X'; }"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "if true; then local X='*' & rmdir $X; fi"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <<'EOF'\n$(X=/\nrmdir sub)\nEOF"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "if true; then readonly X=. & rmdir /usr; fi"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <<EOF\n$(declare X=..\nrmdir $HOME)\nEOF"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "f() { local X=~ || rmdir $X/usr; }; true"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true >(typeset X=\"$HOME\" & rmdir ..)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "f() { export X=\"*\"\nrmdir *; }; true"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true $(local X='$HOME' & rmdir $X/usr)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "(typeset X=/ & rmdir sub/..)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true `readonly X=.; rmdir ..`"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <<'EOF'\n$(export X='$HOME'; rmdir \"$X\")\nEOF"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "X=sub\nrmdir sub"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true >(typeset X=. & rmdir ..)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "{ typeset X=''; rmdir \\$X; }"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "(declare X=${HOME}; rmdir p04-fuzz-does-not-exist)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true >(local X=\"$HOME\"; rmdir sub/..)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "{ export X=$HOME || rmdir '$X'; }"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <(local X=$HOME | rmdir \\$X)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <(typeset X=${HOME} || rmdir \\$X)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true $(readonly X=/ || rmdir .)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "while true; do readonly X=${HOME} && rmdir ..; break; done"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <<'EOF'\n$(readonly X=sub || rmdir p04-fuzz-does-not-exist)\nEOF"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "(X=/; rmdir ..)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true `declare X='*' | rmdir p04-fuzz-does-not-exist/..`"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "X=\"$HOME\" || rmdir /usr"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true $(declare X=. && rmdir $X)"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "{ typeset X=${HOME} && rmdir '$X'; }"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true <<EOF\n$(typeset X=\"$HOME\" || rmdir ~)\nEOF"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "typeset X=~; rmdir ${X}/"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "for Y in one; do X=/usr; rmdir $HOME; done"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "true $(typeset X='*'; rmdir \"$X\")"
+						}
+					}
+				]
+			},
+			{
+				"text": "FUZZ_DONE"
+			}
+		]
+	},
+	"timeout_ms": 120000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"FUZZ_DONE"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			}
+		],
+		"files": []
+	},
+	"skip": []
+}
