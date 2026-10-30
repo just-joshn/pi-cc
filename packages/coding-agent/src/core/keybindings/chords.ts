@@ -35,7 +35,9 @@ export class ChordResolver {
 	}
 
 	private advance(hits: readonly Binding[], index: number, now: number): ChordResult {
-		const longer = hits.filter((binding) => binding.keys.length > index);
+		// CC starts a chord only when a longer binding has a non-null action (jet, chunk-963y7jan.js);
+		// a longer `null` unbinding leaves the prefix key free for its own single-key action.
+		const longer = hits.filter((binding) => binding.keys.length > index && binding.action !== null);
 		if (longer.length > 0) {
 			this.state = { kind: "pending", candidates: longer, index, expires: now + 3000 };
 			return { kind: "pending" };

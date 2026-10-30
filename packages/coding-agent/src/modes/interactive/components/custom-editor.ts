@@ -34,10 +34,10 @@ export class CustomEditor extends Editor {
 	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: CustomEditorOptions) {
 		super(tui, theme, options);
 		this.keybindings = keybindings;
-		keybindings.onChordStatus = (message) => {
+		keybindings.onChordStatus((message) => {
 			this.chordStatus = message;
 			this.tui.requestRender();
-		};
+		});
 		this.embedWorkingStatus = options?.embedWorkingStatus ?? false;
 	}
 

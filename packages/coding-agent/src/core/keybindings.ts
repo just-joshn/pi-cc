@@ -7,14 +7,19 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "@earendil-works/pi-tui";
-import { existsSync, readFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { Compile } from "typebox/compile";
-import { getAgentDir } from "../config.ts";
+import { getAgentDir, getDebugLogPath } from "../config.ts";
 import { stripBom } from "../utils/text.ts";
 import { KeybindingValueSchema } from "./key-id-schema.ts";
 import { type Binding, ChordResolver } from "./keybindings/chords.ts";
-import { importCcKeybindings, parseKeySequence, resolveBindings } from "./keybindings/import-cc.ts";
+import {
+	type ImportedBindings,
+	importCcKeybindings,
+	parseKeySequence,
+	resolveBindings,
+} from "./keybindings/import-cc.ts";
 import { userSettingsPath } from "./settings/cc/paths.ts";
 
 export function useWindowsKeybindings(
@@ -330,6 +335,17 @@ function loadRawConfig(path: string): Record<string, unknown> | undefined {
 	}
 }
 
+/** Appends an import warning to pi's debug log; write errors are ignored, logging must not break startup. */
+function appendImportWarning(line: string): void {
+	try {
+		const path = getDebugLogPath();
+		mkdirSync(dirname(path), { recursive: true });
+		appendFileSync(path, `${new Date().toISOString()} ${line}\n`);
+	} catch {
+		// Best effort: the log is diagnostic only.
+	}
+}
+
 export class KeybindingsManager extends TuiKeybindingsManager {
 	private configPath: string | undefined;
 	private ccConfigPath: string | undefined;
@@ -339,7 +355,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	private resolvedContexts = new Map<Binding["context"], readonly Binding[]>();
 	private diagnostics: string[] = [];
 	private chordTimer: ReturnType<typeof setTimeout> | undefined;
-	onChordStatus?: (message: string | undefined) => void;
+	private chordStatusListeners = new Set<(message: string | undefined) => void>();
 
 	constructor(userBindings: KeybindingsConfig = {}, configPath?: string) {
 		super(KEYBINDINGS, userBindings);
@@ -354,6 +370,21 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		return manager;
 	}
 
+	/** Registers a listener for pending and cancelled chord feedback so each editor renders its own border. */
+	onChordStatus(listener: (message: string | undefined) => void): void {
+		this.chordStatusListeners.add(listener);
+	}
+
+	private setChordStatus(message: string | undefined): void {
+		for (const listener of this.chordStatusListeners) listener(message);
+	}
+
+	/** Load failures become startup warnings; per-entry warnings go to the debug log like CC's validation log. */
+	private recordImport(imported: ImportedBindings, source: string): void {
+		this.diagnostics.push(...imported.diagnostics.map((message) => `${source}: ${message}`));
+		for (const warning of imported.warnings) appendImportWarning(`${source}: ${warning}`);
+	}
+
 	reload(): void {
 		if (!this.configPath) return;
 		this.cancelChord();
@@ -364,7 +395,9 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 			if (ccRaw) {
 				const imported = importCcKeybindings(ccRaw, new Set(Object.keys(KEYBINDINGS)));
 				this.importedBindings = imported.bindings;
-				this.diagnostics = imported.diagnostics.map((message) => `${this.ccConfigPath}: ${message}`);
+				this.recordImport(imported, this.ccConfigPath);
+			} else if (existsSync(this.ccConfigPath)) {
+				this.diagnostics.push(`${this.ccConfigPath}: CC keybindings file could not be read as JSON`);
 			}
 		}
 		const raw = loadRawConfig(this.configPath);
@@ -375,7 +408,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		if (Object.hasOwn(raw, "bindings")) {
 			const imported = importCcKeybindings(raw, new Set(Object.keys(KEYBINDINGS)));
 			this.importedBindings.push(...imported.bindings);
-			this.diagnostics.push(...imported.diagnostics.map((message) => `${this.configPath}: ${message}`));
+			this.recordImport(imported, this.configPath);
 			this.setUserBindings({});
 			return;
 		}
@@ -432,7 +465,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		this.chordResolver.reset();
 		clearTimeout(this.chordTimer);
 		this.chordTimer = undefined;
-		this.onChordStatus?.(undefined);
+		this.setChordStatus(undefined);
 	}
 
 	/** Runs all checks for one editor event against a single chord resolution. */
@@ -444,10 +477,10 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		const result = this.chordResolver.resolve(data, this.getContextBindings(context));
 		if (result.kind === "pending") {
 			clearTimeout(this.chordTimer);
-			this.onChordStatus?.("Waiting for next key (3s)");
+			this.setChordStatus("Waiting for next key (3s)");
 			this.chordTimer = setTimeout(() => {
 				this.chordResolver.reset();
-				this.onChordStatus?.("Chord cancelled. No next key within 3s");
+				this.setChordStatus("Chord cancelled. No next key within 3s");
 				this.chordTimer = setTimeout(() => this.cancelChord(), 3000);
 				this.chordTimer.unref();
 			}, 3000);
