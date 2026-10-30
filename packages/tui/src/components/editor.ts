@@ -2231,7 +2231,13 @@ export class Editor implements Component, Focusable {
 		if (vim.state.mode === "insert") return this.handleVimInsertInput(vim, data, isEscape);
 		if (isEscape) return this.applyVimInput(vim, { kind: "escape" });
 		const printable = this.vimPrintable(data);
-		if (printable === undefined) return this.applyVimInput(vim, this.vimSpecialKey(vim, data));
+		if (printable === undefined) {
+			const key = parseKey(data);
+			// Claude Code hands Enter to the editor before its state machine sees it, with any command pending.
+			if (key === "enter") return false;
+			const routed = this.vimSpecialKey(vim, data, key);
+			return routed === undefined ? false : this.applyVimInput(vim, routed);
+		}
 		// A read that carries several characters is typed one at a time.
 		let consumed = false;
 		for (const { segment } of graphemeSegmenter.segment(printable)) {
@@ -2246,17 +2252,29 @@ export class Editor implements Component, Focusable {
 		return data.length > 0 && !data.startsWith("\x1b") && !/[\x00-\x1f\x7f]/.test(data) ? data : undefined;
 	}
 
-	private vimSpecialKey(vim: VimRuntime, data: string): VimInput {
+	/** Claude Code routes Backspace and Delete into its machine only from idle, a count or an operator; every other
+	 * pending state keeps itself and the editor acts on the key (chunk-hz2c9q6k.js:1637-1654). */
+	private vimSpecialKey(vim: VimRuntime, data: string, key: string | undefined): VimInput | undefined {
 		const kb = getKeybindings();
-		const key = parseKey(data);
-		if (key === undefined || key.includes("+")) return { kind: "other" };
 		const idle = vim.state.pending === "";
+		const pending = this.pendingKeyClass(vim.state.pending);
 		for (const [action, mapped] of VIM_KEY_ACTIONS) {
-			if (kb.matches(data, action) && (idle || mapped !== "x")) return { kind: "key", key: mapped };
+			if (!kb.matches(data, action)) continue;
+			// Delete maps to x only from idle or an operator; Backspace from idle, a count or an operator.
+			if (mapped === "x" && pending !== "idle" && pending !== "operator") return undefined;
+			if (mapped === BACKSPACE && pending === "other") return undefined;
+			return { kind: "key", key: mapped };
 		}
 		if (!idle && kb.matches(data, "tui.editor.cursorUp")) return { kind: "key", key: "k" };
 		if (!idle && kb.matches(data, "tui.editor.cursorDown")) return { kind: "key", key: "j" };
 		return { kind: "other" };
+	}
+
+	private pendingKeyClass(pending: string): "idle" | "count" | "operator" | "other" {
+		if (pending === "") return "idle";
+		if (/^[1-9]\d*$/.test(pending)) return "count";
+		if (/^[dcy]\d*$/.test(pending)) return "operator";
+		return "other";
 	}
 
 	private handleVimInsertInput(vim: VimRuntime, data: string, isEscape: boolean): boolean {
