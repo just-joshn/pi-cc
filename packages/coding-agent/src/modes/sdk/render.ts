@@ -17,13 +17,15 @@ import type {
 	StreamEventFrame,
 	UserToolResultFrame,
 } from "./frames.ts";
-import { anthropicStopReason, type TurnTally } from "./result.ts";
+import { anthropicStopReason, type ModelLimits, type TurnTally } from "./result.ts";
 
 export interface RenderContext {
 	sessionId(): string;
 	includePartial: boolean;
 	emit(frame: SdkFrame): void;
 	now(): number;
+	/** The context window and output cap of the model that produced `message`, read when its usage is counted. */
+	limitsOf(message: AssistantMessage): ModelLimits;
 }
 
 /** The streaming message under way: what the first block reported, which every row of it repeats. */
@@ -74,7 +76,11 @@ export class FrameRenderer {
 				if (event.message.role === "assistant") {
 					const message = event.message as AssistantMessage;
 					this.messageEnd(message);
-					this.tally?.addAssistant(message, this.context.now() - this.requestStartedAt);
+					this.tally?.addAssistant(
+						message,
+						this.context.now() - this.requestStartedAt,
+						this.context.limitsOf(message),
+					);
 					this.open = undefined;
 				} else if (event.message.role === "toolResult") {
 					this.context.emit(this.toolResultFrame(event.message as ToolResultMessage));
@@ -256,7 +262,11 @@ export class FrameRenderer {
 			.map((block) => block.text)
 			.join("\n");
 		const call = this.calls.get(message.toolCallId);
-		const block: Json = { tool_use_id: message.toolCallId, type: "tool_result", content: text };
+		const block: Json = {
+			tool_use_id: message.toolCallId,
+			type: "tool_result",
+			content: toolResultContent(message, text),
+		};
 		if (message.isError) block.is_error = true;
 		return {
 			type: "user",
@@ -268,6 +278,17 @@ export class FrameRenderer {
 			tool_use_result: toolUseResult(call, text, message.isError),
 		};
 	}
+}
+
+/** Text-only results are one string. A result holding images is an array of blocks in the order the tool produced them. */
+function toolResultContent(message: ToolResultMessage, text: string): string | Json[] {
+	if (!message.content.some((block) => block.type === "image")) return text;
+	return message.content.map(
+		(block): Json =>
+			block.type === "image"
+				? { type: "image", source: { type: "base64", media_type: block.mimeType, data: block.data } }
+				: { type: "text", text: block.text },
+	);
 }
 
 const NUMBERED_LINE = /^\d+\t/;

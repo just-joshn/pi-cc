@@ -1291,7 +1291,7 @@ export async function main(args: string[], options?: MainOptions) {
 							includePartial: parsed.includePartialMessages === true,
 							replayUser: parsed.replayUserMessages === true,
 							permissionMode: sdkPermissionMode(parsed.permissionMode),
-							authConfigured: model !== undefined && modelRuntime.hasConfiguredAuth(model.provider),
+							hasAuth: (provider) => modelRuntime.hasConfiguredAuth(provider),
 							input: process.stdin,
 							env: process.env,
 						},

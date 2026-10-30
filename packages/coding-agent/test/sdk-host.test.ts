@@ -49,7 +49,7 @@ describe("SdkHost", () => {
 			includePartial: false,
 			replayUser: false,
 			permissionMode: "default",
-			authConfigured: true,
+			hasAuth: () => true,
 			input,
 			env: {},
 			write: (text) => written.push(text),
@@ -263,6 +263,97 @@ describe("SdkHost", () => {
 		expect(frames[3].model).toBe("faux-b");
 	});
 
+	it("reads credentials for the model selected at turn time, so set_model to an authenticated model logs in", async () => {
+		let current: Harness | undefined;
+		const input = new PassThrough();
+		input.end(`${[controlLine("a", "set_model", { model: "faux-b" }), userLine("go")].join("\n")}\n`);
+		const { frames, exitCode } = await run(
+			{ inputFormat: "stream-json", hasAuth: () => current?.session.model?.id === "faux-b" },
+			[],
+			(h) => {
+				current = h;
+				h.setResponses([fauxAssistantMessage("ok")]);
+			},
+			input,
+			{ models: [{ id: "faux-a" }, { id: "faux-b" }] },
+		);
+
+		expect(frames.map(label)).toEqual(["control_response", "system/init", "assistant", "result/success"]);
+		expect(frames[1]).toMatchObject({ model: "faux-b", apiKeySource: "oauth" });
+		expect(frames[3]).toMatchObject({ is_error: false, result: "ok" });
+		expect(exitCode).toBe(0);
+	});
+
+	it("keeps each model's own limits in the cumulative modelUsage after set_model", async () => {
+		const input = new PassThrough();
+		const { frames } = await run(
+			{ inputFormat: "stream-json" },
+			[],
+			(h) => {
+				h.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
+				let ended = 0;
+				h.session.subscribe((event) => {
+					if (event.type === "agent_end" && ++ended === 1) {
+						input.write(`${controlLine("m", "set_model", { model: "faux-b" })}\n${userLine("again")}\n`);
+						input.end();
+					}
+				});
+				input.write(`${userLine("first")}\n`);
+			},
+			input,
+			{
+				models: [
+					{ id: "faux-a", contextWindow: 1000, maxTokens: 100 },
+					{ id: "faux-b", contextWindow: 2000, maxTokens: 200 },
+				],
+			},
+		);
+
+		const results = frames.filter((frame) => frame.type === "result");
+		expect(results).toHaveLength(2);
+		expect(results[1].modelUsage["faux-a"]).toMatchObject({ contextWindow: 1000, maxOutputTokens: 100 });
+		expect(results[1].modelUsage["faux-b"]).toMatchObject({ contextWindow: 2000, maxOutputTokens: 200 });
+	});
+
+	it("interrupt during a running turn aborts it, answers, and still writes the turn's result", async () => {
+		const input = new PassThrough();
+		const blockingTool: AgentTool = {
+			name: "block",
+			label: "block",
+			description: "waits for abort",
+			parameters: Type.Object({}),
+			execute: (_id, _params, signal) =>
+				new Promise((resolve) => {
+					input.write(`${controlLine("stop", "interrupt")}\n`);
+					input.end();
+					signal?.addEventListener("abort", () =>
+						resolve({ content: [{ type: "text", text: "aborted" }], details: {} }),
+					);
+				}),
+		};
+		const { frames } = await run(
+			{ inputFormat: "stream-json" },
+			[],
+			(h) =>
+				h.setResponses([
+					fauxAssistantMessage([fauxToolCall("block", {}, { id: "toolu_1" })], { stopReason: "toolUse" }),
+					fauxAssistantMessage("never"),
+				]),
+			(() => {
+				input.write(`${userLine("go")}\n`);
+				return input;
+			})(),
+			{ tools: [blockingTool] },
+		);
+
+		expect(frames.find((frame) => frame.type === "control_response")?.response).toEqual({
+			subtype: "success",
+			request_id: "stop",
+			response: { still_queued: [] },
+		});
+		expect(frames.at(-1)).toMatchObject({ type: "result" });
+	});
+
 	it("end_session answers and stops without running the queued message", async () => {
 		const input = new PassThrough();
 		input.end(`${[controlLine("r1", "end_session"), userLine("never")].join("\n")}\n`);
@@ -283,7 +374,7 @@ describe("SdkHost", () => {
 	});
 
 	it("reports a missing credential as frames and exit 1, without calling the model", async () => {
-		const { frames, exitCode, harness } = await run({ authConfigured: false }, ["go"], (h) =>
+		const { frames, exitCode, harness } = await run({ hasAuth: () => false }, ["go"], (h) =>
 			h.setResponses([fauxAssistantMessage("never")]),
 		);
 

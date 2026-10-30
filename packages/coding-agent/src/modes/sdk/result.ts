@@ -12,6 +12,7 @@ export interface ModelTotals {
 	cacheCreation1h: number;
 	thinkingTokens: number;
 	costUSD: number;
+	limits: ModelLimits;
 }
 
 export interface ModelLimits {
@@ -33,6 +34,7 @@ const ZERO: ModelTotals = {
 	cacheCreation1h: 0,
 	thinkingTokens: 0,
 	costUSD: 0,
+	limits: { contextWindow: 0, maxOutputTokens: 0 },
 };
 
 const STOP_REASONS: Readonly<Record<string, string>> = {
@@ -65,10 +67,10 @@ export class TurnTally {
 	}
 
 	/** Folds one finished assistant message in; `apiMs` is how long its request took. */
-	addAssistant(message: AssistantMessage, apiMs: number): void {
+	addAssistant(message: AssistantMessage, apiMs: number, limits: ModelLimits): void {
 		this.turns += 1;
 		this.apiMs += apiMs;
-		this.models[message.model] = addUsage(this.models[message.model] ?? ZERO, message.usage);
+		this.models[message.model] = addUsage(this.models[message.model] ?? ZERO, message.usage, limits);
 		this.lastText = message.content
 			.filter((block) => block.type === "text")
 			.map((block) => block.text)
@@ -81,7 +83,7 @@ export class TurnTally {
 	}
 }
 
-function addUsage(totals: ModelTotals, usage: Usage): ModelTotals {
+function addUsage(totals: ModelTotals, usage: Usage, limits: ModelLimits): ModelTotals {
 	return {
 		inputTokens: totals.inputTokens + usage.input,
 		outputTokens: totals.outputTokens + usage.output,
@@ -90,6 +92,7 @@ function addUsage(totals: ModelTotals, usage: Usage): ModelTotals {
 		cacheCreation1h: totals.cacheCreation1h + (usage.cacheWrite1h ?? 0),
 		thinkingTokens: totals.thinkingTokens + (usage.reasoning ?? 0),
 		costUSD: totals.costUSD + usage.cost.total,
+		limits,
 	};
 }
 
@@ -105,12 +108,13 @@ function merge(base: Record<string, ModelTotals>, extra: Record<string, ModelTot
 			cacheCreation1h: current.cacheCreation1h + totals.cacheCreation1h,
 			thinkingTokens: current.thinkingTokens + totals.thinkingTokens,
 			costUSD: current.costUSD + totals.costUSD,
+			limits: totals.limits,
 		};
 	}
 	return out;
 }
 
-const sum = (models: Record<string, ModelTotals>, key: keyof ModelTotals): number =>
+const sum = (models: Record<string, ModelTotals>, key: Exclude<keyof ModelTotals, "limits">): number =>
 	Object.values(models).reduce((total, model) => total + model[key], 0);
 
 function usageBlock(models: Record<string, ModelTotals>): Json {
@@ -132,7 +136,7 @@ function usageBlock(models: Record<string, ModelTotals>): Json {
 	};
 }
 
-function modelUsageBlock(models: Record<string, ModelTotals>, limits: (model: string) => ModelLimits): Json {
+function modelUsageBlock(models: Record<string, ModelTotals>): Json {
 	return Object.fromEntries(
 		Object.entries(models).map(([model, totals]) => [
 			model,
@@ -143,7 +147,7 @@ function modelUsageBlock(models: Record<string, ModelTotals>, limits: (model: st
 				cacheCreationInputTokens: totals.cacheCreationInputTokens,
 				webSearchRequests: 0,
 				costUSD: totals.costUSD,
-				...limits(model),
+				...totals.limits,
 				thinkingTokens: totals.thinkingTokens,
 				cacheCreationEphemeral5mInputTokens: totals.cacheCreationInputTokens - totals.cacheCreation1h,
 				cacheCreationEphemeral1hInputTokens: totals.cacheCreation1h,
@@ -175,7 +179,7 @@ export class SessionLedger {
 	private resultIndex = 0;
 
 	/** Folds a finished turn in and returns its `result` frame. */
-	result(turn: TurnTally, sessionId: string, now: number, limits: (model: string) => ModelLimits): ResultFrame {
+	result(turn: TurnTally, sessionId: string, now: number): ResultFrame {
 		this.models = merge(this.models, turn.models);
 		this.apiMs += turn.apiMs;
 		const isError = turn.errorMessage !== undefined;
@@ -185,7 +189,7 @@ export class SessionLedger {
 			session_id: sessionId,
 			total_cost_usd: sum(this.models, "costUSD"),
 			usage: usageBlock(turn.models),
-			modelUsage: modelUsageBlock(this.models, limits),
+			modelUsage: modelUsageBlock(this.models),
 			permission_denials: turn.denials,
 			terminal_reason: isError ? "api_error" : "completed",
 			fast_mode_state: "off",
@@ -206,7 +210,7 @@ export class SessionLedger {
 			first_content_frame_ms: turn.ttftMs,
 			queued_turn_count: 0,
 			result_index: this.nextResultIndex(),
-			model_usage_since_last_result: modelUsageBlock(turn.models, limits),
+			model_usage_since_last_result: modelUsageBlock(turn.models),
 		};
 	}
 

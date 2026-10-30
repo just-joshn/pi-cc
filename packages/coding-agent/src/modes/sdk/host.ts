@@ -25,7 +25,8 @@ export interface SdkHostOptions {
 	includePartial: boolean;
 	replayUser: boolean;
 	permissionMode: string;
-	authConfigured: boolean;
+	/** Whether the provider has a credential, asked for the model selected now so a `set_model` shows. */
+	hasAuth(provider: string): boolean;
 	/** Where stream-json user messages and control requests arrive. */
 	input: Readable;
 	env: NodeJS.ProcessEnv;
@@ -61,7 +62,23 @@ export class SdkHost {
 			includePartial: options.includePartial,
 			emit: (frame) => this.emit(frame),
 			now: () => Date.now(),
+			limitsOf: (message) => {
+				const model = this.getSession().modelRuntime.getModel(message.provider, message.model);
+				return { contextWindow: model?.contextWindow ?? 0, maxOutputTokens: model?.maxTokens ?? 0 };
+			},
 		});
+	}
+
+	private factsOf(session: AgentSession) {
+		const authConfigured = session.model !== undefined && this.options.hasAuth(session.model.provider);
+		return {
+			authConfigured,
+			facts: readSessionFacts(
+				session,
+				{ permissionMode: this.permissionMode.current, authConfigured },
+				this.options.env,
+			),
+		};
 	}
 
 	/** The session event listener: renders every event as zero or more frames. */
@@ -88,13 +105,9 @@ export class SdkHost {
 	private async turn(prompt: SdkPrompt): Promise<void> {
 		const session = this.getSession();
 		const startedAt = Date.now();
-		const facts = readSessionFacts(
-			session,
-			{ permissionMode: this.permissionMode.current, authConfigured: this.options.authConfigured },
-			this.options.env,
-		);
+		const { facts, authConfigured } = this.factsOf(session);
 		this.emit(buildInitFrame(facts));
-		if (!this.options.authConfigured) {
+		if (!authConfigured) {
 			this.emit(notLoggedInFrame(facts.sessionId));
 			this.emit(this.ledger.notLoggedInResult(facts.sessionId, Date.now(), startedAt, NOT_LOGGED_IN_TEXT));
 			this.exitCode = 1;
@@ -106,11 +119,7 @@ export class SdkHost {
 		this.renderer.beginTurn(tally);
 		await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
 		await session.waitForIdle();
-		const model = session.model;
-		const result = this.ledger.result(tally, session.sessionId, Date.now(), () => ({
-			contextWindow: model?.contextWindow ?? 0,
-			maxOutputTokens: model?.maxTokens ?? 0,
-		}));
+		const result = this.ledger.result(tally, session.sessionId, Date.now());
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
 	}
@@ -134,11 +143,7 @@ export class SdkHost {
 					const session = this.getSession();
 					const frames = await handleControlRequest(input.requestId, input.request, {
 						session,
-						facts: readSessionFacts(
-							session,
-							{ permissionMode: this.permissionMode.current, authConfigured: this.options.authConfigured },
-							this.options.env,
-						),
+						facts: this.factsOf(session).facts,
 						env: this.options.env,
 						home: homedir(),
 						permissionMode: this.permissionMode,

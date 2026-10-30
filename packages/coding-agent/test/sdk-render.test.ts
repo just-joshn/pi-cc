@@ -12,6 +12,7 @@ function renderer(includePartial = false) {
 		includePartial,
 		emit: (frame) => frames.push(frame),
 		now: () => 1_000,
+		limitsOf: () => ({ contextWindow: 0, maxOutputTokens: 0 }),
 	});
 	instance.beginTurn(new TurnTally(0));
 	return { instance, frames };
@@ -70,6 +71,45 @@ function resultOf(text: string, isError = false): AgentSessionEvent {
 		},
 	} as AgentSessionEvent;
 }
+
+function resultWith(content: unknown[]): AgentSessionEvent {
+	return {
+		type: "message_end",
+		message: { role: "toolResult", toolCallId: "toolu_1", toolName: "x", content, isError: false, timestamp: 0 },
+	} as AgentSessionEvent;
+}
+
+describe("tool_result content", () => {
+	const image = { type: "image", data: "QUJD", mimeType: "image/png" };
+	const imageBlock = { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } };
+
+	test("text only stays one string", () => {
+		const { instance, frames } = renderer();
+		instance.onEvent(
+			resultWith([
+				{ type: "text", text: "a" },
+				{ type: "text", text: "b" },
+			]),
+		);
+		expect((frames[0] as { message: { content: unknown[] } }).message.content[0]).toMatchObject({ content: "a\nb" });
+	});
+
+	test("an image-only result keeps the image block", () => {
+		const { instance, frames } = renderer();
+		instance.onEvent(resultWith([image]));
+		expect((frames[0] as { message: { content: unknown[] } }).message.content[0]).toMatchObject({
+			content: [imageBlock],
+		});
+	});
+
+	test("a mixed result keeps text and image blocks in order", () => {
+		const { instance, frames } = renderer();
+		instance.onEvent(resultWith([{ type: "text", text: "shot" }, image]));
+		expect((frames[0] as { message: { content: unknown[] } }).message.content[0]).toMatchObject({
+			content: [{ type: "text", text: "shot" }, imageBlock],
+		});
+	});
+});
 
 describe("tool_use_result", () => {
 	test("Read reports the file the way Claude Code does", () => {
