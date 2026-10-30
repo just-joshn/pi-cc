@@ -73,6 +73,9 @@ const SIDE_ARGV: ArgvAllowlist = {
 		// P10: stream-json framing flags, which only change what the print host writes or echoes
 		"--include-partial-messages",
 		"--replay-user-messages",
+		// P10: the turn cap, and a negative value the cap's cases write after it
+		"--max-turns",
+		"-1",
 		// tool selection, which PR #7's cases pin
 		"--tools",
 		"--disallowedTools",
@@ -89,6 +92,10 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"abc",
 		"json",
 		"stream-json",
+		// the `--max-turns` values P10's cases write
+		"0",
+		"1",
+		"2",
 		// the `text` value of `--input-format` and `--output-format` in P10's coupling cases
 		"text",
 		// a value of `--model` in PR #6's family-alias case

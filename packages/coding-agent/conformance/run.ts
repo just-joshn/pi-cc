@@ -314,8 +314,7 @@ function runSandboxed(
 		child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
 		// A child that exits before reading stdin closes the pipe under us; that is not a case failure.
 		child.stdin.on("error", () => {});
-		writeStdin(child.stdin, stdin);
-		child.stdin.end();
+		void writeStdin(child.stdin, stdin, () => Buffer.concat(stdout).toString("utf8")).then(() => child.stdin.end());
 		const timer = setTimeout(() => {
 			timedOut = true;
 			if (child.pid !== undefined) killGroup(child.pid);
@@ -436,13 +435,28 @@ function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function writeStdin(stream: Writable, stdin: StdinSpec): void {
+/**
+ * Writes the stdin script. A stream-json line `#sleep <ms>` pauses and `#waitfor <regexp>` waits (up to 30 s)
+ * until the side's stdout matches, so a case can send a control request while a turn is mid-flight.
+ */
+async function writeStdin(stream: Writable, stdin: StdinSpec, stdoutSoFar: () => string): Promise<void> {
 	if (stdin === null) return;
 	if (stdin.kind === "text") {
 		stream.write(stdin.data);
 		return;
 	}
-	for (const line of stdin.lines) stream.write(`${line}\n`);
+	for (const line of stdin.lines) {
+		if (line.startsWith("#sleep ")) {
+			await new Promise((resolve) => setTimeout(resolve, Number(line.slice("#sleep ".length))));
+		} else if (line.startsWith("#waitfor ")) {
+			const pattern = new RegExp(line.slice("#waitfor ".length));
+			const deadline = Date.now() + 30_000;
+			while (!pattern.test(stdoutSoFar()) && Date.now() < deadline)
+				await new Promise((resolve) => setTimeout(resolve, 50));
+		} else {
+			stream.write(`${line}\n`);
+		}
+	}
 }
 
 function skipReason(testCase: ConformanceCase, claudeAbsent: boolean): string | null {
