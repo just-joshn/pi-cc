@@ -51,15 +51,23 @@
 					},
 					"output_config": {
 						"effort": "medium"
-					}
+					},
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
 				},
 				"bodyNotMatch": [
 					"block_binding"
 				],
 				"bodyAt": {
-					"messages": {
-						"notMatch": [
-							"\"output_config\""
+					"messages.1.content.0.text": {
+						"match": [
+							"^# Environment"
 						]
 					}
 				}
