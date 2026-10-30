@@ -1,5 +1,6 @@
 /** How memory files are shown to the model: the startup reminder, the per-file reminder, and the prompt section. */
 
+import type { TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { MemoryFile, MemoryType } from "./discover.ts";
 
 /** The label each memory type carries in the startup reminder. */
@@ -35,21 +36,21 @@ export function nestedReminderPath(text: string): string | undefined {
 }
 
 /**
- * Tool result details that name which content blocks `renderNestedReminder` made. The session
- * records it when it injects a reminder, so a block is a reminder because of where it came from,
- * never because its text looks like one.
+ * A text block `renderNestedReminder` made. The session marks it when it injects the reminder,
+ * so a block is a reminder because of where it came from, never because its text looks like one.
+ * The mark lives on the block, not in tool result details, whose shape belongs to the tool and
+ * its extensions. Providers read only `text`, and JSON persistence keeps the whole block.
  */
-export function withInjectedReminders(details: unknown, indexes: readonly number[]): unknown {
-	if (indexes.length === 0) return details;
-	if (details === undefined || details === null) return { ccMemoryReminders: indexes };
-	if (typeof details !== "object" || Array.isArray(details)) return details;
-	return { ...details, ccMemoryReminders: indexes };
+export type InjectedReminderBlock = TextContent & { ccMemoryReminder: true };
+
+/** The text block that carries the nested reminder for `file`. */
+export function injectedReminderBlock(file: MemoryFile): InjectedReminderBlock {
+	return { type: "text", text: renderNestedReminder(file), ccMemoryReminder: true };
 }
 
-/** The content block indexes of a tool result's injected reminders, as {@link withInjectedReminders} recorded them. */
-export function injectedReminderIndexes(details: unknown): ReadonlySet<number> {
-	const indexes = (details as { ccMemoryReminders?: unknown } | null | undefined)?.ccMemoryReminders;
-	return new Set(Array.isArray(indexes) ? indexes.filter((index) => Number.isInteger(index)) : []);
+/** Whether a tool result content block is a reminder the session injected. */
+export function isInjectedReminder(block: ToolResultMessage["content"][number]): block is InjectedReminderBlock {
+	return block.type === "text" && (block as Partial<InjectedReminderBlock>).ccMemoryReminder === true;
 }
 
 /** Whether a reminder made by `renderNestedReminder` is for an AGENTS.md file. */

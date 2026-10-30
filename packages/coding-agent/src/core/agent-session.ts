@@ -118,10 +118,11 @@ import { ensureAutoMemoryDir } from "./memory/auto-memory.ts";
 import { memoryForFileAccess } from "./memory/discover.ts";
 import {
 	autoMemoryPromptSection,
+	type InjectedReminderBlock,
+	injectedReminderBlock,
+	isInjectedReminder,
 	nestedReminderPath,
 	renderMemoryReminder,
-	renderNestedReminder,
-	withInjectedReminders,
 } from "./memory/wrapper.ts";
 import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -732,10 +733,9 @@ export class AgentSession {
 		}
 
 		// The hook result already dropped structured content that replaced content no longer matches.
-		const injected = memoryBlocks.map((_, i) => normalizedContent.length + i);
 		return {
 			content: [...normalizedContent, ...memoryBlocks],
-			details: withInjectedReminders(hookResult?.details ?? result.details, injected),
+			details: hookResult?.details,
 			structuredContent: hookResult ? hookResult.structuredContent : result.structuredContent,
 			isError: hookResult?.isError ?? isError,
 			usage: hookResult?.usage,
@@ -1766,7 +1766,7 @@ export class AgentSession {
 	 * model already has in context, from startup or an earlier result, is left out; compaction drops
 	 * earlier results, so their files can come back.
 	 */
-	private _memoryForToolCall(toolName: string, args: unknown): TextContent[] {
+	private _memoryForToolCall(toolName: string, args: unknown): InjectedReminderBlock[] {
 		const memory = this._resourceLoader.getMemory();
 		const input = args as { path?: unknown; file_path?: unknown } | undefined;
 		const path = input?.path ?? input?.file_path;
@@ -1775,14 +1775,11 @@ export class AgentSession {
 		for (const message of this.agent.state.messages) {
 			if (message.role !== "toolResult") continue;
 			for (const block of message.content) {
-				const injected = block.type === "text" ? nestedReminderPath(block.text) : undefined;
+				const injected = isInjectedReminder(block) ? nestedReminderPath(block.text) : undefined;
 				if (injected !== undefined) loaded.add(injected);
 			}
 		}
-		return memoryForFileAccess(path, memory.location, loaded).map((file) => ({
-			type: "text",
-			text: renderNestedReminder(file),
-		}));
+		return memoryForFileAccess(path, memory.location, loaded).map(injectedReminderBlock);
 	}
 
 	private _rebuildSystemPrompt(toolNames: string[]): void {

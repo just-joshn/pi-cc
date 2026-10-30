@@ -27,7 +27,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { type TSchema, Type } from "typebox";
-import { injectedReminderIndexes, isAgentsReminder } from "../memory/wrapper.ts";
+import { isAgentsReminder, isInjectedReminder } from "../memory/wrapper.ts";
 import { CC_READ_MAX_BYTES, CC_READ_MAX_TOKENS } from "./cc-text.ts";
 import { editToolSystemPromptContribution } from "./edit.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./truncate.ts";
@@ -689,10 +689,9 @@ function appendToResult(message: ToolResultMessage, text: string): ToolResultMes
 }
 
 function takeNestedReminders(message: ToolResultMessage): { result: ToolResultMessage; reminders: string[] } {
-	const injected = injectedReminderIndexes(message.details);
 	const reminders: string[] = [];
-	const content = message.content.filter((block, index) => {
-		if (block.type !== "text" || !injected.has(index)) return true;
+	const content = message.content.filter((block) => {
+		if (!isInjectedReminder(block)) return true;
 		reminders.push(block.text);
 		return false;
 	});

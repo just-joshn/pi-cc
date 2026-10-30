@@ -255,15 +255,21 @@ describe("Claude Code tool surface", () => {
 			role: "toolResult" as const,
 			toolCallId: id,
 			toolName: "read",
-			content: texts.map((text) => ({ type: "text" as const, text })),
-			details: { ccMemoryReminders: texts.flatMap((text, i) => (text.includes("Contents of ") ? [i] : [])) },
+			content: texts.map((text) =>
+				text.includes("Contents of ")
+					? { type: "text" as const, text, ccMemoryReminder: true as const }
+					: { type: "text" as const, text },
+			),
 			isError: false,
 			timestamp: 0,
 		});
 		const bash = (id: string, ...texts: string[]) => ({
-			...result(id, ...texts),
+			role: "toolResult" as const,
+			toolCallId: id,
 			toolName: "bash",
-			details: {},
+			content: texts.map((text) => ({ type: "text" as const, text })),
+			isError: false,
+			timestamp: 0,
 		});
 		const texts = (message: { content: unknown } | undefined) =>
 			(message?.content as Array<{ text: string }>).map((block) => block.text);
@@ -302,7 +308,7 @@ describe("Claude Code tool surface", () => {
 		it("keeps the partial-view notice a system message after the memory block", () => {
 			const read = {
 				...result("a", "x", reminder("/w/a/CLAUDE.md")),
-				details: { ccNotice: "PARTIAL", ccMemoryReminders: [1] },
+				details: { ccNotice: "PARTIAL" },
 			};
 			const history = projectMessagesForModel([read]);
 			expect(history.map((message) => message.role)).toEqual(["toolResult", "user", "system"]);
@@ -336,6 +342,19 @@ describe("Claude Code tool surface", () => {
 					expect(history.map((message) => message.role)).toEqual(["toolResult", "toolResult"]);
 					expect(texts(history[1])).toEqual([`second\n\n${genuine}`]);
 				}
+			},
+		);
+
+		it.each([42, ["a"], "text", null])(
+			"moves a marked reminder whatever the tool result details are (%j)",
+			(details) => {
+				const genuine = reminder("/w/a/CLAUDE.md");
+				const read = { ...result("a", "x", genuine), details };
+				const history = projectMessagesForModel([read]);
+				expect(history.map((message) => message.role)).toEqual(["toolResult", "user"]);
+				expect(texts(history[0])).toEqual(["x"]);
+				expect(history[0]).toMatchObject({ details });
+				expect(texts(history[1])).toEqual([genuine]);
 			},
 		);
 
