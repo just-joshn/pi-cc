@@ -1,5 +1,3 @@
-/** What a permission evaluation answers, and the texts the model reads when a call does not run. */
-
 import type { PermissionMode } from "./mode.ts";
 import type { PermissionRule } from "./rules.ts";
 
@@ -31,7 +29,6 @@ export type Decision = AllowDecision | DenyDecision | AskDecision;
 /** A tool check's answer: a decision, or no opinion (`passthrough`), which later stages settle. */
 export type CheckResult = Decision | { readonly behavior: "passthrough"; readonly message: string };
 
-/** The ask a tool that has no check of its own gets. */
 export function defaultAskMessage(toolName: string): string {
 	return `Claude requested permissions to use ${toolName}, but you haven't granted it yet.`;
 }
@@ -39,7 +36,6 @@ export function defaultAskMessage(toolName: string): string {
 const WORK_AROUND_WARNING =
 	"IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.";
 
-/** The denial `dontAsk` mode turns an ask into. */
 export function dontAskMessage(toolName: string): string {
 	return `Permission to use ${toolName} has been denied because Claude Code is running in don't ask mode. ${WORK_AROUND_WARNING}`;
 }

@@ -3,28 +3,48 @@
  * working directories, whether it is a settings or shell-startup file, and whether a path rule
  * covers it.
  *
- * This is the first cut: one realpath of the deepest existing ancestor. The path-safety unit owns
- * the full spelling walk, leaf-symlink refusal and double canonicalization, and replaces
- * {@link canonicalPath} behind the same signatures.
+ * This is the first cut: one realpath of the deepest existing ancestor, with dangling links followed
+ * by hand. The path-safety unit owns the full spelling walk and double canonicalization, and
+ * replaces {@link canonicalPath} behind the same signatures.
  */
 
-import { realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 const CASE_INSENSITIVE = process.platform === "darwin" || process.platform === "win32";
+const MAX_LINK_HOPS = 40;
 
-/** The absolute path with symlinks resolved as far as the file system has the path. */
 export function canonicalPath(path: string, cwd: string): string {
-	return realOrAncestor(isAbsolute(path) ? resolve(path) : resolve(cwd, path));
+	return landing(isAbsolute(path) ? resolve(path) : resolve(cwd, path), MAX_LINK_HOPS);
 }
 
-function realOrAncestor(full: string): string {
+/**
+ * Where a write to `full` lands. `realpath` fails on a link whose target is missing, and a write
+ * through it creates the target, so the link is followed by hand: the first missing component that
+ * is a link continues at its target.
+ */
+function landing(full: string, hops: number): string {
 	try {
 		return realpathSync(full);
 	} catch {
 		const parent = dirname(full);
-		return parent === full ? full : join(realOrAncestor(parent), basename(full));
+		if (parent === full) return full;
+		const real = join(landing(parent, hops), basename(full));
+		const target = hops > 0 ? linkTarget(real) : undefined;
+		return target === undefined ? real : landing(resolve(dirname(real), target), hops - 1);
 	}
+}
+
+function linkTarget(path: string): string | undefined {
+	try {
+		return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function isLeafSymlink(path: string, cwd: string): boolean {
+	return linkTarget(isAbsolute(path) ? resolve(path) : resolve(cwd, path)) !== undefined;
 }
 
 function fold(path: string): string {
@@ -37,7 +57,6 @@ export function isInside(directory: string, path: string): boolean {
 	return target === base || target.startsWith(base.endsWith(sep) ? base : base + sep);
 }
 
-/** The working directories as they really are on disk. */
 export function canonicalDirectories(cwd: string, additional: readonly string[]): string[] {
 	return [cwd, ...additional].map((directory) => canonicalPath(directory, cwd));
 }
@@ -110,12 +129,16 @@ export function isSensitivePath(absolute: string): boolean {
 	);
 }
 
-/** A Claude Code settings file: `.claude/settings.json` or `.claude/settings.local.json` under any directory. */
+/** The ask Claude Code raises before any tool edits a settings or shell-startup file, or undefined when the path is ordinary. */
+export function editSafetyMessage(path: string): string | undefined {
+	if (isSettingsFile(path)) return `Claude requested permissions to write to ${path}, but you haven't granted it yet.`;
+	if (isSensitivePath(path)) return `Claude requested permissions to edit ${path} which is a sensitive file.`;
+	return undefined;
+}
+
 export function isSettingsFile(absolute: string): boolean {
 	return /(?:^|[/\\])\.claude[/\\]settings(?:\.local)?\.json$/i.test(absolute);
 }
-
-// -- path rules -------------------------------------------------------------------------------------
 
 export interface PathRuleBase {
 	readonly cwd: string;

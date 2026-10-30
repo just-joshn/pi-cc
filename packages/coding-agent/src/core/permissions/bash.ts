@@ -6,24 +6,24 @@
  * not `/bin/echo hi`, `FOO=1 echo hi`, `time echo hi` or `\echo hi`. Deny and ask rules also look
  * through env assignments and wrappers, so a wrapper cannot hide a denied command.
  *
- * The read-only command table, the working-directory checks and the file-command messages cover
- * what the conformance cases measure. Full shell analysis (heredocs, process substitution, the
- * remaining commands) belongs to the Bash unit.
+ * Every file a command line touches comes out of one place: `commandEffect` for a command's own
+ * operands and `parseCommand` for its redirections. Reads and writes then go through the same
+ * working-directory and sensitive-file checks the file tools use. Full shell analysis (heredocs,
+ * process substitution, the remaining commands) belongs to the Bash unit.
  */
 
-import { canonicalPath, insideDirectories } from "./paths.ts";
+import { resolve } from "node:path";
+import { canonicalPath, editSafetyMessage, insideDirectories } from "./paths.ts";
+import { commandEffect } from "./read-only.ts";
 import type { PermissionRule } from "./rules.ts";
 
 export interface ParsedCommand {
-	/** Simple commands in order, without redirections, trimmed. */
 	readonly parts: readonly string[];
-	/** Every redirection target that writes a file, in order. */
 	readonly writeTargets: readonly string[];
+	readonly readTargets: readonly string[];
 	/** `$(...)`, backticks or process substitution: a command the check cannot see. */
 	readonly nested: boolean;
-	/** `( ... )` grouping or a `{ ...; }` block. */
 	readonly grouped: boolean;
-	/** A lone `&`. */
 	readonly background: boolean;
 	/** A here-document, whose body the check does not read. */
 	readonly heredoc: boolean;
@@ -34,12 +34,10 @@ export interface ParsedCommand {
 	readonly looseParts: readonly string[];
 }
 
-const WRITING_OPERATORS = new Set([">", ">>", ">|", "<>"]);
-
-/** Scans a command line once: simple commands, redirections, and what hides a command from the check. */
 export function parseCommand(command: string): ParsedCommand {
 	const parts: string[] = [];
 	const writeTargets: string[] = [];
+	const readTargets: string[] = [];
 	const flags = { nested: false, grouped: false, background: false, heredoc: false };
 	let current = "";
 	let quote: string | undefined;
@@ -74,7 +72,7 @@ export function parseCommand(command: string): ParsedCommand {
 		} else if (char === "<" || char === ">") {
 			const redirect = readRedirection(command, index, current);
 			flags.heredoc = flags.heredoc || redirect.heredoc;
-			if (redirect.target !== undefined) writeTargets.push(redirect.target);
+			if (redirect.target !== undefined) (redirect.reads ? readTargets : writeTargets).push(redirect.target);
 			current = redirect.before;
 			index = redirect.end - 1;
 		} else if ((char === "&" && next === "&") || (char === "|" && next === "|")) {
@@ -90,7 +88,7 @@ export function parseCommand(command: string): ParsedCommand {
 		} else current += char;
 	}
 	flush();
-	return { parts, writeTargets, looseParts: loosePartsOf(command), ...flags };
+	return { parts, writeTargets, readTargets, looseParts: loosePartsOf(command), ...flags };
 }
 
 /**
@@ -123,29 +121,25 @@ function loosePartsOf(command: string): string[] {
 }
 
 interface Redirection {
-	/** The command text before the operator, without the descriptor that belonged to it. */
 	readonly before: string;
-	/** The file it writes, when it writes one. */
 	readonly target?: string;
+	readonly reads?: boolean;
 	readonly heredoc: boolean;
-	/** The index after the redirection. */
 	readonly end: number;
 }
 
 const REDIRECTION_OPERATORS = ["<<<", "<<", ">>", ">|", "<>", ">", "<"];
+const FD_WORD = /^(?:\d+-?|-)$/;
+const NON_FILES = new Set(["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"]);
 
-/** Reads the redirection that starts at `start`: `>`, `>>`, `>|`, `<>`, `&>`, `<`, `<<`, `<<<` and `n>&m`. */
 function readRedirection(command: string, start: number, before: string): Redirection {
 	const operator = REDIRECTION_OPERATORS.find((candidate) => command.startsWith(candidate, start)) as string;
 	let end = start + operator.length;
 	const descriptor = /(?:^|\s)(\d+|&)$/.exec(before);
 	const stripped = descriptor ? before.slice(0, before.length - (descriptor[1] as string).length) : before;
 	if (operator === "<<") return { before: stripped, heredoc: true, end };
-	if (command[end] === "&" && operator !== "<<<") {
-		end++;
-		while (end < command.length && /[\d-]/.test(command[end] as string)) end++;
-		return { before: stripped, heredoc: false, end };
-	}
+	const duplicating = command[end] === "&" && operator !== "<<<";
+	if (duplicating) end++;
 	while (command[end] === " " || command[end] === "\t") end++;
 	let word = "";
 	let quote: string | undefined;
@@ -158,16 +152,16 @@ function readRedirection(command: string, start: number, before: string): Redire
 		else if (/[\s;&|<>()]/.test(char)) break;
 		else word += char;
 	}
-	const writes = WRITING_OPERATORS.has(operator) || descriptor?.[1] === "&";
-	return {
-		before: stripped,
-		...(writes && word !== "" && word !== "/dev/null" ? { target: word } : {}),
-		heredoc: false,
-		end,
-	};
+	const base = { before: stripped, heredoc: false, end };
+	if (operator === "<<<" || word === "" || NON_FILES.has(word)) return base;
+	if (duplicating) {
+		const writesFile = operator === ">" && !FD_WORD.test(word);
+		return writesFile ? { ...base, target: word } : base;
+	}
+	if (operator === "<") return { ...base, target: word, reads: true };
+	return { ...base, target: word };
 }
 
-/** Shell words with quotes removed. `$` and glob characters are kept as written. */
 export function shellWords(part: string): string[] {
 	const words: string[] = [];
 	let word = "";
@@ -197,8 +191,6 @@ export function shellWords(part: string): string[] {
 	if (started) words.push(word);
 	return words;
 }
-
-// -- rules ----------------------------------------------------------------------------------------
 
 type RuleShape =
 	| { readonly kind: "exact"; readonly command: string }
@@ -265,8 +257,6 @@ export function matchRule(rules: readonly PermissionRule[], command: string): Pe
 	});
 }
 
-// -- read-only and file commands --------------------------------------------------------------------
-
 /** What each command does to a path operand, in the words of the refusal for a path outside the working directories. */
 const READ_VERBS: Readonly<Record<string, string>> = {
 	cat: "concatenate files from",
@@ -274,100 +264,109 @@ const READ_VERBS: Readonly<Record<string, string>> = {
 	grep: "search for patterns in files from",
 };
 
-const READ_ONLY_COMMANDS = new Set([
-	"pwd",
-	"cat",
-	"head",
-	"tail",
-	"wc",
-	"grep",
-	"find",
-	"ls",
-	"date",
-	"whoami",
-	"uname",
-	"which",
-	"sort",
-	"cut",
-	"tr",
-	"stat",
-	"file",
-	"du",
-	"echo",
-	"printf",
-	"true",
-	"false",
-	"sleep",
-	"test",
-	"[",
-	"diff",
-	"basename",
-	"dirname",
-	"realpath",
-	"readlink",
-	"jq",
-	"tree",
-	"uniq",
+/** Options a prefix rule cannot auto-allow: the command runs programs or writes files with them. */
+const FIND_UNSAFE_OPTIONS = new Set([
+	"-exec",
+	"-execdir",
+	"-ok",
+	"-okdir",
+	"-delete",
+	"-rm",
+	"-fprint",
+	"-fprint0",
+	"-fprintf",
+	"-fls",
+	"-files0-from",
 ]);
 
-const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame", "describe"]);
-/** Options that make an otherwise read-only git command write a file or run a program. */
-const GIT_WRITING_OPTION = /^(?:--output|--ext-diff|--textconv|--exec|-o)/;
-/** Commands whose `-oFILE` or `--output` writes a file. */
-const OUTPUT_FLAG_COMMANDS = new Set(["sort", "tree"]);
-const PRINT_SCRIPT = /^(?:\$|\d+)(?:,(?:\$|\d+))?p$/;
-const FIND_WRITES = /^-(?:delete|exec|execdir|ok|okdir|fprint\w*|fls)$/;
-const VERSION_ONLY = new Set(["node", "python", "python3"]);
+const JQ_DANGEROUS_OPTION = /^(?:-[A-Za-z]*[fL]|--(?:from-file|rawfile|slurpfile|library-path)(?:$|=))/;
+const AWK_COMMANDS = new Set(["awk", "gawk", "mawk", "nawk"]);
+const AWK_UNCHECKABLE_OPTION = /^-[bcCghIkMnNOPrsStV]*[fEileDW]|^--(?:fil|e|i|lo|s|de)/;
 
-/** Commands whose operands are files the command creates, changes or removes. acceptEdits allows them inside the working directories. */
-const FILE_COMMANDS = new Set(["touch", "mkdir", "rm", "rmdir", "mv", "cp", "sed"]);
-
-function isReadOnly(words: readonly string[]): boolean {
-	const [head = "", ...args] = words;
-	if (READ_ONLY_COMMANDS.has(head)) {
-		if (head === "find") return !args.some((arg) => FIND_WRITES.test(arg));
-		return !(OUTPUT_FLAG_COMMANDS.has(head) && args.some((arg) => /^(?:--output|-o)/.test(arg)));
+/** Whether the command line has `*`, `?` or a `[...]` outside quotes, which the shell expands before the command runs. */
+function hasUnquotedGlob(text: string): boolean {
+	let quote: string | undefined;
+	let bracket = false;
+	for (let index = 0; index < text.length; index++) {
+		const char = text[index] as string;
+		if (quote !== undefined) {
+			if (char === "\\" && quote === '"') index++;
+			else if (char === quote) quote = undefined;
+		} else if (char === "\\") index++;
+		else if (char === "'" || char === '"') quote = char;
+		else if (char === "*" || char === "?") return true;
+		else if (char === "[") bracket = true;
+		else if (char === "]" && bracket) return true;
 	}
-	if (head === "git") {
-		const subcommand = args[0] ?? "";
-		if (READ_ONLY_GIT.has(subcommand)) return !args.slice(1).some((arg) => GIT_WRITING_OPTION.test(arg));
-		if (subcommand === "branch" || subcommand === "remote")
-			return args
-				.slice(1)
-				.every(
-					(arg) =>
-						arg.startsWith("-") && !/^-[a-zA-Z]*[dDmMfcC]|^--(?:delete|move|copy|force|set-upstream)/.test(arg),
-				);
-		return subcommand === "config" && args[1] === "--get";
-	}
-	if (head === "sed") return args.length === 3 && args[0] === "-n" && PRINT_SCRIPT.test(args[1] ?? "");
-	if (VERSION_ONLY.has(head))
-		return args.length === 1 && (args[0] === "--version" || args[0] === "-v" || args[0] === "-V");
 	return false;
 }
 
-/** The operands of a command that name files. `grep` takes its pattern first. */
-function pathOperands(words: readonly string[]): string[] {
+function awkProgramRefusal(program: string): string | undefined {
+	if (/(?<![A-Za-z_])system[\s\\]*\(/.test(program))
+		return "awk program contains system() which executes arbitrary commands";
+	if (/(?:^|[^|])\|&?[^/|%";#{}]*"/.test(program) || /(?:^|[^|])\|&?[\s\\]*getline\b/.test(program))
+		return 'awk program contains a command pipe (| "cmd" or | getline) which executes arbitrary commands';
+	if (/@[\s\\]*(?:load|include)\b|@[\s\\]*\w+(?:::\w+)?(?:\[[^\]]*\])*[\s\\]*\(/.test(program))
+		return "awk program contains @load/@include or an @indirect call which can execute arbitrary code";
+	if (/(?<![A-Za-z_])extension[\s\\]*\(/.test(program))
+		return "awk program contains extension() which loads arbitrary native code (legacy gawk)";
+	if (/"\/inet[46]?\//.test(program))
+		return "awk program opens a gawk /inet/ network socket which can exfiltrate data";
+	return undefined;
+}
+
+/**
+ * Why a prefix rule cannot allow this command as written, or undefined when it can. The commands
+ * are the ones whose options or program text can run another program or write a file.
+ */
+function prefixRefusal(rule: PermissionRule, words: readonly string[], text: string): string | undefined {
+	if (rule.content === undefined || ruleShape(rule.content).kind !== "prefix") return undefined;
 	const [head = "", ...args] = words;
-	const operands = args.filter((arg) => !arg.startsWith("-"));
-	return head === "grep" ? operands.slice(1) : operands;
+	if (head === "find") {
+		const option = args.find((word) => FIND_UNSAFE_OPTIONS.has(word));
+		if (option !== undefined)
+			return `find with '${option}' executes commands or modifies files \u2014 cannot be auto-allowed by a Bash(find:*) prefix rule`;
+		if (hasUnquotedGlob(text))
+			return "find contains unquoted glob characters \u2014 could glob-expand to a dangerous action before find runs";
+	}
+	if (head === "jq") {
+		if (args.some((arg) => /\bsystem\s*\(/.test(arg)))
+			return "jq command contains system() function which executes arbitrary commands";
+		if (args.some((arg) => /\b(?:include|import)\b/.test(arg)))
+			return 'jq command contains include/import \u2014 modules can load arbitrary .jq files via {search:"."} and call env or other builtins';
+		if (args.some((arg) => JQ_DANGEROUS_OPTION.test(arg)))
+			return "jq command contains dangerous flags that could execute code or read arbitrary files";
+	}
+	if (AWK_COMMANDS.has(head)) {
+		if (hasUnquotedGlob(text))
+			return "awk command contains unquoted glob characters \u2014 could glob-expand to a planted program or flag before awk runs";
+		for (const arg of args) {
+			const refusal = awkProgramRefusal(arg);
+			if (refusal !== undefined) return refusal;
+		}
+		if (args.some((arg) => AWK_UNCHECKABLE_OPTION.test(arg)))
+			return "awk has an option that can't be checked before it runs";
+	}
+	return undefined;
 }
 
 function hasUnresolvable(path: string): boolean {
 	return /[$`*?[]|^~/.test(path);
 }
 
-/** The path an operand names, as it really lands. Refusals name this path, as Claude Code's do. */
 function absoluteOperand(path: string, cwd: string): string {
 	return canonicalPath(path, cwd);
 }
 
-// -- the check --------------------------------------------------------------------------------------
-
 export type SubcommandVerdict =
-	| { readonly kind: "allowed"; readonly rule?: PermissionRule }
+	| { readonly kind: "allowed"; readonly rule?: PermissionRule; readonly readOnly: boolean }
 	| { readonly kind: "blocked"; readonly message: string }
-	| { readonly kind: "needs-approval"; readonly message?: string; readonly rule?: PermissionRule };
+	| {
+			readonly kind: "needs-approval";
+			readonly message?: string;
+			/** A settings or shell-startup file is involved: bypass mode may still run it. */
+			readonly safety?: boolean;
+	  };
 
 export interface BashCheckInput {
 	readonly command: string;
@@ -381,12 +380,16 @@ export interface BashCheckInput {
 
 export type BashCheck =
 	| { readonly behavior: "deny"; readonly message: string; readonly rule?: PermissionRule }
-	| { readonly behavior: "ask"; readonly message: string | undefined; readonly rule?: PermissionRule }
-	| { readonly behavior: "allow"; readonly rule?: PermissionRule };
+	| {
+			readonly behavior: "ask";
+			readonly message: string | undefined;
+			readonly rule?: PermissionRule;
+			readonly safety?: boolean;
+	  }
+	| { readonly behavior: "allow"; readonly rule?: PermissionRule; readonly readOnly: boolean };
 
 const NEEDS_APPROVAL = "This command requires approval";
 
-/** Checks one Bash command against the rules, the read-only table and the mode. */
 export function checkBash(input: BashCheckInput): BashCheck {
 	const command = input.command.trim();
 	const parsed = parseCommand(command);
@@ -412,6 +415,7 @@ export function checkBash(input: BashCheckInput): BashCheck {
 	}
 	const judged: Judged[] = [
 		...parsed.parts.map((part) => ({ subject: part, verdict: checkPart(part, input) })),
+		...parsed.readTargets.map((target) => ({ subject: target, verdict: checkInputRedirection(target, input) })),
 		...parsed.writeTargets.map((target) => ({ subject: target, verdict: checkRedirection(target, input) })),
 	];
 	const blocked = judged.find(({ verdict }) => verdict.kind === "blocked");
@@ -421,13 +425,18 @@ export function checkBash(input: BashCheckInput): BashCheck {
 		const rule = judged
 			.map(({ verdict }) => (verdict.kind === "allowed" ? verdict.rule : undefined))
 			.find((found) => found !== undefined);
-		return rule ? { behavior: "allow", rule } : { behavior: "allow" };
+		const readOnly =
+			parsed.writeTargets.length === 0 &&
+			judged.every(({ verdict }) => verdict.kind === "allowed" && verdict.readOnly);
+		return rule ? { behavior: "allow", rule, readOnly } : { behavior: "allow", readOnly };
 	}
 	const only = pending[0]?.verdict;
+	const safety = pending.some(({ verdict }) => verdict.kind === "needs-approval" && verdict.safety === true);
 	if (judged.length === 1 || (pending.length === 1 && only?.kind === "needs-approval" && only.message !== undefined)) {
 		return {
 			behavior: "ask",
 			message: (only?.kind === "needs-approval" ? only.message : undefined) ?? NEEDS_APPROVAL,
+			safety,
 		};
 	}
 	const subjects = pending.map(({ subject }) => subject);
@@ -435,6 +444,7 @@ export function checkBash(input: BashCheckInput): BashCheck {
 	return {
 		behavior: "ask",
 		message: `This Bash command contains multiple operations. The following ${part} approval: ${subjects.join(", ")}`,
+		safety,
 	};
 }
 
@@ -453,22 +463,21 @@ function firstMatch(
 }
 
 function checkPart(part: string, input: BashCheckInput): SubcommandVerdict {
-	const rule = matchRule(input.allow, part);
-	if (rule) return { kind: "allowed", rule };
 	const words = shellWords(part);
 	const head = words[0] ?? "";
-	if (isReadOnly(words)) return checkReadOperands(head, words, input);
-	if (
-		FILE_COMMANDS.has(head) &&
-		!(head === "sed" && !words.some((word) => /^-[a-zA-Z]*i/.test(word) || word === "--in-place"))
-	) {
-		return checkFileOperands(head, words, input);
+	const effect = commandEffect(words);
+	const rule = matchRule(input.allow, part);
+	if (rule) {
+		const refusal = prefixRefusal(rule, words, part);
+		if (refusal !== undefined) return { kind: "needs-approval", message: refusal };
+		return { kind: "allowed", rule, readOnly: effect.readOnly };
 	}
+	if (effect.readOnly) return checkReadOperands(head, effect.reads, input);
+	if (effect.reads.length + effect.writes.length > 0) return checkFileOperands(head, effect, input);
 	return { kind: "needs-approval" };
 }
 
-function checkReadOperands(head: string, words: readonly string[], input: BashCheckInput): SubcommandVerdict {
-	const operands = pathOperands(words);
+function checkReadOperands(head: string, operands: readonly string[], input: BashCheckInput): SubcommandVerdict {
 	if (operands.some(hasUnresolvable)) return { kind: "needs-approval" };
 	for (const operand of operands) {
 		const absolute = absoluteOperand(operand, input.cwd);
@@ -477,31 +486,42 @@ function checkReadOperands(head: string, words: readonly string[], input: BashCh
 			if (verb === undefined) return { kind: "needs-approval" };
 			return {
 				kind: "blocked",
-				message: `${head} in '${absolute}' was blocked. For security, Claude Code may only ${verb} the allowed working directories for this session: ${input.directories.map((d) => `'${d}'`).join(", ")}.`,
+				message: `${head} in '${absolute}' was blocked. For security, Claude Code may only ${verb} the allowed working directories for this session: ${quotedDirectories(input)}.`,
 			};
 		}
 	}
-	return { kind: "allowed" };
+	return { kind: "allowed", readOnly: true };
 }
 
-function checkFileOperands(head: string, words: readonly string[], input: BashCheckInput): SubcommandVerdict {
-	const operands = words.slice(1).filter((word) => !word.startsWith("-"));
-	const targets = (head === "sed" ? operands.slice(1) : operands).map((operand) => ({
-		operand,
-		absolute: absoluteOperand(operand, input.cwd),
-	}));
-	if (targets.length === 0 || targets.some((target) => hasUnresolvable(target.operand)))
-		return { kind: "needs-approval" };
-	const outside = targets.find((target) => !insideDirectories(input.directories, target.absolute));
-	if (outside) {
+function checkFileOperands(
+	head: string,
+	effect: { readonly reads: readonly string[]; readonly writes: readonly string[] },
+	input: BashCheckInput,
+): SubcommandVerdict {
+	const operands = [...effect.reads, ...effect.writes];
+	if (effect.writes.length === 0 || operands.some(hasUnresolvable)) return { kind: "needs-approval" };
+	const absolute = operands.map((operand) => absoluteOperand(operand, input.cwd));
+	const outside = absolute.find((path) => !insideDirectories(input.directories, path));
+	if (outside !== undefined) {
 		return {
 			kind: "needs-approval",
-			message: `${head} in '${outside.absolute}' needs approval. The path is outside the working directories for this session ('${input.cwd}'). Allowing runs the command as written.`,
+			message: `${head} in '${outside}' needs approval. ${OUTSIDE_NOTE(input.cwd)} Allowing runs the command as written.`,
 		};
 	}
-	if (input.acceptEdits) return { kind: "allowed" };
-	const first = targets[0];
-	return { kind: "needs-approval", message: fileCommandAsk(head, first?.absolute ?? "", input.cwd) };
+	const unsafe = firstUnsafeWrite(effect.writes, input);
+	if (unsafe !== undefined) return { kind: "needs-approval", message: unsafe, safety: true };
+	if (input.acceptEdits) return { kind: "allowed", readOnly: false };
+	return { kind: "needs-approval", message: fileCommandAsk(head, absolute[0] ?? "", input.cwd) };
+}
+
+function checkInputRedirection(target: string, input: BashCheckInput): SubcommandVerdict {
+	if (hasUnresolvable(target)) return { kind: "needs-approval" };
+	const absolute = absoluteOperand(target, input.cwd);
+	if (insideDirectories(input.directories, absolute)) return { kind: "allowed", readOnly: true };
+	return {
+		kind: "blocked",
+		message: `Input redirection from '${absolute}' was blocked. For security, Claude Code may only read files in the allowed working directories for this session: ${quotedDirectories(input)}.`,
+	};
 }
 
 function checkRedirection(target: string, input: BashCheckInput): SubcommandVerdict {
@@ -510,12 +530,30 @@ function checkRedirection(target: string, input: BashCheckInput): SubcommandVerd
 	if (!insideDirectories(input.directories, absolute)) {
 		return {
 			kind: "needs-approval",
-			message: `Output redirection to '${absolute}' needs approval. The path is outside the working directories for this session ('${input.cwd}'). Allowing runs the command as written.`,
+			message: `Output redirection to '${absolute}' needs approval. ${OUTSIDE_NOTE(input.cwd)} Allowing runs the command as written.`,
 		};
 	}
-	if (input.acceptEdits) return { kind: "allowed" };
+	const unsafe = firstUnsafeWrite([target], input);
+	if (unsafe !== undefined) return { kind: "needs-approval", message: unsafe, safety: true };
+	if (input.acceptEdits) return { kind: "allowed", readOnly: false };
 	return { kind: "needs-approval", message: redirectionAsk(absolute, input.cwd) };
 }
+
+function firstUnsafeWrite(operands: readonly string[], input: BashCheckInput): string | undefined {
+	for (const operand of operands) {
+		const written = resolve(input.cwd, operand);
+		const unsafe = editSafetyMessage(written) ?? editSafetyMessage(absoluteOperand(operand, input.cwd));
+		if (unsafe !== undefined) return unsafe;
+	}
+	return undefined;
+}
+
+function quotedDirectories(input: BashCheckInput): string {
+	return input.directories.map((directory) => `'${directory}'`).join(", ");
+}
+
+const OUTSIDE_NOTE = (cwd: string): string =>
+	`The path is outside the working directories for this session ('${cwd}').`;
 
 const INSIDE_NOTE = (cwd: string): string =>
 	`The path is inside the working directories for this session ('${cwd}'), and Claude Code asks before a shell command creates, changes or removes files there.`;

@@ -1,0 +1,125 @@
+{
+	"id": "perm/bash-read-only-options",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "MARK_B\n",
+		"c.txt": "MARK_C\n",
+		"d.txt": "MARK_D\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sort --compress-program=/usr/bin/true c.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sort -r b.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep --regexp=a /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep -e a /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep --regexp=MARK_B b.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep MARK_B b.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep -f /etc/hosts b.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sort -o out.txt d.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"grep in '[^ ]*/etc/hosts' was blocked\\.",
+				"MARK_B",
+				"This command requires approval"
+			]
+		},
+		"files": [],
+		"absent": [
+			"$WORKSPACE/out.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 9,
+				"bodyMatch": [
+					"grep in '[^ ]*/etc/hosts' was blocked\\.",
+					"MARK_B",
+					"This command requires approval"
+				],
+				"bodyNotMatch": [
+					"MARK_C",
+					"MARK_D"
+				]
+			}
+		]
+	},
+	"skip": []
+}

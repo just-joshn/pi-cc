@@ -1,10 +1,7 @@
-/** Builds a session's permission inputs from the command line and the merged settings. */
-
 import type { PermissionInit, SettingsPermissions } from "./context.ts";
 import { parsePermissionMode } from "./mode.ts";
 import { parseRuleText } from "./rules.ts";
 
-/** The flags that reach the permission engine, in the shape `Args` carries them. */
 export interface PermissionFlags {
 	readonly permissionMode?: string;
 	readonly permissionPrompts?: string;
@@ -16,7 +13,6 @@ export interface PermissionFlags {
 export interface PermissionSetup {
 	readonly init: PermissionInit;
 	readonly prompts: "host" | "none";
-	/** Tool names whole-tool deny rules take away from the model, as patterns. */
 	readonly deniedToolPatterns: readonly string[];
 	readonly warnings: readonly string[];
 }
@@ -59,7 +55,6 @@ export function splitToolList(entries: readonly string[]): string[] {
 	return tools;
 }
 
-/** Whole-tool deny rules, as the tool-name patterns that hide those tools from the model. */
 function deniedPatterns(denyTexts: readonly string[]): string[] {
 	const patterns: string[] = [];
 	for (const text of denyTexts) {
@@ -99,6 +94,9 @@ export function permissionSetup(
 			...(cliMode === undefined ? {} : { cliMode }),
 			allowedTools,
 			disallowedTools,
+			...(typeof settingsValues.useAutoModeDuringPlan === "boolean"
+				? { useAutoModeDuringPlan: settingsValues.useAutoModeDuringPlan }
+				: {}),
 		},
 		prompts: flags.permissionPrompts === "none" ? "none" : "host",
 		deniedToolPatterns: deniedPatterns([...(settings.deny ?? []), ...disallowedTools]),
