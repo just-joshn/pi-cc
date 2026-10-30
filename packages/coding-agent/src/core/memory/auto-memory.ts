@@ -60,10 +60,9 @@ export function truncateMemoryIndex(content: string): string {
 		return trimmed;
 	}
 	const overLines = lines.length > MAX_INDEX_LINES;
-	const limit = [overLines && `${MAX_INDEX_LINES}-line`, overChars && `${MAX_INDEX_CHARS}-character`]
-		.filter(Boolean)
-		.join(" and ");
-	return `${kept}\n\n> Note: MEMORY.md is over the ${limit} limit, so ${cutSummary(kept, trimmed, lines.length)}. Keep each index entry to one short line and move details into topic files.`;
+	const limits = [overLines && `${MAX_INDEX_LINES}-line`, overChars && `${MAX_INDEX_CHARS}-character`].filter(Boolean);
+	const limit = `${limits.join(" and ")} ${limits.length > 1 ? "limits" : "limit"}`;
+	return `${kept}\n\n> Note: MEMORY.md is over the ${limit}, so ${cutSummary(kept, trimmed, lines.length)}. Keep each index entry to one short line and move details into topic files.`;
 }
 
 function cutSummary(kept: string, full: string, total: number): string {

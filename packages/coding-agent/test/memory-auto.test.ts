@@ -109,6 +109,11 @@ describe("MEMORY.md", () => {
 		expect(note).toMatch(/17 of 100 lines were left out, starting at line 84\./);
 	});
 
+	test("a file over both limits names both limits", () => {
+		const lines = Array.from({ length: 300 }, () => "x".repeat(200));
+		expect(truncateMemoryIndex(lines.join("\n"))).toContain("over the 200-line and 25000-character limits, so");
+	});
+
 	test("one line left out is singular", () => {
 		const lines = Array.from({ length: 201 }, (_, index) => `L${index + 1}`);
 		expect(truncateMemoryIndex(lines.join("\n"))).toMatch(/1 of 201 lines was left out, starting at line 201\./);
