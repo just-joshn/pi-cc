@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@earendil-works/pi-ai/compat";
@@ -100,6 +100,70 @@ describe("CC model-specific prior-read checks", () => {
 		},
 	);
 
+	describe.each(["claude-haiku-4-5", "claude-opus-5-5"])("stale detection by modification time on %s", (id) => {
+		const touch = (file: string) => {
+			const later = new Date(Date.now() + 5000);
+			utimesSync(file, later, later);
+		};
+		const readCases = [
+			["offset 2", { path: "a.txt", offset: 2 }],
+			["limit 1", { path: "a.txt", limit: 1 }],
+		] as const;
+
+		it.each(readCases)("a %s read then a touch recovers the Edit and refuses the Write", async (_name, readArgs) => {
+			writeFileSync(join(cwd, "a.txt"), "before\nsecond\nthird\n");
+			const edit = await sessionWithTool(cwd, id, "edit");
+			const write = await sessionWithTool(cwd, id, "write");
+			try {
+				await edit.readTool.execute("read", readArgs);
+				await write.readTool.execute("read", readArgs);
+				touch(join(cwd, "a.txt"));
+				const result = await edit.tool.execute("edit", edit.args);
+				expect(result.content[0]).toMatchObject({
+					text: expect.stringContaining("the file had been modified on disk"),
+				});
+				writeFileSync(join(cwd, "a.txt"), "before\nsecond\nthird\n");
+				touch(join(cwd, "a.txt"));
+				await expect(write.tool.execute("write", write.args)).rejects.toThrow(toolUseError(CC_TOOL_TEXT.editStale));
+			} finally {
+				edit.session.dispose();
+				write.session.dispose();
+			}
+		});
+
+		it("a full read then a touch applies both tools with the file state suffix", async () => {
+			const edit = await sessionWithTool(cwd, id, "edit");
+			const write = await sessionWithTool(cwd, id, "write");
+			try {
+				await edit.readTool.execute("read", { path: "a.txt" });
+				touch(join(cwd, "a.txt"));
+				const edited = await edit.tool.execute("edit", edit.args);
+				expect(edited.content[0]).toMatchObject({ text: expect.stringContaining("file state is current") });
+				await write.readTool.execute("read", { path: "a.txt" });
+				touch(join(cwd, "a.txt"));
+				await write.tool.execute("write", write.args);
+				expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("after\n");
+			} finally {
+				edit.session.dispose();
+				write.session.dispose();
+			}
+		});
+
+		it("changed content with an unadvanced modification time is not stale", async () => {
+			const { session, tool, readTool, args } = await sessionWithTool(cwd, id, "write");
+			try {
+				await readTool.execute("read", { path: "a.txt" });
+				const before = new Date(Date.now() - 60_000);
+				writeFileSync(join(cwd, "a.txt"), "changed before\n");
+				utimesSync(join(cwd, "a.txt"), before, before);
+				await tool.execute("write", args);
+				expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("after\n");
+			} finally {
+				session.dispose();
+			}
+		});
+	});
+
 	it.each(["claude-haiku-4-5", "claude-opus-5-5"])("refuses a stale Write on %s for every model", async (id) => {
 		const { session, tool, readTool, args } = await sessionWithTool(cwd, id, "write");
 		try {
@@ -134,6 +198,11 @@ describe("CC model-specific prior-read checks", () => {
 		["claude-3-5-sonnet-v2@20241022", "claude-3-5-sonnet"],
 		["claude-haiku-4-5[1m]", "claude-haiku-4-5"],
 		["claude-opus-4", "claude-opus-4-0"],
+		["claude-opus-4-10", "claude-opus-4-10"],
+		["claude-opus-40", "claude-opus-40"],
+		["claude-sonnet-40", "claude-sonnet-40"],
+		["claude-sonnet-4-10-20251001", "claude-sonnet-4-10"],
+		["us.anthropic.claude-opus-4-10-v1:0", "claude-opus-4-10"],
 		["claude-haiku-4-5-latest", "claude-haiku-4-5"],
 		["claude-opus-4-7", "claude-opus-4-7"],
 		["gpt-5", "gpt-5"],
@@ -155,6 +224,14 @@ describe("CC model-specific prior-read checks", () => {
 			expect(call.inputError).toBe(tooBigError("limit"));
 		},
 	);
+
+	it("reports an unsafe offset and an unsafe limit together, offset first", () => {
+		const call = projectToolCall({
+			name: "Read",
+			arguments: { file_path: "a.txt", limit: "9007199254740992", offset: 9007199254740992 },
+		});
+		expect(call.inputError).toBe(tooBigError("offset", "limit"));
+	});
 
 	it.each(["9007199254740992", "99999999999999999999"])(
 		"rejects an unsafe Read offset %s with CC's Zod message",
@@ -181,19 +258,17 @@ describe("CC model-specific prior-read checks", () => {
 	);
 });
 
-function tooBigError(field: "limit" | "offset"): string {
+function tooBigError(...fields: Array<"limit" | "offset">): string {
 	return `<tool_use_error>InputValidationError: ${JSON.stringify(
-		[
-			{
-				code: "too_big",
-				maximum: Number.MAX_SAFE_INTEGER,
-				note: "Integers must be within the safe integer range.",
-				origin: "int",
-				inclusive: true,
-				path: [field],
-				message: "Too big: expected int to be <=9007199254740991",
-			},
-		],
+		fields.map((field) => ({
+			code: "too_big",
+			maximum: Number.MAX_SAFE_INTEGER,
+			note: "Integers must be within the safe integer range.",
+			origin: "int",
+			inclusive: true,
+			path: [field],
+			message: "Too big: expected int to be <=9007199254740991",
+		})),
 		null,
 		2,
 	)}</tool_use_error>`;
