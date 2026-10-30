@@ -2,6 +2,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
+import { type CcTuiSettings, NO_CC_TUI } from "../../../src/core/settings/cc/tui.ts";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { createHarness, createTestUiContext } from "../harness.ts";
@@ -52,6 +53,8 @@ type RebindContext = {
 };
 
 type ReloadCommandContext = {
+	ccTui: CcTuiSettings;
+	newBorder: () => unknown;
 	hideThinkingBlock: boolean;
 	session: {
 		isStreaming: boolean;
@@ -121,6 +124,8 @@ type ReloadCommandContextOverrides = Omit<
 function createReloadCommandContext(overrides: ReloadCommandContextOverrides = {}): ReloadCommandContext {
 	const editor = overrides.editor ?? {};
 	return {
+		ccTui: NO_CC_TUI,
+		newBorder: () => new Container(),
 		hideThinkingBlock: overrides.hideThinkingBlock ?? false,
 		session: {
 			isStreaming: false,

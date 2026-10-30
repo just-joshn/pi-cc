@@ -11,6 +11,8 @@ export type CcJsonKind = "string" | "boolean" | "number" | "object" | "array" | 
 
 export interface CcFieldRule {
 	readonly kind: CcJsonKind | "enum";
+	/** The detail CC reports for a field it validates as a union, where it names no single expected type. */
+	readonly mismatch?: string;
 	/** The admitted spellings of an enum field. */
 	readonly values?: readonly string[];
 	/** The sub-fields of an object field. A sub-key outside this table loads unchecked. */
@@ -38,6 +40,11 @@ export const SETTINGS_FIELDS: Readonly<Record<string, CcFieldRule>> = {
 	requiredMinimumVersion: { kind: "string" },
 	requiredMaximumVersion: { kind: "string" },
 	autoUpdatesChannel: { kind: "enum", values: ["latest", "stable", "rc"] },
+	tui: { kind: "enum", values: ["default", "fullscreen"] },
+	timeZone: { kind: "string" },
+	timeFormat: { kind: "string", mismatch: "Invalid input" },
+	prefersReducedMotion: { kind: "boolean" },
+	axScreenReader: { kind: "boolean" },
 
 	allowManagedHooksOnly: { kind: "boolean" },
 	allowManagedMcpServersOnly: { kind: "boolean" },
@@ -101,6 +108,16 @@ const LENIENT_FIELDS: Readonly<Record<string, CcLenientRule>> = {
 		admits: Array.isArray,
 		detail: (value) => `"deniedMcpServers" must be an array; received ${describe(value)}. This field was ignored.`,
 	},
+};
+
+/**
+ * Fields Claude Code validates with a fallback to unset: a value that fails is dropped without a word
+ * and the rest of the file loads.
+ */
+const SILENT_FIELDS: Readonly<Record<string, (value: unknown) => boolean>> = {
+	editorMode: (value) => value === "normal" || value === "vim",
+	maxProseWidth: (value) => typeof value === "number" && Number.isInteger(value) && value >= 40,
+	vimInsertModeRemaps: isJsonObject,
 };
 
 /** Old spellings Claude Code renames before validation. The alias itself never reaches the values. */
@@ -223,6 +240,13 @@ function readField(
 		}
 		return;
 	}
+	const silent = SILENT_FIELDS[key];
+	if (silent !== undefined) {
+		if (silent(value)) {
+			values[key] = value;
+		}
+		return;
+	}
 	if (key === "deniedModels") {
 		if (source === "policy") {
 			values[key] = value;
@@ -255,7 +279,7 @@ function validateField(path: string, value: unknown, rule: CcFieldRule): CcField
 	if ((rule.kind === "string" || rule.kind === "boolean" || rule.kind === "number") && typeof value === rule.kind) {
 		return ok(value);
 	}
-	return failed(path, `Expected ${rule.kind}, but received ${describe(value)}`);
+	return failed(path, rule.mismatch ?? `Expected ${rule.kind}, but received ${describe(value)}`);
 }
 
 function validateObject(

@@ -1,6 +1,6 @@
 import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocomplete.ts";
 import { getKeybindings } from "../keybindings.ts";
-import { decodePrintableKey, matchesKey } from "../keys.ts";
+import { decodePrintableKey, matchesKey, parseKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
 import {
 	type Component,
@@ -22,6 +22,10 @@ import {
 	sliceByColumn,
 	visibleWidth,
 } from "../utils.ts";
+import { INSERT_STATE, type VimInput, type VimState, vimKey } from "../vim/engine.ts";
+import { BACKSPACE } from "../vim/motions.ts";
+import { type PendingRemap, stepRemap, type VimConfig } from "../vim/remaps.ts";
+import { clampNormal } from "../vim/text.ts";
 import { findWordBackward, findWordForward } from "../word-navigation.ts";
 import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.ts";
 
@@ -294,6 +298,22 @@ function createScrollBorder(direction: "↑" | "↓", hiddenLineCount: number, w
 	return sliceByColumn(indicator, 0, indicatorWidth, true) + ellipsis;
 }
 
+interface VimRuntime {
+	config: VimConfig;
+	state: VimState;
+	remap: PendingRemap | undefined;
+	/** Undo stack depth when the current insert session began, so Escape can fold the session into one undo step. */
+	insertUndoDepth: number;
+}
+
+/** Normal-mode keys with no printable form that vim maps to a motion, by editor action. */
+const VIM_KEY_ACTIONS = [
+	["tui.editor.cursorLeft", "h"],
+	["tui.editor.cursorRight", "l"],
+	["tui.editor.deleteCharBackward", BACKSPACE],
+	["tui.editor.deleteCharForward", "x"],
+] as const;
+
 export class Editor implements Component, Focusable {
 	private state: EditorState = {
 		lines: [""],
@@ -371,6 +391,9 @@ export class Editor implements Component, Focusable {
 
 	// Undo support
 	private undoStack = new UndoStack<EditorSnapshot>();
+
+	// Vim mode: undefined when off.
+	private vim: VimRuntime | undefined;
 
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
@@ -631,6 +654,8 @@ export class Editor implements Component, Focusable {
 				result.push(`${leftPadding}${line}${linePadding}${rightPadding}`);
 			}
 		}
+
+		if (this.vim?.state.mode === "insert") result.push(`${leftPadding}-- INSERT --`.slice(0, width));
 
 		return result;
 	}
@@ -1120,6 +1145,37 @@ export class Editor implements Component, Focusable {
 
 	getCursor(): { line: number; col: number } {
 		return { line: this.state.cursorLine, col: this.state.cursorCol };
+	}
+
+	/** The cursor as an index into getText(). */
+	getCursorOffset(): number {
+		let offset = this.state.cursorCol;
+		for (let line = 0; line < this.state.cursorLine; line++) offset += (this.state.lines[line]?.length ?? 0) + 1;
+		return offset;
+	}
+
+	/**
+	 * Replace the text and put the cursor at `offset` (an index into the new text) as one undo step. Unlike
+	 * setText, paste markers keep their pasted content.
+	 */
+	setBuffer(text: string, offset: number): void {
+		this.cancelAutocomplete();
+		this.lastAction = null;
+		const changed = this.getText() !== text;
+		if (changed) {
+			this.exitHistoryBrowsing();
+			this.pushUndoSnapshot();
+			this.state.lines = text.split("\n");
+		}
+		let remaining = Math.max(0, Math.min(offset, text.length));
+		let line = 0;
+		while (line < this.state.lines.length - 1 && remaining > (this.state.lines[line]?.length ?? 0)) {
+			remaining -= (this.state.lines[line]?.length ?? 0) + 1;
+			line++;
+		}
+		this.state.cursorLine = line;
+		this.setCursorCol(remaining);
+		if (changed && this.onChange) this.onChange(this.getText());
 	}
 
 	setText(text: string): void {
@@ -2127,7 +2183,8 @@ export class Editor implements Component, Focusable {
 		this.undoStack.push({ state: this.state, pastes: this.pastes, pasteCounter: this.pasteCounter });
 	}
 
-	private undo(): void {
+	/** Undo the last edit. */
+	undo(): void {
 		this.exitHistoryBrowsing();
 		const snapshot = this.undoStack.pop();
 		if (!snapshot) return;
@@ -2139,6 +2196,120 @@ export class Editor implements Component, Focusable {
 		if (this.onChange) {
 			this.onChange(this.getText());
 		}
+	}
+
+	/**
+	 * Turn vim editing on (a config) or off (undefined). Turning it on starts in insert mode; turning it
+	 * on again only swaps the config.
+	 */
+	setVimMode(config: VimConfig | undefined): void {
+		if (config === undefined) {
+			this.vim = undefined;
+		} else if (this.vim === undefined) {
+			this.vim = { config, state: INSERT_STATE, remap: undefined, insertUndoDepth: this.undoStack.length };
+		} else {
+			this.vim.config = config;
+		}
+		this.tui.requestRender();
+	}
+
+	getVimMode(): "insert" | "normal" | undefined {
+		return this.vim?.state.mode;
+	}
+
+	/**
+	 * Offer a key to vim mode before normal editing. Returns true when vim consumed it. Keys vim leaves
+	 * alone (Enter, chords, typing in insert mode) return false and belong to handleInput.
+	 */
+	handleVimInput(data: string, isEscape: boolean): boolean {
+		const vim = this.vim;
+		if (vim === undefined) return false;
+		if (this.isInPaste || this.jumpMode !== null || data.includes("\x1b[200~")) {
+			vim.remap = undefined;
+			return false;
+		}
+		if (vim.state.mode === "insert") return this.handleVimInsertInput(vim, data, isEscape);
+		if (isEscape) return this.applyVimInput(vim, { kind: "escape" });
+		const printable = this.vimPrintable(data);
+		if (printable === undefined) return this.applyVimInput(vim, this.vimSpecialKey(vim, data));
+		// A read that carries several characters is typed one at a time.
+		let consumed = false;
+		for (const { segment } of graphemeSegmenter.segment(printable)) {
+			consumed = this.applyVimInput(vim, { kind: "key", key: segment }) || consumed;
+		}
+		return consumed;
+	}
+
+	private vimPrintable(data: string): string | undefined {
+		const decoded = decodePrintableKey(data);
+		if (decoded !== undefined) return decoded;
+		return data.length > 0 && !data.startsWith("\x1b") && !/[\x00-\x1f\x7f]/.test(data) ? data : undefined;
+	}
+
+	private vimSpecialKey(vim: VimRuntime, data: string): VimInput {
+		const kb = getKeybindings();
+		const key = parseKey(data);
+		if (key === undefined || key.includes("+")) return { kind: "other" };
+		const idle = vim.state.pending === "";
+		for (const [action, mapped] of VIM_KEY_ACTIONS) {
+			if (kb.matches(data, action) && (idle || mapped !== "x")) return { kind: "key", key: mapped };
+		}
+		if (!idle && kb.matches(data, "tui.editor.cursorUp")) return { kind: "key", key: "k" };
+		if (!idle && kb.matches(data, "tui.editor.cursorDown")) return { kind: "key", key: "j" };
+		return { kind: "other" };
+	}
+
+	private handleVimInsertInput(vim: VimRuntime, data: string, isEscape: boolean): boolean {
+		const pending = vim.remap;
+		vim.remap = undefined;
+		if (this.autocompleteState) return false;
+		if (isEscape) return this.applyVimInput(vim, { kind: "escape" });
+		const typed = this.vimPrintable(data);
+		if (typed === undefined || vim.config.insertRemaps.size === 0) return false;
+		const buffer = { text: this.getText(), offset: this.getCursorOffset() };
+		const now = (vim.config.now ?? Date.now)();
+		const result = stepRemap(vim.config.insertRemaps, pending, typed, buffer, now);
+		vim.remap = result.pending;
+		if (result.fire === "chunk") return this.applyVimInput(vim, { kind: "escape" });
+		if (result.fire === "pair" && pending !== undefined) {
+			const cut = buffer.offset - pending.char.length;
+			const text = buffer.text.slice(0, cut) + buffer.text.slice(buffer.offset);
+			return this.applyVimInput(vim, { kind: "escape" }, { text, offset: cut });
+		}
+		return false;
+	}
+
+	/** Runs one key through the engine and applies what it asks for. Returns whether the key was consumed. */
+	private applyVimInput(vim: VimRuntime, input: VimInput, buffer?: { text: string; offset: number }): boolean {
+		const current = buffer ?? { text: this.getText(), offset: this.getCursorOffset() };
+		const depth = this.undoStack.length;
+		const before = vim.state.mode;
+		const step = vimKey(vim.state, input, current);
+		vim.state = step.state;
+		if (step.history) this.navigateHistory(step.history === "up" ? -1 : 1);
+		if (step.undo) this.undo();
+		if (step.buffer) this.setBuffer(step.buffer.text, step.buffer.offset);
+		else if (buffer !== undefined) this.setBuffer(buffer.text, buffer.offset);
+		if (step.state.mode === "normal") this.clampVimCursor();
+		if (before === "normal" && step.state.mode === "insert") vim.insertUndoDepth = depth;
+		if (before === "insert" && step.state.mode === "normal") this.foldUndoSince(vim.insertUndoDepth);
+		this.tui.requestRender();
+		return !step.passThrough;
+	}
+
+	private clampVimCursor(): void {
+		const text = this.getText();
+		const offset = this.getCursorOffset();
+		const clamped = clampNormal(text, offset);
+		if (clamped !== offset) this.setBuffer(text, clamped);
+	}
+
+	// One insert session, however many words it typed, undoes in one step: keep only its oldest snapshot.
+	private foldUndoSince(depth: number): void {
+		if (this.undoStack.length <= depth + 1) return;
+		let oldest: EditorSnapshot | undefined;
+		while (this.undoStack.length > depth) oldest = this.undoStack.pop();
+		if (oldest !== undefined) this.undoStack.push(oldest);
 	}
 
 	/**

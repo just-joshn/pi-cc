@@ -3,6 +3,7 @@ import { Container, getKeybindings, isViewportTUI, ScrollView, setKeybindings, T
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
+import { type CcTuiSettings, NO_CC_TUI } from "../src/core/settings/cc/tui.ts";
 import type { FullscreenExitOutput, TuiMode } from "../src/core/settings-manager.ts";
 import {
 	BranchSummaryStatusIndicator,
@@ -417,6 +418,8 @@ type ClearStatusContext = {
 	options: { tuiMode?: TuiMode };
 	ui: { getClearOnShrink: () => boolean };
 	idleStatus: Component;
+	ccTui?: CcTuiSettings;
+	ccStillIndicator?(): unknown;
 	setEditorWorkingStatusIndicator(indicator: StatusIndicator | undefined): boolean;
 };
 
@@ -442,6 +445,8 @@ describe("clear-on-shrink status spacing", () => {
 			options: { tuiMode: "regular" },
 			ui: { getClearOnShrink: () => true },
 			idleStatus: new Text("", 0, 0),
+			ccTui: NO_CC_TUI,
+			ccStillIndicator: Reflect.get(InteractiveMode.prototype, "ccStillIndicator"),
 			setEditorWorkingStatusIndicator: interactiveModePrototype.setEditorWorkingStatusIndicator,
 		};
 		const indicators = [

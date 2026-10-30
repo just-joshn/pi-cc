@@ -1,0 +1,37 @@
+{
+	"id": "tui/lenient-keys-drop-silently",
+	"area": "tui",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$CONFIG/settings.json": "{\"maxProseWidth\": 10, \"editorMode\": \"emacs\", \"vimInsertModeRemaps\": [1], \"model\": \"claude-opus-4-5\"}\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stderr": {
+			"equals": ""
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-opus-4-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

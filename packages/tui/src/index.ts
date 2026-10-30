@@ -195,4 +195,5 @@ export {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "./utils.ts";
+export { parseVimInsertRemaps, type VimConfig, type VimInsertRemaps } from "./vim/remaps.ts";
 export type { WheelScrollLines } from "./wheel-scroll.ts";

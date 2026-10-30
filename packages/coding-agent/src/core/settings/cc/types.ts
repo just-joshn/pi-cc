@@ -7,6 +7,9 @@ export type CcSettingsSource = "user" | "project" | "local" | "flag" | "policy";
 /** The one order table. Later tiers win per key. `policy` is last: an operator tier, not a session tier. */
 export const CC_SETTINGS_ORDER: readonly CcSettingsSource[] = ["user", "project", "local", "flag", "policy"];
 
+/** Keys CC reads through its operator-tier lookup (`i7`): policy first, then flag, then user. Never project or local. */
+export const CC_OPERATOR_TIER_KEYS: readonly string[] = ["axScreenReader", "vimInsertModeRemaps"];
+
 /** The tiers `--setting-sources` can switch off. The flag and policy tiers are always admitted. */
 export const CC_FILE_SOURCES: readonly CcSettingsSource[] = ["user", "project", "local"];
 
@@ -20,6 +23,8 @@ export interface CcSettings {
 	readonly values: Readonly<Record<string, unknown>>;
 	/** Which tier supplied the winning value, per key. Feeds the report and later units. */
 	readonly sources: ReadonlyMap<string, CcSettingsSource>;
+	/** The keys CC reads only from the policy, flag and user tiers, from the first of those tiers that defines each. */
+	readonly operatorTier: Readonly<Record<string, unknown>>;
 	/** `pluginConfigs.<id>.options` per plugin id, merged over the user, flag and policy tiers. */
 	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }

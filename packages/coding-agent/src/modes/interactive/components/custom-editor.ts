@@ -23,6 +23,7 @@ export class CustomEditor extends Editor {
 	private workingStatusIndicator: StatusIndicator | undefined;
 	private chordStatus: string | undefined;
 	public readonly embedWorkingStatus: boolean;
+	private flat = false;
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 
 	// Special handlers that can be dynamically replaced
@@ -42,8 +43,18 @@ export class CustomEditor extends Editor {
 		this.workingStatusIndicator = indicator;
 	}
 
+	/** Flat mode drops the decorative rule above and below the prompt; status text keeps its line. */
+	setFlat(flat: boolean): void {
+		this.flat = flat;
+	}
+
+	protected override renderBottomBorder(width: number, hiddenLineCount: number): string {
+		return this.flat && hiddenLineCount === 0 ? "" : super.renderBottomBorder(width, hiddenLineCount);
+	}
+
 	protected override renderTopBorder(width: number, hiddenLineCount: number): string {
 		if (this.chordStatus) return this.borderColor(truncateToWidth(`── ${this.chordStatus} `, width, ""));
+		if (this.flat && hiddenLineCount === 0 && !this.workingStatusIndicator) return "";
 		if (!this.embedWorkingStatus || !this.workingStatusIndicator || width <= 0) {
 			return super.renderTopBorder(width, hiddenLineCount);
 		}
@@ -140,6 +151,11 @@ export class CustomEditor extends Editor {
 	}
 
 	private handleBoundInput(data: string): void {
+		// Vim mode sees keys before app actions. It consumes Escape in insert mode and Escape with a command pending;
+		// otherwise Escape falls through to the interrupt handling below.
+		const interrupt = this.keybindings.matches(data, "app.interrupt");
+		if (!(interrupt && this.isShowingAutocomplete()) && this.handleVimInput(data, interrupt)) return;
+
 		// Selection page keys move an open autocomplete menu before app actions run.
 		// This lets users bind Ctrl+V even though it pastes images by default.
 		if (
