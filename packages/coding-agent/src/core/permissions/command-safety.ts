@@ -4,7 +4,8 @@
  * Every verdict here comes from the command's words and redirections, the working directories and
  * the mode alone. Each carries a tier, which is how far an answer can reach to clear it:
  *
- *   safety     a settings or shell-startup file. No rule clears it, a whole-tool allow does not, only bypass does.
+ *   safety     a settings or shell-startup file, `&`, a dangerous removal, a blocked read. No rule clears it and a
+ *              whole-tool allow does not. Only bypass does, except for a breaker that is bypass-immune (see breakers.ts).
  *   path       an operand the check cannot place inside the working directories, or cannot resolve.
  *              A whole-tool allow clears it. A prefix or exact rule does not.
  *   construct  an option or program text that runs another program or writes a file.
@@ -13,6 +14,7 @@
  */
 
 import { dirname, resolve } from "node:path";
+import { type Breaker, isBypassImmune, READ_BLOCK_MESSAGE, unanalyzableUnderReadBlock } from "./breakers.ts";
 import { canonicalPath, editSafetyMessage, insideDirectories } from "./paths.ts";
 import type { CommandEffect } from "./read-only.ts";
 
@@ -21,24 +23,37 @@ export type Tier = "safety" | "path" | "construct" | "approval";
 export type Verdict =
 	| { readonly kind: "none" }
 	| { readonly kind: "allowed" }
-	| { readonly kind: "ask"; readonly tier: Tier; readonly message?: string };
+	| { readonly kind: "ask"; readonly tier: Tier; readonly message?: string; readonly breaker?: Breaker };
 
 export interface Scope {
 	readonly directories: readonly string[];
 	readonly cwd: string;
 	readonly home: string;
 	readonly acceptEdits: boolean;
+	/** `permissions.blockReadsOutsideWorkingDirectories`: a read outside the working directories asks and bypass does not clear it. */
+	readonly blockReads?: boolean;
 }
 
 const NONE: Verdict = { kind: "none" };
 const TIER_ORDER: readonly Tier[] = ["approval", "construct", "path", "safety"];
 
-/** The verdict that is hardest to clear, the first of them on a tie. An ask outranks an allowed, which outranks none. */
+/**
+ * How hard a verdict is to clear. An ask outranks an allowed, which outranks none, and among asks the
+ * tier decides, with a bypass-immune breaker above every other safety check. Precedence is this
+ * number alone, so no check order can let a milder verdict win.
+ */
+export function severity(verdict: Verdict): number {
+	if (verdict.kind === "none") return -1;
+	if (verdict.kind === "allowed") return 0;
+	return (TIER_ORDER.indexOf(verdict.tier) + 1) * 2 + (isBypassImmune(verdict.breaker) ? 1 : 0);
+}
+
+/** The verdict that is hardest to clear, the first of them on a tie. */
 export function strictest(verdicts: readonly Verdict[]): Verdict {
 	let found: Verdict = NONE;
 	let rank = -1;
 	for (const verdict of verdicts) {
-		const here = verdict.kind === "ask" ? TIER_ORDER.indexOf(verdict.tier) + 1 : verdict.kind === "allowed" ? 0 : -1;
+		const here = severity(verdict);
 		if (here > rank) {
 			found = verdict;
 			rank = here;
@@ -78,6 +93,24 @@ function expandHome(path: string, home: string, variables: boolean): string | un
 	return variable ? home + path.slice(variable[0].length) : undefined;
 }
 
+/** The ask for a read the read block does not allow. Nothing but a person's answer clears it, bypass included. */
+const READ_BLOCKED: Verdict = {
+	kind: "ask",
+	tier: "safety",
+	message: READ_BLOCK_MESSAGE,
+	breaker: "outsideReadsBlocked",
+};
+
+function unanalyzable(message: string, scope: Scope): Verdict {
+	if (!scope.blockReads) return { kind: "ask", tier: "path", message };
+	return {
+		kind: "ask",
+		tier: "safety",
+		message: unanalyzableUnderReadBlock(message),
+		breaker: "outsideReadsBlocked",
+	};
+}
+
 function landing(path: string, scope: Scope): string {
 	return canonicalPath(path, scope.cwd);
 }
@@ -101,12 +134,13 @@ export function readOperandVerdict(head: string, operands: readonly string[], sc
 		const written = home ?? operand;
 		if (EXPANDED_AT_RUNTIME.test(written)) {
 			if (textOnly) return { kind: "ask", tier: "approval" };
-			return { kind: "ask", tier: "path", message: VARIABLE };
+			return unanalyzable(VARIABLE, scope);
 		}
 		if (textOnly) continue;
 		const place = GLOB_CHARACTER.test(written) ? globDirectory(written) : written;
 		const absolute = landing(place, scope);
 		if (insideDirectories(scope.directories, absolute)) continue;
+		if (scope.blockReads) return READ_BLOCKED;
 		return { kind: "ask", tier: "path", message: blockedRead(head, verb, absolute, scope) };
 	}
 	return NONE;
@@ -137,6 +171,11 @@ export function fileOperandVerdict(
 		if (unsafe !== undefined) return { kind: "ask", tier: "safety", message: unsafe };
 	}
 	const absolute = resolved.map((path) => landing(path, scope));
+	if (
+		scope.blockReads &&
+		absolute.slice(0, effect.reads.length).some((path) => !insideDirectories(scope.directories, path))
+	)
+		return READ_BLOCKED;
 	const outside = absolute.find((path) => !insideDirectories(scope.directories, path));
 	if (outside !== undefined) {
 		return {
@@ -156,10 +195,11 @@ export function fileOperandVerdict(
 
 export function inputRedirectionVerdict(target: string, scope: Scope): Verdict {
 	const written = expandHome(target, scope.home, false) ?? target;
-	if (EXPANDED_AT_RUNTIME.test(written)) return { kind: "ask", tier: "path", message: VARIABLE };
+	if (EXPANDED_AT_RUNTIME.test(written)) return unanalyzable(VARIABLE, scope);
 	if (GLOB_CHARACTER.test(written)) return { kind: "ask", tier: "path", message: EXPANSION };
 	const absolute = landing(written, scope);
 	if (insideDirectories(scope.directories, absolute)) return NONE;
+	if (scope.blockReads) return READ_BLOCKED;
 	return {
 		kind: "ask",
 		tier: "path",

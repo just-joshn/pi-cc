@@ -13,6 +13,7 @@
  */
 
 import { homedir } from "node:os";
+import { type Breaker, isBypassImmune, unanalyzableUnderReadBlock } from "./breakers.ts";
 import {
 	constructVerdict,
 	fileOperandVerdict,
@@ -20,11 +21,13 @@ import {
 	outputRedirectionVerdict,
 	readOperandVerdict,
 	type Scope,
+	severity,
 	strictest,
 	type Tier,
 	type Verdict,
 } from "./command-safety.ts";
 import { commandEffect } from "./read-only.ts";
+import { dangerousRemoval } from "./removal.ts";
 import type { PermissionRule } from "./rules.ts";
 
 export interface ParsedCommand {
@@ -271,7 +274,7 @@ export function matchRule(rules: readonly PermissionRule[], command: string): Pe
 
 export type SubcommandVerdict =
 	| { readonly kind: "allowed"; readonly rule?: PermissionRule; readonly readOnly: boolean }
-	| { readonly kind: "ask"; readonly tier: Tier; readonly message?: string };
+	| { readonly kind: "ask"; readonly tier: Tier; readonly message?: string; readonly breaker?: Breaker };
 
 export interface BashCheckInput {
 	readonly command: string;
@@ -282,6 +285,8 @@ export interface BashCheckInput {
 	readonly directories: readonly string[];
 	readonly cwd: string;
 	readonly home?: string;
+	readonly blockReads?: boolean;
+	readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 export type BashCheck =
@@ -291,6 +296,7 @@ export type BashCheck =
 			readonly message: string | undefined;
 			readonly rule?: PermissionRule;
 			readonly safety?: boolean;
+			readonly breaker?: Breaker;
 	  }
 	| { readonly behavior: "allow"; readonly rule?: PermissionRule; readonly readOnly: boolean };
 
@@ -314,6 +320,7 @@ export function checkBash(input: BashCheckInput): BashCheck {
 		cwd: input.cwd,
 		home: input.home ?? homedir(),
 		acceptEdits: input.acceptEdits,
+		blockReads: input.blockReads === true,
 	};
 	const judged: Judged[] = [
 		...parsed.parts.map((part) => ({ subject: part, verdict: checkPart(part, input, scope) })),
@@ -326,11 +333,29 @@ export function checkBash(input: BashCheckInput): BashCheck {
 			verdict: ruled(outputRedirectionVerdict(target, scope), false),
 		})),
 	];
-	const pending = judged.filter(({ verdict }) => verdict.kind === "ask");
-	const touchesSensitive = pending.some(({ verdict }) => verdict.kind === "ask" && verdict.tier === "safety");
-	const structural = structuralAsk(parsed);
-	if (structural && !(structural.safety && touchesSensitive))
-		return { behavior: "ask", message: structural.message, safety: structural.safety };
+	const structural = structuralAsk(parsed, scope);
+	// Measured: claude reads no path or redirection inside a group or substitution, so only a breaker
+	// that is bypass-immune (a removal, the read block) can still be seen there.
+	const blind = structural !== undefined && structural.tier !== "safety";
+	const pending = judged.filter(
+		({ verdict }) => verdict.kind === "ask" && !(blind && !isBypassImmune(verdict.breaker)),
+	);
+	const removal = removalAsk(command, input, scope);
+	const worstPending = Math.max(-1, ...pending.map(({ verdict }) => severity(verdict)));
+	if (removal && severity(removal) >= Math.max(worstPending, structural ? severity(structural) : -1)) {
+		return { behavior: "ask", message: removal.message, safety: true, breaker: removal.breaker };
+	}
+	if (
+		structural &&
+		(severity(structural) > worstPending || (severity(structural) === worstPending && structural.tier !== "safety"))
+	) {
+		return {
+			behavior: "ask",
+			message: structural.message,
+			safety: structural.tier === "safety",
+			...(structural.breaker ? { breaker: structural.breaker } : {}),
+		};
+	}
 	if (pending.length === 0) {
 		const rule = judged
 			.map(({ verdict }) => (verdict.kind === "allowed" ? verdict.rule : undefined))
@@ -341,12 +366,20 @@ export function checkBash(input: BashCheckInput): BashCheck {
 		return rule ? { behavior: "allow", rule, readOnly } : { behavior: "allow", readOnly };
 	}
 	const only = pending[0]?.verdict;
-	const safety = touchesSensitive;
-	if (judged.length === 1 || (pending.length === 1 && only?.kind === "ask" && only.message !== undefined)) {
+	const worst = strictest(pending.map(({ verdict }) => verdict));
+	const safety = worst.kind === "ask" && worst.tier === "safety";
+	const breaker = worst.kind === "ask" ? worst.breaker : undefined;
+	const named =
+		pending.length === 1 &&
+		only?.kind === "ask" &&
+		only.message !== undefined &&
+		only.breaker !== "outsideReadsBlocked";
+	if (judged.length === 1 || named) {
 		return {
 			behavior: "ask",
 			message: (only?.kind === "ask" ? only.message : undefined) ?? NEEDS_APPROVAL,
 			safety,
+			...(breaker ? { breaker } : {}),
 		};
 	}
 	const subjects = pending.map(({ subject }) => subject);
@@ -355,19 +388,42 @@ export function checkBash(input: BashCheckInput): BashCheck {
 		behavior: "ask",
 		message: `This Bash command contains multiple operations. The following ${part} approval: ${subjects.join(", ")}`,
 		safety,
+		...(breaker ? { breaker } : {}),
 	};
 }
 
-function structuralAsk(parsed: ParsedCommand): { message: string; safety: boolean } | undefined {
-	if (parsed.nested)
-		return { message: "A nested command in this command can't be checked before it runs", safety: false };
+type AskVerdict = Extract<Verdict, { kind: "ask" }> & { readonly message: string };
+
+function removalAsk(command: string, input: BashCheckInput, scope: Scope): AskVerdict | undefined {
+	const found = dangerousRemoval(command, {
+		cwd: input.cwd,
+		home: scope.home,
+		directories: input.directories,
+		env: input.env ?? process.env,
+	});
+	return found ? { kind: "ask", tier: "safety", message: found.message, breaker: "dangerousRemoval" } : undefined;
+}
+
+function structuralAsk(parsed: ParsedCommand, scope: Scope): AskVerdict | undefined {
+	if (parsed.nested) {
+		const message = "A nested command in this command can't be checked before it runs";
+		return scope.blockReads
+			? { kind: "ask", tier: "safety", message: unanalyzableUnderReadBlock(message), breaker: "outsideReadsBlocked" }
+			: { kind: "ask", tier: "path", message };
+	}
 	if (parsed.grouped)
-		return { message: "This command uses shell operators that require approval for safety", safety: false };
+		return {
+			kind: "ask",
+			tier: "path",
+			message: "This command uses shell operators that require approval for safety",
+		};
 	if (parsed.background) {
 		return {
+			kind: "ask",
+			tier: "safety",
 			message:
 				"This command uses the `&` background operator, which defers execution past approval-time safety checks. Approve only if you trust it.",
-			safety: true,
+			breaker: "backgroundOperator",
 		};
 	}
 	return undefined;
@@ -388,7 +444,8 @@ function firstMatch(
 }
 
 function ruled(verdict: Verdict, readOnly: boolean): SubcommandVerdict {
-	if (verdict.kind === "ask") return { kind: "ask", tier: verdict.tier, message: verdict.message };
+	if (verdict.kind === "ask")
+		return { kind: "ask", tier: verdict.tier, message: verdict.message, breaker: verdict.breaker };
 	return { kind: "allowed", readOnly };
 }
 
@@ -401,6 +458,15 @@ function checkPart(part: string, input: BashCheckInput, scope: Scope): Subcomman
 	const words = shellWords(part);
 	const effect = commandEffect(words);
 	const head = words[0] ?? "";
+	if (scope.blockReads && (head === "cd" || head === "pushd")) {
+		const moved = readOperandVerdict(
+			head,
+			words.slice(1).filter((word) => !word.startsWith("-")),
+			scope,
+		);
+		if (moved.kind === "ask")
+			return { kind: "ask", tier: moved.tier, message: moved.message, breaker: moved.breaker };
+	}
 	const files = effect.readOnly
 		? readOperandVerdict(head, effect.reads, scope)
 		: fileOperandVerdict(head, effect, scope);
@@ -409,7 +475,7 @@ function checkPart(part: string, input: BashCheckInput, scope: Scope): Subcomman
 	const exact = rule?.content !== undefined && ruleShape(rule.content).kind === "exact";
 	if (verdict.kind === "ask") {
 		const cleared = verdict.tier === "approval" ? rule !== undefined : verdict.tier === "construct" ? exact : false;
-		if (!cleared) return { kind: "ask", tier: verdict.tier, message: verdict.message };
+		if (!cleared) return { kind: "ask", tier: verdict.tier, message: verdict.message, breaker: verdict.breaker };
 	}
 	if (rule) return { kind: "allowed", rule, readOnly: effect.readOnly };
 	if (verdict.kind === "allowed") return { kind: "allowed", readOnly: false };

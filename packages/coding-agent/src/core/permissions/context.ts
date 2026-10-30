@@ -23,6 +23,10 @@ export interface PermissionContext {
 	readonly bypassAvailable: boolean;
 	/** Plan mode leaves a Bash command that is not read-only to the auto-mode classifier, so no allow rule runs it. */
 	readonly autoModeDuringPlan: boolean;
+	/** `permissions.blockReadsOutsideWorkingDirectories`: reads outside the working directories are refused or held, bypass included. */
+	readonly blockReadsOutsideWorkingDirectories: boolean;
+	/** The operator waived the dangerous-removal breaker and nothing in the session could have narrowed a removal. */
+	readonly removalWaived: boolean;
 }
 
 /** The inputs a session starts from: settings, flags and the working directory. */
@@ -38,6 +42,8 @@ export interface PermissionInit {
 	readonly disallowedTools?: readonly string[];
 	/** `useAutoModeDuringPlan` of the merged settings. Defaults to true, as in Claude Code. */
 	readonly useAutoModeDuringPlan?: boolean;
+	/** `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` is set and this is not a child session. */
+	readonly removalWaiverRequested?: boolean;
 }
 
 export interface SettingsPermissions {
@@ -46,6 +52,7 @@ export interface SettingsPermissions {
 	readonly deny?: readonly string[];
 	readonly defaultMode?: string;
 	readonly disableBypassPermissionsMode?: string;
+	readonly blockReadsOutsideWorkingDirectories?: boolean;
 }
 
 export class PermissionState {
@@ -56,6 +63,8 @@ export class PermissionState {
 	private readonly directories: readonly string[];
 	private readonly bypassAvailable: boolean;
 	private readonly autoModeDuringPlan: boolean;
+	private readonly blockReads: boolean;
+	private readonly removalWaiverRequested: boolean;
 
 	constructor(init: PermissionInit) {
 		this.cwd = init.cwd;
@@ -63,6 +72,8 @@ export class PermissionState {
 		this.directories = canonicalDirectories(init.cwd, init.additionalDirectories ?? []);
 		this.bypassAvailable = init.settings?.disableBypassPermissionsMode !== "disable";
 		this.autoModeDuringPlan = init.useAutoModeDuringPlan !== false;
+		this.blockReads = init.settings?.blockReadsOutsideWorkingDirectories === true;
+		this.removalWaiverRequested = init.removalWaiverRequested === true;
 		this.rules = new RuleSet([
 			...rulesFromTexts(init.settings?.allow ?? [], "allow", "settings"),
 			...rulesFromTexts(init.settings?.ask ?? [], "ask", "settings"),
@@ -90,7 +101,16 @@ export class PermissionState {
 			directories: this.directories,
 			bypassAvailable: this.bypassAvailable,
 			autoModeDuringPlan: this.autoModeDuringPlan,
+			blockReadsOutsideWorkingDirectories: this.blockReads,
+			removalWaived: this.removalWaiverRequested && !this.blockReads && !this.narrowingRules(),
 		};
+	}
+
+	/** Any deny or ask rule on a tool a removal could be judged under voids the waiver, as it does in Claude Code. */
+	private narrowingRules(): boolean {
+		return (["deny", "ask"] as const).some((behavior) =>
+			this.rules.of(behavior).some((rule) => ["Bash", "Edit", "Read"].includes(rule.toolName)),
+		);
 	}
 
 	/** Sets the mode. A bypass request the settings forbid is refused, and the mode is left as it was. */

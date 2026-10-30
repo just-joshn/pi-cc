@@ -1,0 +1,335 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BREAKERS, type Breaker, holdsUnderBypass, isBypassImmune } from "../src/core/permissions/breakers.ts";
+import { severity, strictest, type Verdict } from "../src/core/permissions/command-safety.ts";
+import { type PermissionContext, type PermissionInit, PermissionState } from "../src/core/permissions/context.ts";
+import { applyDontAsk, evaluatePermission } from "../src/core/permissions/evaluate.ts";
+import type { PermissionMode } from "../src/core/permissions/mode.ts";
+import { dangerousRemoval } from "../src/core/permissions/removal.ts";
+import type { PermissionCall } from "../src/core/permissions/tool-checks.ts";
+
+let cwd: string;
+let home: string;
+
+beforeEach(() => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-breakers-")));
+	cwd = join(root, "work");
+	home = join(root, "home");
+	mkdirSync(join(cwd, "sub", "deep"), { recursive: true });
+	mkdirSync(home);
+});
+afterEach(() => rmSync(join(cwd, ".."), { recursive: true, force: true }));
+
+function context(mode: PermissionMode, init: Partial<PermissionInit> = {}): PermissionContext {
+	return new PermissionState({ cwd, home, cliMode: mode, ...init }).current();
+}
+
+function evaluate(call: PermissionCall, mode: PermissionMode, init: Partial<PermissionInit> = {}) {
+	const ctx = context(mode, init);
+	const evaluation = evaluatePermission(call, ctx);
+	return { ...evaluation, final: applyDontAsk(evaluation.decision, call, ctx) };
+}
+
+const bash = (command: string): PermissionCall => ({ name: "Bash", input: { command } });
+const scope = () => ({ cwd, home, directories: [cwd], env: {} as Record<string, string | undefined> });
+const removal = (command: string, env: Record<string, string | undefined> = {}) =>
+	dangerousRemoval(command, { ...scope(), env });
+
+describe("the breaker table", () => {
+	it("is Claude Code's: five bypass-immune breakers and one that the operator may waive", () => {
+		const immune = (Object.keys(BREAKERS) as Breaker[]).filter((name) => isBypassImmune(name)).sort();
+		expect(immune).toEqual(
+			["dangerousRemoval", "isolatePeerMachines", "outsideReadsBlocked", "restrictedMode", "unfinishedCheck"].sort(),
+		);
+		const waivable = (Object.keys(BREAKERS) as Breaker[]).filter((name) => BREAKERS[name].waivableInBypass);
+		expect(waivable).toEqual(["dangerousRemoval"]);
+	});
+
+	it("holds an immune breaker under bypass, lets the waiver release only a removal, and never holds an ordinary one", () => {
+		expect(holdsUnderBypass("dangerousRemoval", false)).toBe(true);
+		expect(holdsUnderBypass("dangerousRemoval", true)).toBe(false);
+		expect(holdsUnderBypass("outsideReadsBlocked", true)).toBe(true);
+		expect(holdsUnderBypass("unfinishedCheck", true)).toBe(true);
+		expect(holdsUnderBypass("backgroundOperator", false)).toBe(false);
+		expect(holdsUnderBypass(undefined, false)).toBe(false);
+	});
+});
+
+describe("verdict severity", () => {
+	const verdicts: Verdict[] = [
+		{ kind: "none" },
+		{ kind: "allowed" },
+		{ kind: "ask", tier: "approval" },
+		{ kind: "ask", tier: "construct" },
+		{ kind: "ask", tier: "path" },
+		{ kind: "ask", tier: "safety", breaker: "backgroundOperator" },
+		{ kind: "ask", tier: "safety", breaker: "dangerousRemoval" },
+	];
+
+	it("ranks each tier above the one before it, with a bypass-immune breaker on top", () => {
+		const ranks = verdicts.map(severity);
+		expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
+		expect(new Set(ranks).size).toBe(ranks.length);
+	});
+
+	it("picks the same verdict whatever order the checks ran in", () => {
+		const worst = verdicts.at(-1);
+		for (let rotation = 0; rotation < verdicts.length; rotation++) {
+			const rotated = [...verdicts.slice(rotation), ...verdicts.slice(0, rotation)];
+			expect(strictest(rotated)).toBe(worst);
+			expect(strictest([...rotated].reverse())).toBe(worst);
+		}
+	});
+});
+
+describe("dangerous removal targets", () => {
+	it.each([
+		"rm -rf .",
+		"rm -rf ./",
+		"rm -rf *",
+		"rm -rf ./*",
+		"rm -rf ..",
+		"rm -rf ~",
+		"rm -rf $HOME",
+		"rm -rf /",
+		"rm -rf /*",
+		"rm -rf /etc",
+		"rm -rf /usr",
+		"rm -rf /tmp",
+		"rm -rf sub/..",
+		"rmdir .",
+		"rm -r -f -- *",
+		"sudo rm -rf /",
+	])("refuses %s", (command) => {
+		const found = removal(command);
+		expect(found?.message, command).toMatch(/^Dangerous (?:rm|rmdir) operation detected/);
+	});
+
+	it("names a workspace directory or a critical system directory, as Claude Code does", () => {
+		expect(removal("rm -rf .")?.message).toContain("would remove a workspace directory");
+		expect(removal("rm -rf ..")?.message).toContain("would remove a workspace directory");
+		expect(removal("rm -rf /etc")?.message).toContain("would remove a critical system directory");
+		expect(removal("rm -rf ~")?.message).toContain("would remove a critical system directory");
+		expect(removal("rm -rf /")?.message).toContain(`'/'\n\nThis command would remove a critical system directory.`);
+	});
+
+	it.each([
+		"rm -rf sub/deep",
+		"rm -rf sub/*",
+		"rm -rf ~/x",
+		"rm -rf $HOME/x",
+		"rm -rf ../x",
+		"rm -rf /usr/local",
+		'rm -rf "$X"',
+		"rm file.txt",
+		"echo 'rm -rf .'",
+		'echo "a; rm -rf ."',
+		"xargs rm -rf .",
+		"find . -delete",
+		"cat <<EOF\nrm -rf .\nEOF",
+	])("lets %s through", (command) => {
+		expect(removal(command), command).toBeUndefined();
+	});
+
+	it.each([
+		["{ rm -rf .; }", "group"],
+		["(rm -rf *)", "subshell"],
+		["echo $(rm -rf .)", "substitution"],
+		["echo `rm -rf ..`", "backticks"],
+		["for i in 1; do rm -rf *; done", "loop body"],
+		["if true; then rm -rf .; fi", "conditional"],
+		["bash -c 'rm -rf .'", "inline script"],
+		["eval 'rm -rf .'", "eval"],
+		["echo hi && (rm -rf *)", "later in a list"],
+		["rm -rf . &", "background"],
+	])("finds %s (%s)", (command) => {
+		expect(removal(command)?.message, command).toContain("Dangerous rm operation detected");
+	});
+
+	it("refuses a glob after a directory change, a variable that may be empty, and a substitution as the target", () => {
+		expect(removal("cd sub && rm -rf *")?.message).toContain("changes directories before the removal");
+		expect(removal("rm -rf $X/")?.message).toContain("is a shell variable expansion");
+		expect(removal("rm -rf $X/")?.message).toContain(['rewrite it as `"$', '{X:?}"/`'].join(""));
+		expect(removal("rm -rf $X/usr")?.message).toContain("becomes `/usr`");
+		expect(removal("rm -rf $(echo /)")?.message).toContain("output of a command substitution");
+		expect(removal("rm -rf $X/", { X: "/some/dir" })).toBeUndefined();
+	});
+});
+
+describe("a dangerous removal against rules, modes and bypass", () => {
+	const targets = ["rm -rf .", "rm -rf *", "rm -rf ~", "rm -rf /", "rm -rf /*", "rm -rf ..", "rm -rf /etc"];
+
+	it.each(["default", "acceptEdits", "bypassPermissions", "plan"] as const)(
+		"holds under %s even with a whole-tool allow",
+		(mode) => {
+			for (const command of targets) {
+				const result = evaluate(bash(command), mode, { allowedTools: ["Bash"] });
+				expect(result.decision.behavior, `${mode} ${command}`).toBe("ask");
+				expect(result.stage, `${mode} ${command}`).toBe("modeHold");
+				const decision = result.decision;
+				if (mode !== "plan") {
+					expect(decision.behavior === "ask" && decision.reason).toMatchObject({
+						type: "safetyCheck",
+						breaker: "dangerousRemoval",
+					});
+				}
+			}
+		},
+	);
+
+	it("holds against a prefix rule that names rm", () => {
+		const result = evaluate(bash("rm -rf *"), "default", { allowedTools: ["Bash(rm:*)"] });
+		expect(result.decision.behavior).toBe("ask");
+	});
+
+	it("becomes a dontAsk denial with the don't ask text", () => {
+		const result = evaluate(bash("rm -rf ~"), "dontAsk", { allowedTools: ["Bash"] });
+		expect(result.final.behavior).toBe("deny");
+		expect(result.final.behavior === "deny" && result.final.message).toContain("don't ask mode");
+	});
+
+	it("still allows an ordinary removal under bypass and under acceptEdits", () => {
+		for (const mode of ["bypassPermissions", "acceptEdits"] as const) {
+			expect(evaluate(bash("rm -rf sub/deep"), mode).decision.behavior, mode).toBe("allow");
+		}
+	});
+
+	it("is released under bypass by the operator's waiver, and by nothing narrower", () => {
+		const waived = evaluate(bash("rm -rf ~"), "bypassPermissions", { removalWaiverRequested: true });
+		expect(waived.decision.behavior).toBe("allow");
+		expect(
+			evaluate(bash("rm -rf ~"), "default", { removalWaiverRequested: true, allowedTools: ["Bash"] }).decision
+				.behavior,
+		).toBe("ask");
+	});
+
+	it.each([
+		["a deny rule with content", { disallowedTools: ["Bash(curl:*)"] }],
+		["an ask rule on Read", { settings: { ask: ["Read(/nope/*)"] } }],
+		["the read block", { settings: { blockReadsOutsideWorkingDirectories: true } }],
+	])("is not released when %s is in force", (_label, extra) => {
+		const result = evaluate(bash("rm -rf ~"), "bypassPermissions", { removalWaiverRequested: true, ...extra });
+		expect(result.decision.behavior).toBe("ask");
+	});
+});
+
+describe("the read block", () => {
+	const blocked = { settings: { blockReadsOutsideWorkingDirectories: true } } as const;
+
+	it("refuses a Read outside the working directories with the path and directories in the text", () => {
+		const result = evaluate({ name: "Read", input: { file_path: "/etc/hosts" } }, "bypassPermissions", blocked);
+		expect(result.decision.behavior).toBe("deny");
+		expect(result.decision.behavior === "deny" && result.decision.message).toBe(
+			`/etc/hosts is outside ${cwd}; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories. Ask the user to add the directory with /add-dir, or to remove that setting.`,
+		);
+	});
+
+	it("reads inside the working directories as before", () => {
+		const result = evaluate({ name: "Read", input: { file_path: join(cwd, "a.txt") } }, "default", blocked);
+		expect(result.decision.behavior).toBe("allow");
+	});
+
+	it.each(["cat /etc/hosts", "ls /tmp", "grep -r foo /etc", "head -1 ~/x", "echo hi | cat /etc/hosts"])(
+		"holds %s against bypass and a whole-tool allow",
+		(command) => {
+			const result = evaluate(bash(command), "bypassPermissions", { ...blocked, allowedTools: ["Bash"] });
+			expect(result.decision.behavior, command).toBe("ask");
+			expect(result.stage, command).toBe("modeHold");
+			const decision = result.decision;
+			expect(decision.behavior === "ask" && decision.reason).toMatchObject({
+				type: "safetyCheck",
+				breaker: "outsideReadsBlocked",
+			});
+		},
+	);
+
+	it("words a command it cannot analyze as Claude Code does", () => {
+		for (const [command, text] of [
+			["cat $X", "A variable in this command can't be checked before it runs"],
+			["echo $(cat /etc/hosts)", "A nested command in this command can't be checked before it runs"],
+		] as const) {
+			const result = evaluate(bash(command), "bypassPermissions", blocked);
+			const decision = result.decision;
+			expect(decision.behavior, command).toBe("ask");
+			expect(decision.behavior === "ask" && decision.message).toBe(
+				`${text}; under the read block (permissions.blockReadsOutsideWorkingDirectories) a command the shell parser cannot analyze asks the person`,
+			);
+		}
+	});
+
+	it("names the part of a pipeline that needs approval", () => {
+		const result = evaluate(bash("echo hi | cat /etc/hosts"), "bypassPermissions", blocked);
+		const decision = result.decision;
+		expect(decision.behavior === "ask" && decision.message).toBe(
+			"This Bash command contains multiple operations. The following part requires approval: cat /etc/hosts",
+		);
+	});
+
+	it("leaves a read inside the working directories alone", () => {
+		expect(evaluate(bash("cat seed.txt"), "bypassPermissions", blocked).decision.behavior).toBe("allow");
+	});
+
+	it("does nothing when the setting is off", () => {
+		expect(evaluate(bash("cat /etc/hosts"), "bypassPermissions").decision.behavior).toBe("allow");
+	});
+});
+
+describe("a check that did not finish", () => {
+	function brokenContext(mode: PermissionMode): PermissionContext {
+		const ctx = context(mode, { allowedTools: ["Bash"] });
+		const rules = {
+			...ctx.rules,
+			of: ctx.rules.of.bind(ctx.rules),
+			wholeTool: ctx.rules.wholeTool.bind(ctx.rules),
+			withContent: () => {
+				throw new Error("rule store unavailable");
+			},
+		};
+		return { ...ctx, rules: rules as unknown as PermissionContext["rules"] };
+	}
+
+	it("asks with Claude Code's text and is held against bypass", () => {
+		for (const mode of ["default", "bypassPermissions"] as const) {
+			const result = evaluatePermission(bash("echo hi"), brokenContext(mode));
+			expect(result.decision.behavior, mode).toBe("ask");
+			expect(result.decision.behavior === "ask" && result.decision.message).toBe(
+				"The permission check for this command did not finish, so its safety checks did not run.",
+			);
+			expect(result.stage).toBe("modeHold");
+		}
+	});
+});
+
+describe("the background operator against grouped commands", () => {
+	it("asks for a simple command that ends in & and holds against a whole-tool allow", () => {
+		const result = evaluate(bash("echo hi & echo b"), "default", { allowedTools: ["Bash"] });
+		expect(result.decision.behavior).toBe("ask");
+		expect(result.stage).toBe("modeHold");
+	});
+
+	it("does not ask where Claude Code runs it: with a group, a substitution or a function body in the line", () => {
+		for (const command of ["echo a & (echo b)", "(echo a &)", "{ echo a; } &", "f(){ echo F|cat& }; echo defined"]) {
+			const result = evaluate(bash(command), "default", { allowedTools: ["Bash"] });
+			expect(result.decision.behavior, command).toBe("allow");
+		}
+	});
+
+	it("lets a bypass-held removal win over a group and over the operator, whichever the line puts first", () => {
+		for (const command of ["{ rm -rf .; } &", "echo a & rm -rf .", "(echo a) & rm -rf *", "rm -rf . & (echo a)"]) {
+			const result = evaluate(bash(command), "bypassPermissions", { allowedTools: ["Bash"] });
+			const decision = result.decision;
+			expect(decision.behavior, command).toBe("ask");
+			expect(decision.behavior === "ask" && decision.message, command).toContain("Dangerous rm operation detected");
+		}
+	});
+
+	it("lets a whole-tool allow run a settings-file write inside a group, as Claude Code does (measured)", () => {
+		for (const command of ["{ echo x > ~/.claude/settings.json; }", "echo $(id) > .git/config"]) {
+			expect(evaluate(bash(command), "default", { allowedTools: ["Bash"] }).decision.behavior, command).toBe(
+				"allow",
+			);
+		}
+	});
+});

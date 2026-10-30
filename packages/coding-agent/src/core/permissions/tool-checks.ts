@@ -8,6 +8,7 @@
 
 import { resolve } from "node:path";
 import { type BashCheck, checkBash } from "./bash.ts";
+import { READ_BLOCK_MESSAGE, UNFINISHED_CHECK_MESSAGE } from "./breakers.ts";
 import type { PermissionContext } from "./context.ts";
 import { type CheckResult, defaultAskMessage, FILE_DENIED_BY_RULE, fileCoveredByReadDeny } from "./decision.ts";
 import { canonicalPath, editSafetyMessage, insideDirectories, isLeafSymlink, pathRuleMatches } from "./paths.ts";
@@ -59,16 +60,26 @@ function checkShell(call: PermissionCall, ctx: PermissionContext): CheckResult {
 	const command = call.input.command;
 	if (typeof command !== "string") return { behavior: "passthrough", message: defaultAskMessage(call.name) };
 	const rules = (behavior: "allow" | "ask" | "deny") => ctx.rules.withContent(behavior, call.name);
-	const result = checkBash({
-		command,
-		deny: rules("deny"),
-		ask: rules("ask"),
-		allow: rules("allow"),
-		acceptEdits: ctx.mode === "acceptEdits",
-		directories: ctx.directories,
-		cwd: ctx.cwd,
-		home: ctx.home,
-	});
+	let result: BashCheck;
+	try {
+		result = checkBash({
+			command,
+			deny: rules("deny"),
+			ask: rules("ask"),
+			allow: rules("allow"),
+			acceptEdits: ctx.mode === "acceptEdits",
+			directories: ctx.directories,
+			cwd: ctx.cwd,
+			home: ctx.home,
+			blockReads: ctx.blockReadsOutsideWorkingDirectories,
+		});
+	} catch {
+		return {
+			behavior: "ask",
+			message: UNFINISHED_CHECK_MESSAGE,
+			reason: { type: "safetyCheck", reason: UNFINISHED_CHECK_MESSAGE, breaker: "unfinishedCheck" },
+		};
+	}
 	const verdict = shellVerdict(call, result);
 	if (ctx.mode !== "plan" || !ctx.autoModeDuringPlan || verdict.behavior === "deny") return verdict;
 	if (verdict.behavior === "allow" && result.behavior === "allow" && result.readOnly) return verdict;
@@ -92,7 +103,7 @@ function shellVerdict(call: PermissionCall, result: BashCheck): CheckResult {
 			const message = result.message ?? defaultAskMessage(call.name);
 			if (result.rule) return { behavior: "ask", message, reason: { type: "rule", rule: result.rule } };
 			const reason = result.safety
-				? { type: "safetyCheck" as const, reason: message }
+				? { type: "safetyCheck" as const, reason: message, ...(result.breaker ? { breaker: result.breaker } : {}) }
 				: { type: "other" as const, reason: message };
 			return { behavior: "ask", message, reason };
 		}
@@ -132,8 +143,15 @@ function checkReadPath(call: PermissionCall, ctx: PermissionContext): CheckResul
 	const grantMessage = `Claude requested permissions to read from ${path}, but you haven't granted it yet.`;
 	const asked = pathRule(familyRules(ctx, "ask", "Read"), path, ctx);
 	if (asked) return { behavior: "ask", message: grantMessage, reason: { type: "rule", rule: asked } };
-	if (insideDirectories(ctx.directories, canonicalPath(path, ctx.cwd)))
-		return { behavior: "allow", reason: { type: "mode", mode: "default" } };
+	const inside = insideDirectories(ctx.directories, canonicalPath(path, ctx.cwd));
+	if (ctx.blockReadsOutsideWorkingDirectories && !inside) {
+		return {
+			behavior: "deny",
+			message: `${path} is outside ${ctx.directories.join(", ")}; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories. Ask the user to add the directory with /add-dir, or to remove that setting.`,
+			reason: { type: "other", reason: READ_BLOCK_MESSAGE },
+		};
+	}
+	if (inside) return { behavior: "allow", reason: { type: "mode", mode: "default" } };
 	const allowed = pathRule(familyRules(ctx, "allow", "Read"), path, ctx);
 	if (allowed) return { behavior: "allow", reason: { type: "rule", rule: allowed } };
 	return {
