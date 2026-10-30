@@ -44,9 +44,11 @@ Examples: `ctrl+shift+x`, `alt+ctrl+x`, `ctrl+shift+alt+x`, `super+k`, `ctrl+sup
 
 ## Prompt chords and CC files
 
-The default prompt editor accepts space-separated sequences in the same file. For example, `"app.model.select": "ctrl+k ctrl+s"` opens the model selector after both strokes. A chord prefix takes precedence over a single-key action on that prefix. The prefix expires after one second without running the single-key action. A mismatching next stroke starts a new lookup, so ordinary text is not lost.
+The default prompt editor accepts space-separated sequences in the same file. For example, `"app.model.select": "ctrl+k ctrl+s"` opens the model selector after both strokes. A chord prefix takes precedence over a single-key action on that prefix. The prefix expires after three seconds without running the single-key action. A mismatching next stroke is consumed, including Escape or another prefix. Escape cancels even if configured as a chord suffix. The prompt border shows a pending indicator, then a three-second timeout notice if no next key arrives.
 
-Alternatively, use CC's context-block format. The native action map and CC context blocks are exclusive file formats. A CC file accepts only `bindings` and optional `$schema` at its root. Mixing native action fields into that root rejects the whole file and produces import diagnostics:
+CC's file is loaded from `$CLAUDE_CONFIG_DIR/keybindings.json`, or `~/.claude/keybindings.json` when the environment variable is unset or empty. Pi still loads `<agent-dir>/keybindings.json`. The layering is pi defaults, then CC's file, then pi's file. Later declarations win conflicts on the same sequence. Native pi action assignments still replace that action's pi defaults. CC assignments on other sequences remain active.
+
+Either file can use CC's context-block format. Only `bindings` is required. Unknown root fields, including `$docs`, are ignored. Native action fields in a CC envelope are ignored rather than interpreted:
 
 ```json
 {
@@ -70,11 +72,18 @@ Supported CC action mappings are:
 |---|---|
 | `chat:submit` | `tui.input.submit` |
 | `chat:cancel` | `app.interrupt` |
+| `app:interrupt` | `app.interrupt` |
+| `chat:newline` | `tui.input.newLine` |
+| `chat:undo` | `tui.editor.undo` |
+| `chat:imagePaste` | `app.clipboard.pasteImage` |
+| `history:previous` | `tui.editor.historyPrevious` |
+| `history:next` | `tui.editor.historyNext` |
+| `chat:thinkingToggle` | `app.thinking.toggle` |
 | `chat:modelPicker` | `app.model.select` |
 | `chat:externalEditor` | `app.editor.external` |
 | `app:exit` | `app.exit` |
 
-CC blocks also accept built-in pi action identifiers. Imported bindings use pi's defaults, not CC's default table. The importer accepts `meta`, `opt`, and `option` as aliases for `alt`. Unsupported actions, contexts, and malformed sequences appear in `KeybindingsManager.getImportDiagnostics()` and do not create bindings.
+CC blocks also accept built-in pi action identifiers. Imported bindings use pi's defaults, not CC's default table. The importer accepts `control` for `ctrl`, `meta`/`opt`/`option` for `alt`, `cmd`/`command`/`win` for `super`, `esc` for `escape`, `return` for `enter`, `del` for `delete`, and arrow glyphs for their named directions. Unsupported actions, contexts, and malformed sequences produce startup warnings and remain available through `KeybindingsManager.getImportDiagnostics()`. They do not create bindings.
 
 Chords and context overrides apply only while the default prompt editor handles input. They do not change extension editors, selector dialogs, or fullscreen viewport shortcuts that handle input before the prompt. `getPromptKeys()` returns the prompt's effective sequences for key hints. `getEffectiveConfig()` returns single-stroke keys for prompt extension conflict checks, using a chord's first stroke. The lower-level `getKeys()`, `getResolvedBindings()`, and matching outside prompt dispatch retain the native single-key configuration.
 

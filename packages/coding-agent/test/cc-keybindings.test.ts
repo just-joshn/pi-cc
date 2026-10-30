@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setKeybindings, TuiMainScreen } from "@earendil-works/pi-tui";
 import { Compile } from "typebox/compile";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -19,6 +19,11 @@ import { CustomEditor } from "../src/modes/interactive/components/custom-editor.
 import { createInMemoryModelRegistry } from "./model-runtime-test-utils.ts";
 
 const roots: string[] = [];
+beforeEach(() => {
+	const root = mkdtempSync(join(tmpdir(), "cc-keybindings-env-"));
+	roots.push(root);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", root);
+});
 afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	setKeybindings(new KeybindingsManager());
@@ -108,6 +113,22 @@ describe("CC keybinding file import", () => {
 		expect(manager.getPromptKeys("app.model.select")).toContain("ctrl+b");
 	});
 
+	it("falls back to ~/.claude and layers a pi CC envelope last", () => {
+		const home = mkdtempSync(join(tmpdir(), "cc-keybindings-home-"));
+		roots.push(home);
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+		mkdirSync(join(home, ".claude"));
+		writeFileSync(
+			join(home, ".claude", "keybindings.json"),
+			JSON.stringify(cc({ "ctrl+y": "chat:submit", "ctrl+b": "chat:submit" })),
+		);
+		const { manager } = load(cc({ "ctrl+b": "chat:modelPicker" }));
+		expect(manager.getPromptKeys("tui.input.submit")).toContain("ctrl+y");
+		expect(manager.getPromptKeys("tui.input.submit")).not.toContain("ctrl+b");
+		expect(manager.getPromptKeys("app.model.select")).toContain("ctrl+b");
+	});
+
 	it.each([
 		["chat:newline", "tui.input.newLine"],
 		["chat:undo", "tui.editor.undo"],
@@ -121,7 +142,9 @@ describe("CC keybinding file import", () => {
 	});
 
 	it("treats all CC root metadata as opaque and accepts CC's literal space spelling", () => {
-		expect(importCcKeybindings({ ...cc({ "ctrl+y": "chat:submit" }), $schema: 42 }, new Set()).bindings).toHaveLength(1);
+		expect(importCcKeybindings({ ...cc({ "ctrl+y": "chat:submit" }), $schema: 42 }, new Set()).bindings).toHaveLength(
+			1,
+		);
 		expect(parseKeySequence(" ")).toEqual(["space"]);
 	});
 

@@ -27,6 +27,7 @@ describe("issue #7829 invalid settings warning", () => {
 			const context = {
 				init: vi.fn(async () => {}),
 				options: { startupDiagnostics },
+				keybindings: { getImportDiagnostics: () => ["Unsupported keybinding action: unknown:action"] },
 				chatContainer,
 				outputPad: 1,
 				ui: { requestRender: vi.fn() },
@@ -45,6 +46,9 @@ describe("issue #7829 invalid settings warning", () => {
 			await vi.waitFor(() => {
 				expect(render(chatContainer)).toContain(
 					"Warning: Invalid settings file /tmp/settings.json: malformed JSON",
+				);
+				expect(render(chatContainer)).toContain(
+					"Warning: Keybindings: Unsupported keybinding action: unknown:action",
 				);
 			});
 		} finally {

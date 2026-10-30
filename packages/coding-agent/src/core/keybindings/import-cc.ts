@@ -6,7 +6,6 @@ import type { Binding } from "./chords.ts";
 
 export const CcKeybindingsSchema = Type.Object(
 	{
-		$schema: Type.Optional(Type.String()),
 		bindings: Type.Array(
 			Type.Object({
 				context: Type.String(),
@@ -14,12 +13,21 @@ export const CcKeybindingsSchema = Type.Object(
 			}),
 		),
 	},
-	{ additionalProperties: false },
+	{ additionalProperties: true },
 );
 
 const validateFile = Compile(CcKeybindingsSchema);
 const validateKey = Compile(KeyIdSchema);
 const aliases: Readonly<Record<string, string>> = {
+	control: "ctrl",
+	cmd: "super",
+	command: "super",
+	win: "super",
+	del: "delete",
+	"↑": "up",
+	"↓": "down",
+	"←": "left",
+	"→": "right",
 	meta: "alt",
 	opt: "alt",
 	option: "alt",
@@ -30,6 +38,13 @@ const aliases: Readonly<Record<string, string>> = {
 };
 const actions: Readonly<Record<string, Keybinding>> = {
 	"chat:submit": "tui.input.submit",
+	"chat:newline": "tui.input.newLine",
+	"chat:undo": "tui.editor.undo",
+	"chat:imagePaste": "app.clipboard.pasteImage",
+	"history:previous": "tui.editor.historyPrevious",
+	"history:next": "tui.editor.historyNext",
+	"chat:thinkingToggle": "app.thinking.toggle",
+	"app:interrupt": "app.interrupt",
 	"chat:cancel": "app.interrupt",
 	"chat:modelPicker": "app.model.select",
 	"chat:externalEditor": "app.editor.external",
@@ -43,6 +58,7 @@ export interface ImportedBindings {
 
 /** Parses a CC spelling into pi strokes, rejecting malformed sequences at the file boundary. */
 export function parseKeySequence(value: string): [KeyId, ...KeyId[]] | undefined {
+	if (value === " ") return ["space"];
 	if (!value.trim()) return undefined;
 	const keys = value
 		.trim()
@@ -61,16 +77,6 @@ export function parseKeySequence(value: string): [KeyId, ...KeyId[]] | undefined
 /** Imports supported CC contexts without inventing equivalents for unknown actions. */
 export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<string>): ImportedBindings {
 	const result: ImportedBindings = { bindings: [], diagnostics: [] };
-	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-		for (const field of Object.keys(value)) {
-			if (field !== "$schema" && field !== "bindings") {
-				result.diagnostics.push(
-					`Unsupported CC keybinding root field: ${field}. Native and CC file formats cannot be mixed`,
-				);
-			}
-		}
-		if (result.diagnostics.length > 0) return result;
-	}
 	if (!validateFile.Check(value)) {
 		result.diagnostics.push("CC keybindings must contain a bindings array of context and bindings records");
 		return result;

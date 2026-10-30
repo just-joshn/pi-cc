@@ -383,9 +383,6 @@
         "bindings"
       ],
       "properties": {
-        "$schema": {
-          "type": "string"
-        },
         "bindings": {
           "type": "array",
           "items": {
@@ -417,7 +414,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     }
   ],
   "$defs": {
