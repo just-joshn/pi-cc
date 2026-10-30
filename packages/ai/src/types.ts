@@ -198,6 +198,13 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 	 */
 	identity?: ClientIdentity;
 	/**
+	 * Claude Code wire profile. Present, the Anthropic transport splits the leading prompt into the
+	 * billing, identity and working `system` blocks, places `SystemMessage.context` as a system-role
+	 * message after the first user message, and sends `effort` directly with no effort markers.
+	 * Other transports ignore it.
+	 */
+	ccWire?: CcWireProfile;
+	/**
 	 * HTTP request timeout in milliseconds for providers/SDKs that support it.
 	 * For example, OpenAI and Anthropic SDK clients default to 10 minutes.
 	 */
@@ -215,6 +222,16 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 	 * Default: 60000 (60 seconds). Set to 0 to disable the cap.
 	 */
 	maxRetryDelayMs?: number;
+}
+
+/** The request-level choices of the Claude Code wire shape, decided by the caller. */
+export interface CcWireProfile {
+	/** First `system` block, sent uncached. */
+	billingHeader: string;
+	/** Level of `output_config.effort`; omitted when the model has no effort control. */
+	effort?: "low" | "medium" | "high" | "xhigh" | "max";
+	/** Beta names added to the automatic list. */
+	extraBetas: readonly string[];
 }
 
 export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
@@ -587,6 +604,12 @@ export interface SystemMessage {
 	toolsAdded?: Tool[];
 	/** Tools that stop being available at this point. */
 	toolsRemoved?: ToolReference[];
+	/**
+	 * Per-machine context (working directory, environment, project instructions). It belongs to the
+	 * prompt record and replays like `content`, but a transport with a separate slot for it places it
+	 * there. Single-block transports render it after the sections. A later message's value replaces it.
+	 */
+	context?: string;
 	timestamp: number; // Unix timestamp in milliseconds
 }
 

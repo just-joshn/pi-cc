@@ -10,6 +10,7 @@ import type {
 	Api,
 	AssistantMessage,
 	CacheRetention,
+	CcWireProfile,
 	ImageContent,
 	Message,
 	Model,
@@ -19,6 +20,7 @@ import type {
 	StopReason,
 	StreamFunction,
 	StreamOptions,
+	SystemMessage,
 	TextContent,
 	Tool,
 	ToolResultMessage,
@@ -65,6 +67,7 @@ import type {
 	AnthropicMessageRequest,
 	AnthropicRefusalStopDetails,
 	AnthropicStreamEvent,
+	AnthropicTextBlock,
 	AnthropicThinkingDisplay,
 	AnthropicTool,
 	AnthropicUsage,
@@ -954,7 +957,8 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 		return stream(model, context, {
 			...base,
 			thinkingEnabled: true,
-			effort,
+			effort: base.ccWire?.effort ?? effort,
+			...(base.ccWire ? { thinkingDisplay: "omitted" } : {}),
 		} satisfies AnthropicOptions);
 	}
 
@@ -1114,6 +1118,7 @@ function getBetaFeatures(
 		features.push(MID_CONVERSATION_OUTPUT_CONFIG_BETA, THINKING_BINDING_CONTROLS_BETA);
 	}
 	if (nativeToolChanges) features.push(INLINE_TOOLS_BETA);
+	features.push(...(options?.ccWire?.extraBetas ?? []));
 	return [...new Set(features)];
 }
 
@@ -1164,7 +1169,8 @@ function buildParams(
 	const thinkingDisabled =
 		model.reasoning && options?.thinkingEnabled === false && model.thinkingLevelMap?.off !== null;
 	// Effort cannot change between messages while thinking is disabled, so "off" sends no effort markers.
-	const effortMessages = model.compat?.supportsMidConvoEffort === true && !thinkingDisabled;
+	const ccWire = options?.ccWire;
+	const effortMessages = ccWire === undefined && model.compat?.supportsMidConvoEffort === true && !thinkingDisabled;
 	const converted = convertMessages(
 		conversationMessages,
 		isOAuthToken,
@@ -1172,6 +1178,7 @@ function buildParams(
 		compat.allowEmptySignature,
 		effortMessages ? model.provider : undefined,
 		nativeToolChanges ? convertToolDefinitions : undefined,
+		ccWire !== undefined && compat.supportsMidConvoSystemMessages ? contextMessage(initialSystemMessage) : undefined,
 	);
 	const activeEffort = options?.effort ?? "high";
 	const betaFeatures = getBetaFeatures(model, context, isOAuthToken, nativeToolChanges, options);
@@ -1184,7 +1191,9 @@ function buildParams(
 	};
 
 	// For OAuth tokens, we MUST include Claude Code identity
-	if (isOAuthToken) {
+	if (ccWire) {
+		params.system = ccSystemBlocks(ccWire, initialSystemMessage, cacheControl, compat.supportsMidConvoSystemMessages);
+	} else if (isOAuthToken) {
 		params.system = [
 			{
 				type: "text",
@@ -1243,6 +1252,12 @@ function buildParams(
 		// No effort is sent, so the model default applies. Anthropic rejects `block_binding`
 		// with disabled thinking.
 		params.thinking = { type: "disabled" };
+	} else if (
+		ccWire &&
+		(model.compat?.supportsMidConvoEffort === true || model.compat?.forceAdaptiveThinking === true)
+	) {
+		params.thinking = { type: "adaptive", display: options?.thinkingDisplay ?? "omitted" };
+		if (ccWire.effort) params.output_config = { effort: ccWire.effort };
 	} else if (effortMessages) {
 		// Managed effort models use adaptive thinking so prefix mismatches can
 		// be dropped instead of surfacing as persistent 400 responses.
@@ -1298,6 +1313,42 @@ function buildParams(
 	return { params, hasPreferredStrictTools, providerThinkingLevel: effortMessages ? activeEffort : undefined };
 }
 
+function contextMessage(head: SystemMessage | undefined): AnthropicMessageParam | undefined {
+	return head?.context
+		? { role: "system", content: [{ type: "text", text: sanitizeSurrogates(head.context) }] }
+		: undefined;
+}
+
+/**
+ * The Claude Code `system` shape: an uncached billing line, then the identity and working prompt
+ * blocks the record names. A head without that split, or a model that cannot take the context as a
+ * message, folds into the blocks it has.
+ */
+function ccSystemBlocks(
+	ccWire: CcWireProfile,
+	head: SystemMessage | undefined,
+	cacheControl: AnthropicCacheControl | undefined,
+	contextAsMessage: boolean,
+): AnthropicTextBlock[] {
+	const block = (text: string, cached: boolean): AnthropicTextBlock => ({
+		type: "text",
+		text: sanitizeSurrogates(text),
+		...(cached && cacheControl ? { cache_control: cacheControl } : {}),
+	});
+	const blocks = [block(ccWire.billingHeader, false)];
+	if (!head) return blocks;
+	const identity = head.sections?.identity;
+	const working = head.sections?.working;
+	const context = contextAsMessage || !head.context ? "" : `\n\n${head.context}`;
+	if (typeof identity === "string" && typeof working === "string") {
+		blocks.push(block(identity, true), block(`${working}${context}`, true));
+		return blocks;
+	}
+	const text = contextAsMessage ? getSystemMessageText({ ...head, context: undefined }) : getSystemMessageText(head);
+	if (text.length > 0) blocks.push(block(text, true));
+	return blocks;
+}
+
 // Normalize tool call IDs to match Anthropic's required pattern and length
 function normalizeToolCallId(id: string): string {
 	return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
@@ -1325,6 +1376,8 @@ function convertMessages(
 	managedProvider?: string,
 	/** Converts tool definitions for native `tool_addition` blocks; undefined when tool changes are not native. */
 	convertToolDefinitions?: (tools: Tool[]) => AnthropicTool[],
+	/** System-role message that follows the first user message, the Claude Code placement of per-machine context. */
+	machineContext?: AnthropicMessageParam,
 ): ConvertedAnthropicMessages {
 	const params: AnthropicMessageParam[] = [];
 	const assistantLevels = new Map<number, AnthropicEffort>();
@@ -1500,6 +1553,10 @@ function convertMessages(
 	}
 
 	flushPendingSystemMessages();
+	if (machineContext) {
+		const firstUser = params.findIndex((message) => message.role === "user");
+		params.splice(firstUser === -1 ? params.length : firstUser + 1, 0, machineContext);
+	}
 
 	// Add cache_control to the last user or system message to cache conversation history
 	if (cacheControl && params.length > 0) {
