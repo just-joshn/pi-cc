@@ -247,7 +247,11 @@ export interface MarkdownTheme {
 	highlightCode?: (code: string, lang?: string) => string[];
 	/** Prefix applied to each rendered code block line (default: "  ") */
 	codeBlockIndent?: string;
+	/** Columns that paragraphs, headings, lists and blockquotes wrap at; tables and code keep the full width. */
+	maxProseWidth?: number;
 }
+
+const PROSE_TOKEN_TYPES: ReadonlySet<string> = new Set(["paragraph", "heading", "list", "blockquote"]);
 
 export interface MarkdownOptions {
 	/** Preserve source list markers instead of normalizing them. */
@@ -344,10 +348,17 @@ export class Markdown implements Component {
 
 		// Convert tokens to styled terminal output
 		const renderedLines: string[] = [];
+		const proseWidth = Math.max(1, Math.min(contentWidth, this.theme.maxProseWidth ?? contentWidth));
 
 		for (let i = 0; i < tokens.length; i++) {
 			const token = tokens[i];
 			const nextToken = tokens[i + 1];
+			if (proseWidth < contentWidth && PROSE_TOKEN_TYPES.has(token.type)) {
+				for (const tokenLine of this.renderToken(token, proseWidth, nextToken?.type)) {
+					renderedLines.push(...wrapTextWithAnsi(tokenLine, proseWidth));
+				}
+				continue;
+			}
 			const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
 			for (const tokenLine of tokenLines) {
 				renderedLines.push(tokenLine);
