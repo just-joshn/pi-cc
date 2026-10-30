@@ -25,12 +25,10 @@ const gatedModels = [
 	"claude-3-5-haiku",
 	"claude-haiku-4-5[1m]",
 	"claude-opus-4-6[1M]",
-	// Dated first-party forms, which Claude Code resolves to the bare family name before testing.
 	"claude-haiku-4-5-20251001",
 	"claude-sonnet-4-5-20250929",
 	"claude-opus-4-5-20251101",
 	"claude-sonnet-4-20250514",
-	// Mixed case, which Claude Code lowercases before testing.
 	"Claude-Haiku-4-5",
 ];
 

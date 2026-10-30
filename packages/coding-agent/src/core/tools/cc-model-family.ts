@@ -81,7 +81,7 @@ const CC_NAME_PATTERNS: ReadonlyArray<readonly [string | RegExp, string]> = [
 	["claude-3-haiku", "claude-3-haiku"],
 ];
 
-/** Claude Code's ten legacy model ids whose unread Edit and Write calls are refused (`kSn`'s set). */
+/** Claude Code's ten legacy model ids whose unread Edit and Write calls are refused. */
 const CC_LEGACY_MUTATION_MODELS = new Set([
 	"claude-opus-4-6",
 	"claude-haiku-4-5",
@@ -95,16 +95,13 @@ const CC_LEGACY_MUTATION_MODELS = new Set([
 	"claude-3-5-haiku",
 ]);
 
-/** One parsed model id: the family, its version, and what followed the version. */
 interface CcParsedId {
 	family: string;
 	major: number;
 	minor?: number;
 	/** True for the `claude-3-5-sonnet` shape, where the version precedes the family. */
 	legacyVersionFirst: boolean;
-	/** The matched `claude-<family>-<major>[-<minor>]` prefix. */
 	base: string;
-	/** A suffix the grammar does not recognize, which disqualifies the id from catalog matching. */
 	trailer?: string;
 }
 
@@ -182,8 +179,6 @@ function parseId(e: string): CcParsedId | null {
 		base: parsed.base,
 	};
 	if (parsed.minor !== undefined) result.minor = parsed.minor;
-	// A recognized date or version-tag suffix (`-v1@20251001`, `@20251001`, `-v1:0`, `-latest`) is
-	// accepted and then ignored: it does not disqualify the id and it does not change the shape.
 	if (!isCleanSuffix(rest)) result.trailer = rest;
 	return result;
 }

@@ -90,10 +90,13 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-haiku-4-5",
 		// the model PR #7's notice case runs, one that takes mid-conversation system messages
 		"claude-opus-5-5",
-		// values `--permission-mode` and `--tools` write in PR #7's cases
+		// values `--permission-mode` writes in PR #7's cases
 		"acceptEdits",
 		"bypassPermissions",
+		// values `--allowedTools` and `--tools` write in PR #7's cases
 		"Bash",
+		"Read",
+		// model ids PR #7's gate cases run, whose family resolution they pin
 		"claude-sonnet-4-5",
 		"claude-opus-4-5",
 		"claude-opus-4-1",
@@ -108,8 +111,6 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-opus-4-7",
 		"gpt-5",
 		"openai/gpt-5",
-
-		"Read",
 	],
 };
 

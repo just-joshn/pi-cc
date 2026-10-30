@@ -256,7 +256,6 @@ export function createEditToolDefinition(
 				options?.readState?.record(absolutePath, {
 					content: normalizeForComparison(finalContent),
 					partial: false,
-					// A recovered stale edit leaves other on-disk changes the model has not seen.
 					unseen: !inContext || stale,
 				});
 
@@ -265,7 +264,6 @@ export function createEditToolDefinition(
 				const wording = replaceAll
 					? `The file ${path} has been updated. All occurrences were successfully replaced.`
 					: `The file ${path} has been updated successfully.`;
-				// The recovery note replaces the file-state suffix: the content is no longer in context.
 				const text = stale ? `${wording}${CC_TOOL_TEXT.editStaleRecoveryNote}` : `${wording}${suffix}`;
 				return {
 					content: [{ type: "text", text }],
