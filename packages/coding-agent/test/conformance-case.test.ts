@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(353);
+		expect(cases.length).toBe(354);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -553,6 +553,12 @@ describe("containment declarations", () => {
 	test("rejects a path on a survivor, which is a process", () => {
 		expect(() =>
 			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "survivor", path: "late.txt" }] } }),
+		).toThrow(/is a process, not a path/);
+	});
+
+	test("rejects a path on an unreaped process, which is also not a path", () => {
+		expect(() =>
+			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind: "unreaped", path: "late.txt" }] } }),
 		).toThrow(/is a process, not a path/);
 	});
 

@@ -58,17 +58,21 @@ describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 	test.each([
 		["a bare re-forking script", "/bin/sh ./hop.sh & exit 0"],
 		["the same script started through nohup", "nohup /bin/sh ./hop.sh >/dev/null 2>&1 & exit 0"],
-	])("%s is gone after the reap and stays gone", async (_name, hookCommand) => {
-		const chain = startChain(hookCommand);
-		await delay(150);
-		expect(generations(chain.root)).toBeGreaterThan(1);
+	])(
+		"%s is gone after the reap and stays gone",
+		async (_name, hookCommand) => {
+			const chain = startChain(hookCommand);
+			await delay(150);
+			expect(generations(chain.root)).toBeGreaterThan(1);
 
-		const survived = await reap(chain.pgid, chain.root, chain.startedAt);
-		const afterReap = generations(chain.root);
-		await delay(400);
+			const reaped = await reap(chain.pgid, chain.root, chain.startedAt);
+			const afterReap = generations(chain.root);
+			await delay(400);
 
-		expect(cwdHolders(chain.root)).toEqual([]);
-		expect(generations(chain.root)).toBe(afterReap);
-		expect(survived).toBe(true);
-	}, 30_000);
+			expect(cwdHolders(chain.root)).toEqual([]);
+			expect(generations(chain.root)).toBe(afterReap);
+			expect(reaped).toEqual({ survived: true, converged: true });
+		},
+		30_000,
+	);
 });

@@ -24,6 +24,7 @@ import {
 } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
+import type { ReapResult } from "./reap.ts";
 import { killGroup, reap, WARNINGS } from "./reap.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
 import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, createClaudeSide, hashClaude } from "./sides/claude.ts";
@@ -54,8 +55,8 @@ interface ProcessResult {
 	stdout: string;
 	stderr: string;
 	timedOut: boolean;
-	/** The side left a process behind, which the harness killed before it hashed the workspace. */
-	survivors: boolean;
+	/** What the side left running, which the harness killed before it hashed the workspace. */
+	reaped: ReapResult;
 }
 
 const CONFORMANCE_DIR = fileURLToPath(new URL(".", import.meta.url));
@@ -228,7 +229,8 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
 		const workspaceAfter = scanWorkspace(roots, expectedFilePaths(testCase));
 		const violations: Violation[] = [...workspaceAfter.violations];
-		if (result.survivors) violations.push({ kind: "survivor", path: null });
+		if (result.reaped.survived) violations.push({ kind: "survivor", path: null });
+		if (!result.reaped.converged) violations.push({ kind: "unreaped", path: null });
 		const observation: Observation = {
 			timedOut: result.timedOut,
 			exitCode: result.exitCode,
@@ -325,7 +327,10 @@ function runSandboxed(
 			stdinAbort.abort();
 			await stdinDone;
 			clearTimeout(timer);
-			const survivors = child.pid === undefined ? false : await reap(child.pid, roots.root, startedAt);
+			const reaped =
+				child.pid === undefined
+					? { survived: false, converged: true }
+					: await reap(child.pid, roots.root, startedAt);
 			if (stdinFailure !== undefined) {
 				reject(stdinFailure);
 				return;
@@ -335,7 +340,7 @@ function runSandboxed(
 				stdout: Buffer.concat(stdout).toString("utf8"),
 				stderr: Buffer.concat(stderr).toString("utf8"),
 				timedOut,
-				survivors,
+				reaped,
 			});
 		});
 	});

@@ -192,6 +192,7 @@ export const VIOLATION_KINDS = [
 	"not-regular-file",
 	"unreadable",
 	"survivor",
+	"unreaped",
 ] as const;
 
 export type ViolationKind = (typeof VIOLATION_KINDS)[number];

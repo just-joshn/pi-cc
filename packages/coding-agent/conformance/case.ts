@@ -319,7 +319,7 @@ function asContainmentSpecs(value: unknown, source: string): ContainmentSpec[] |
 			fail(source, `${field}.kind "${kind}" is not a violation kind (${VIOLATION_KINDS.join(", ")})`);
 		}
 		const path = asOptionalString(object.path, source, `${field}.path`);
-		if (kind === "survivor") {
+		if (kind === "survivor" || kind === "unreaped") {
 			if (path !== undefined) fail(source, `${field}.path is a process, not a path, so it cannot be named`);
 			return { kind: kind as ViolationKind };
 		}
