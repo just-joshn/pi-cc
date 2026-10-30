@@ -309,10 +309,30 @@ describe("imported keys dispatch before pi handling", () => {
 		expect(t.press("\x0c").events).toEqual(["submit:draft", "model"]);
 	});
 
-	it("takes precedence over pi's own binding of the same key", () => {
+	it("takes precedence over pi's default binding of the same key", () => {
 		const t = probe({}, cc({ "ctrl+c": "chat:newline" }));
 		t.editor.setText("a");
 		expect(t.press("\x03")).toEqual({ text: "a\n", events: [] });
+	});
+
+	it("yields to a key the pi keybindings file binds", () => {
+		const t = probe({ "app.model.select": "ctrl+y" }, cc({ "ctrl+y": "chat:submit", "ctrl+l": "chat:undo" }));
+		t.editor.setText("draft");
+		expect(t.press("\x19")).toEqual({ text: "draft", events: ["model"] });
+		expect(t.manager.cc.getBindings()).toEqual([{ keys: ["ctrl+l"], action: "tui.editor.undo" }]);
+	});
+
+	it("yields a whole chord whose first stroke the pi file binds", () => {
+		const t = probe({ "app.model.select": "ctrl+k" }, cc({ "ctrl+k ctrl+s": "chat:submit" }));
+		t.editor.setText("draft");
+		expect(t.press("\x0b")).toEqual({ text: "draft", events: ["model"] });
+		expect(t.press("\x13").events).toEqual(["model"]);
+	});
+
+	it("matches the pi file's spelling of a key however it is written", () => {
+		const t = probe({ "app.model.select": ["Ctrl+Y"] }, cc({ "control+y": "chat:submit" }));
+		t.editor.setText("draft");
+		expect(t.press("\x19").events).toEqual(["model"]);
 	});
 
 	it("lets a pi action name in a CC file dispatch without disturbing other keys", () => {
