@@ -1,0 +1,83 @@
+{
+	"id": "perm/bash-exact-allow-clears-constructs-only",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Bash(find . -name b.txt -exec touch out.txt \\;)",
+		"Bash(cat /etc/hosts)",
+		"Bash(echo T > ~/.claude/settings.json)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "MARK_B\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name b.txt -exec touch out.txt \\;"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cat /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo T > ~/.claude/settings.json"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"was blocked",
+				"requested permissions to write to"
+			]
+		},
+		"absent": [
+			"$HOME/.claude/settings.json"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4,
+				"bodyMatch": [
+					"was blocked",
+					"requested permissions to write to"
+				]
+			}
+		],
+		"files": [
+			"out.txt"
+		]
+	},
+	"skip": []
+}

@@ -45,6 +45,41 @@ const write = (file: string): PermissionCall => ({
 });
 const bash = (command: string): PermissionCall => ({ name: "Bash", input: { command } });
 
+describe("a Bash safety verdict against a whole-tool allow", () => {
+	const whole = { allowedTools: ["Bash"] };
+
+	it("holds a sensitive path, a tilde that lands on one, and the background operator", () => {
+		for (const command of [
+			"echo x > .git/config",
+			"echo x > ~/.claude/settings.json",
+			"touch ~/.zshrc",
+			"sleep 1 &",
+		]) {
+			const result = run(bash(command), whole);
+			expect(result.decision.behavior, command).toBe("ask");
+			expect(stageOf(result), command).toBe("modeHold");
+		}
+	});
+
+	it("lets the whole-tool allow clear a dangerous option, an unresolvable operand and a read outside", () => {
+		for (const command of [
+			"find . -delete",
+			"jq -f x.jq b.txt",
+			"find . -name *.txt",
+			"cat /etc/hosts",
+			"echo x > ~/note.txt",
+			"echo x > ../out.txt",
+			"echo $(id) > .git/config",
+		]) {
+			expect(run(bash(command), whole).decision.behavior, command).toBe("allow");
+		}
+	});
+
+	it("lets bypassPermissions clear a held safety verdict", () => {
+		expect(run(bash("echo x > .git/config"), { mode: "bypassPermissions" }).decision.behavior).toBe("allow");
+	});
+});
+
 function stageOf(result: { stage: StageName }): StageName {
 	return result.stage;
 }

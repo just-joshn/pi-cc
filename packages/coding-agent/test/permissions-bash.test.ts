@@ -155,7 +155,11 @@ describe("checking a command", () => {
 			behavior: "ask",
 			message: "This command uses shell operators that require approval for safety",
 		});
-		expect(check("ls &")).toMatchObject({ behavior: "ask", message: expect.stringContaining("background operator") });
+		expect(check("ls &")).toMatchObject({
+			behavior: "ask",
+			safety: true,
+			message: expect.stringContaining("background operator"),
+		});
 	});
 
 	it("denies a deny-ruled part of a compound and names the whole command", () => {
@@ -204,7 +208,7 @@ describe("checking a command", () => {
 
 	it("blocks a read-only command on a path outside the working directories", () => {
 		expect(check("cat /etc/hosts")).toMatchObject({
-			behavior: "deny",
+			behavior: "ask",
 			message: expect.stringMatching(
 				/^cat in '(\/private)?\/etc\/hosts' was blocked\. For security, Claude Code may only concatenate files from the allowed working directories/,
 			),
@@ -253,7 +257,7 @@ describe("redirections that name a file", () => {
 		expect(parseCommand("cat <<< word").readTargets).toEqual([]);
 		expect(check("cat < in.txt").behavior).toBe("allow");
 		expect(check("cat < /etc/hosts")).toMatchObject({
-			behavior: "deny",
+			behavior: "ask",
 			message: expect.stringMatching(/^Input redirection from '(\/private)?\/etc\/hosts' was blocked\./),
 		});
 	});
@@ -277,13 +281,13 @@ describe("options on a read-only command", () => {
 	it("keeps the value of a pattern option out of the path operands", () => {
 		for (const command of ["grep --regexp=a /etc/hosts", "grep -e a /etc/hosts", "grep -f /etc/hosts b.txt"]) {
 			expect(check(command), command).toMatchObject({
-				behavior: "deny",
+				behavior: "ask",
 				message: expect.stringMatching(/^grep in '(\/private)?\/etc\/hosts' was blocked/),
 			});
 		}
 		expect(check("grep --regexp=a b.txt").behavior).toBe("allow");
 		expect(check("grep a b.txt").behavior).toBe("allow");
-		expect(check("grep a /etc/hosts").behavior).toBe("deny");
+		expect(check("grep a /etc/hosts").behavior).toBe("ask");
 	});
 
 	it("reads only the paths before the first find expression", () => {
@@ -341,6 +345,75 @@ describe("a prefix rule", () => {
 
 	it("still allows an exact rule for the same command", () => {
 		expect(check("find . -delete", { allow: ["Bash(find . -delete)"] }).behavior).toBe("allow");
+	});
+});
+
+describe("a command's safety verdict and what can clear it", () => {
+	const unsafe = (command: string) => check(command, { allow: [`Bash(${command.split(" ")[0]}:*)`] });
+
+	it("is computed with no rule and with a prefix rule alike", () => {
+		for (const command of [
+			"jq -n 'system(\"id\")'",
+			"jq -f x.jq b.txt",
+			"find . -name *.txt",
+			"cat /etc/hosts",
+			"cp b.txt ../out.txt",
+			"touch ~/.zshrc",
+			"cat $FOO",
+			"rm *.zz",
+			"grep --regexp=a /etc/hosts",
+		]) {
+			expect(check(command).behavior, command).toBe("ask");
+			expect(unsafe(command).behavior, `${command} under a prefix rule`).toBe("ask");
+		}
+	});
+
+	it("lets only an exact rule clear a dangerous option, never a path or a sensitive file", () => {
+		expect(check("find . -delete", { allow: ["Bash(find . -delete)"] }).behavior).toBe("allow");
+		expect(check("find . -delete", { allow: ["Bash(find . *)"] }).behavior).toBe("ask");
+		expect(check("cat /etc/hosts", { allow: ["Bash(cat /etc/hosts)"] }).behavior).toBe("ask");
+		expect(check("echo x > .git/config", { allow: ["Bash(echo x > .git/config)"] })).toMatchObject({
+			behavior: "ask",
+			safety: true,
+		});
+	});
+
+	it("reads a redirection target and a word with the same unescaping", () => {
+		expect(parseCommand("echo a > .gi\\t/config").writeTargets).toEqual([".git/config"]);
+		expect(shellWords("echo a .gi\\t/config")[2]).toBe(".git/config");
+		expect(parseCommand('echo a > ".gi\\t/config"').writeTargets).toEqual([".gi\\t/config"]);
+		expect(check("echo a > .gi\\t/config", {}, true)).toMatchObject({ behavior: "ask", safety: true });
+	});
+
+	it("expands a leading tilde to the home directory for operands and redirection targets", () => {
+		const home = "/nonexistent-home";
+		const at = (command: string) =>
+			checkBash({
+				command,
+				allow: [],
+				ask: [],
+				deny: [],
+				acceptEdits: true,
+				directories: [cwd],
+				cwd,
+				home,
+			});
+		expect(at("echo a > ~/.claude/settings.json")).toMatchObject({ behavior: "ask", safety: true });
+		expect(at("echo a > ~/note.txt")).toMatchObject({
+			behavior: "ask",
+			safety: false,
+			message: "Shell expansion syntax in paths requires manual approval",
+		});
+		expect(at("cat ~/note.txt")).toMatchObject({ behavior: "ask", message: expect.stringContaining("was blocked") });
+	});
+
+	it("keeps a glob read inside the working directories and refuses a glob write", () => {
+		expect(check("ls *.txt").behavior).toBe("allow");
+		expect(check("ls /etc/*.conf").behavior).toBe("ask");
+		expect(check("rm *.zz", {}, true)).toMatchObject({
+			behavior: "ask",
+			message: "Glob patterns are not allowed in write operations. Please specify an exact file path.",
+		});
 	});
 });
 
