@@ -286,7 +286,6 @@ function runSandboxed(
 	timeoutMs: number,
 ): Promise<ProcessResult> {
 	return new Promise((resolve, reject) => {
-		const startedAt = Date.now();
 		const child = spawn(SANDBOX_EXEC, ["-f", profilePath, ...argv], {
 			cwd,
 			env,
@@ -328,9 +327,7 @@ function runSandboxed(
 			await stdinDone;
 			clearTimeout(timer);
 			const reaped =
-				child.pid === undefined
-					? { survived: false, converged: true }
-					: await reap(child.pid, roots.root, startedAt);
+				child.pid === undefined ? { survived: false, converged: true } : await reap(child.pid, roots.root);
 			if (stdinFailure !== undefined) {
 				reject(stdinFailure);
 				return;

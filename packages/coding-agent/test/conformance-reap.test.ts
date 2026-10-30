@@ -26,18 +26,17 @@ const { spawn } = require("node:child_process");
 spawn("/bin/sh", ["-c", process.argv[1]], { detached: true, stdio: "ignore", cwd: process.cwd() }).unref();
 `;
 
-function startChain(hookCommand: string): { root: string; pgid: number; startedAt: number } {
+function startChain(hookCommand: string): { root: string; pgid: number } {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
 	roots.push(root);
 	writeFileSync(join(root, "hop.sh"), HOP);
-	const startedAt = Date.now();
 	const side = spawn(process.execPath, ["-e", SIDE_SIMULATOR, hookCommand], {
 		cwd: root,
 		detached: true,
 		stdio: "ignore",
 	});
 	side.unref();
-	return { root, pgid: side.pid ?? 0, startedAt };
+	return { root, pgid: side.pid ?? 0 };
 }
 
 function cwdHolders(root: string): string[] {
@@ -65,7 +64,7 @@ describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 			await delay(150);
 			expect(generations(chain.root)).toBeGreaterThan(1);
 
-			const reaped = await reap(chain.pgid, chain.root, chain.startedAt);
+			const reaped = await reap(chain.pgid, chain.root);
 			const afterReap = generations(chain.root);
 			await delay(400);
 
@@ -75,4 +74,43 @@ describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 		},
 		30_000,
 	);
+});
+
+// A scan that cannot run says nothing about the tree, so the reap must not call it clean.
+describe.skipIf(!darwin)("a reap whose scan cannot run", () => {
+	function fakeLsof(script: string): string {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-fake-lsof-")));
+		roots.push(dir);
+		const path = join(dir, "lsof");
+		writeFileSync(path, script, { mode: 0o755 });
+		return path;
+	}
+
+	test.each([
+		["missing", "/nonexistent/lsof"],
+		["silent", "#!/bin/sh\nexit 1\n"],
+	])("an lsof that is %s reports no convergence", async (kind, tool) => {
+		const lsof = kind === "missing" ? tool : fakeLsof(tool);
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+		roots.push(root);
+
+		const reaped = await reap(2 ** 22, root, lsof);
+
+		expect(reaped).toEqual({ survived: false, converged: false });
+	});
+});
+
+describe.skipIf(!darwin)("a reap and the harness's own process group", () => {
+	test("never signals a process in the harness's group, even inside the root", async () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+		roots.push(root);
+		const bystander = spawn("/bin/sleep", ["30"], { cwd: root, stdio: "ignore" });
+
+		const reaped = await reap(2 ** 22, root);
+
+		const alive = bystander.exitCode === null && bystander.signalCode === null;
+		bystander.kill("SIGKILL");
+		expect(alive).toBe(true);
+		expect(reaped).toEqual({ survived: false, converged: true });
+	});
 });
