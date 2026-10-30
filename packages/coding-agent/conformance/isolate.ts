@@ -88,10 +88,13 @@ export function createRoots(tmpRoot: string, caseId: string, side: SideName): Ro
 /**
  * Expands the case-file placeholders. `$HOME` is the side's temp home, never the real one. `$AGENT` and
  * `$CONFIG` are each side's own config store (`PI_CODING_AGENT_DIR`, `CLAUDE_CONFIG_DIR`), so one case can
- * seed a credential into each side's store without naming either side.
+ * seed a credential into each side's store without naming either side. `$MOCK_URL` is the mock server's origin,
+ * available only where the server already runs (argv, env and seeded file content), so a case can aim an exporter at it.
  */
-export function expandPlaceholders(value: string, roots: Roots): string {
+export function expandPlaceholders(value: string, roots: Roots, mockUrl?: string): string {
 	return value
+		.split("$MOCK_URL")
+		.join(mockUrl ?? "$MOCK_URL")
 		.split("$WORKSPACE")
 		.join(roots.workspace)
 		.split("$TMP")
@@ -162,7 +165,7 @@ function isInside(root: string, target: string): boolean {
 }
 
 /** A seeded path must land in a side-owned tree. */
-export function seedFiles(roots: Roots, files: Record<string, string>): void {
+export function seedFiles(roots: Roots, files: Record<string, string>, mockUrl?: string): void {
 	for (const [path, content] of Object.entries(files)) {
 		const expanded = expandPlaceholders(path, roots);
 		const target = isAbsolute(expanded) ? expanded : join(roots.workspace, expanded);
@@ -176,7 +179,7 @@ export function seedFiles(roots: Roots, files: Record<string, string>): void {
 			throw new Error(`seeded path escapes the side root: ${path}`);
 		}
 		mkdirp(dirname(target));
-		writeFileSync(target, expandPlaceholders(content, roots));
+		writeFileSync(target, expandPlaceholders(content, roots, mockUrl));
 	}
 }
 

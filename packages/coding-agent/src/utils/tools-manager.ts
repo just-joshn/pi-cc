@@ -5,6 +5,7 @@ import { join } from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { getBinDir, VERSION } from "../config.ts";
+import { upstreamNetworkAllowed } from "../core/telemetry/gates.ts";
 import { startupEnv } from "./internal-env.ts";
 import { fetchWithRetry } from "./management-http.ts";
 import { getPiUserAgent } from "./pi-user-agent.ts";
@@ -349,6 +350,13 @@ export async function ensureTool(
 
 	if (isOfflineModeEnabled()) {
 		onStatus?.({ type: "warning", message: `${config.name} not found. Offline mode enabled, skipping download.` });
+		return undefined;
+	}
+	if (!upstreamNetworkAllowed()) {
+		onStatus?.({
+			type: "warning",
+			message: `${config.name} not found. Downloads are off; install ${config.name} with your system package manager.`,
+		});
 		return undefined;
 	}
 

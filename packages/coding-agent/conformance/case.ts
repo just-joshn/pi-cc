@@ -26,6 +26,10 @@ export interface RequestSpec {
 	/** A `null` value asserts the header is absent. */
 	headers?: Record<string, HeaderValueSpec>;
 	bodyEquals?: Record<string, unknown>;
+	/** Text every one of which must appear in the serialized body of some matched request. */
+	bodyIncludes?: string[];
+	/** Text that must appear in no matched request's serialized body. */
+	bodyExcludes?: string[];
 }
 
 /**
@@ -119,7 +123,7 @@ const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra
 const JSON_STDOUT_KEYS = ["kind", "records"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
-const REQUEST_KEYS = ["pathStartsWith", "count", "method", "headers", "bodyEquals"];
+const REQUEST_KEYS = ["pathStartsWith", "count", "method", "headers", "bodyEquals", "bodyIncludes", "bodyExcludes"];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -350,6 +354,8 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 			method,
 			headers: asRequestHeaders(object.headers, source, `${field}.headers`),
 			bodyEquals: body as Record<string, unknown> | undefined,
+			bodyIncludes: asOptionalStringArray(object.bodyIncludes, source, `${field}.bodyIncludes`),
+			bodyExcludes: asOptionalStringArray(object.bodyExcludes, source, `${field}.bodyExcludes`),
 		};
 	});
 }

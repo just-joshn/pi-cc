@@ -10,6 +10,7 @@ import {
 import { VERSION } from "../config.ts";
 import { fetchWithRetry } from "../utils/management-http.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
+import { upstreamNetworkAllowed } from "./telemetry/gates.ts";
 
 const DEFAULT_CATALOG_BASE_URL = "https://pi.dev";
 const REMOTE_CATALOG_ATTEMPT_TIMEOUT_MS = 4_000;
@@ -21,6 +22,11 @@ export const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
  * the chat-only shard, which this client handles unchanged.
  */
 export const REMOTE_CATALOG_MODEL_TYPES: readonly ModelType[] = ["chat", "image", "classifier"];
+
+/** The upstream pi.dev catalog is only fetched when the operator allows upstream traffic. */
+function catalogFetchAllowed(allowNetwork: boolean, catalogBaseUrl: string): boolean {
+	return allowNetwork && (catalogBaseUrl !== DEFAULT_CATALOG_BASE_URL || upstreamNetworkAllowed());
+}
 
 function isSupportedModelType(model: { type?: unknown }): boolean {
 	return (
@@ -128,7 +134,7 @@ export function withRemoteCatalog(
 			) {
 				return;
 			}
-			if (!context.allowNetwork || context.signal.aborted) return;
+			if (!catalogFetchAllowed(context.allowNetwork, catalogBaseUrl) || context.signal.aborted) return;
 			// Skip the request if pi.dev was checked less than REMOTE_CATALOG_REFRESH_INTERVAL_MS ago.
 			// An entry without lastModified (saved by an older pi, or after a failed first request) is
 			// always refetched: remoteModels() ignores it, so waiting would leave the overlay empty.
@@ -217,7 +223,7 @@ export function withPersonalizedCatalog(
 			) {
 				return;
 			}
-			if (!context.allowNetwork || context.signal.aborted) return;
+			if (!catalogFetchAllowed(context.allowNetwork, catalogBaseUrl) || context.signal.aborted) return;
 
 			const response = await requestCatalog(provider.id, catalogBaseUrl, context.signal);
 			if (context.signal.aborted) return;

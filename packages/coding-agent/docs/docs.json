@@ -153,6 +153,10 @@
           "path": "settings.md"
         },
         {
+          "title": "Telemetry",
+          "path": "telemetry.md"
+        },
+        {
           "title": "Models Configuration",
           "path": "models-configuration.md"
         },

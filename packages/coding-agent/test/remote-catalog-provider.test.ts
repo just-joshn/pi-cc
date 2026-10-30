@@ -8,7 +8,7 @@ import {
 	type Provider,
 	type RefreshModelsContext,
 } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VERSION } from "../src/config.ts";
 import {
 	type PersonalizeCatalog,
@@ -75,9 +75,19 @@ async function refreshProvider(
 	});
 }
 
+beforeEach(() => vi.stubEnv("PI_CC_ALLOW_UPSTREAM_NETWORK", "1"));
 afterEach(() => vi.restoreAllMocks());
 
 describe("remote catalog provider", () => {
+	it("does not call pi.dev unless upstream traffic is allowed", async () => {
+		vi.stubEnv("PI_CC_ALLOW_UPSTREAM_NETWORK", undefined);
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		const provider = testProvider();
+		await refreshProvider(provider, new InMemoryModelsStore());
+		expect(fetchSpy).not.toHaveBeenCalled();
+		expect(provider.getModels().map((entry) => entry.id)).toEqual(["static"]);
+	});
+
 	it("parses keyed catalogs, sends version headers, observes the refresh TTL, and supports forced refreshes", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
 			async () =>

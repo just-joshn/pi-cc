@@ -2,7 +2,7 @@ import type * as ChildProcess from "node:child_process";
 import type * as Fs from "node:fs";
 import type * as Os from "node:os";
 import { arch, platform } from "os";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureTool, getLatestVersion, type ToolStatus } from "../src/utils/tools-manager.ts";
 
 const originalOffline = process.env.PI_OFFLINE;
@@ -112,6 +112,8 @@ describe("getLatestVersion", () => {
 });
 
 describe("ensureTool", () => {
+	beforeEach(() => vi.stubEnv("PI_CC_ALLOW_UPSTREAM_NETWORK", "1"));
+
 	it("reports status through a callback without writing to the console", async () => {
 		process.env.PI_OFFLINE = "1";
 		const statuses: ToolStatus[] = [];

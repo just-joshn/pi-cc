@@ -1,5 +1,5 @@
 /**
- * A local Anthropic Messages server. It replays one scripted turn per request, records every request
+ * A local Anthropic Messages server, which also accepts OTLP/HTTP exports. It replays one scripted turn per request, records every request
  * it receives to `requests.jsonl`, and answers 502 once the script is exhausted so a side that asks
  * for one turn too many fails on a recorded request rather than a connection error.
  */
@@ -10,6 +10,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type { Turn } from "../case.ts";
+
+/** The OTLP/HTTP signal paths, so a case can point an operator-owned exporter at the same mock port. */
+const OTLP_PATHS = ["/v1/metrics", "/v1/logs", "/v1/traces"];
 
 export interface RecordedRequest {
 	index: number;
@@ -49,6 +52,10 @@ export async function startMockServer(options: { turns: Turn[]; outDir: string }
 			};
 			requests.push(record);
 			appendFileSync(logPath, `${JSON.stringify(record)}\n`);
+			if (OTLP_PATHS.some((prefix) => path.startsWith(prefix))) {
+				response.writeHead(200, { "content-type": "application/json" }).end("{}");
+				return;
+			}
 			if (path.startsWith("/v1/messages/count_tokens")) {
 				const body = { input_tokens: Math.ceil(text.length / 4) };
 				response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));

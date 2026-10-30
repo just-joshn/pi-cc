@@ -1,0 +1,58 @@
+{
+ "id": "telemetry/otlp-from-settings-env",
+ "area": "telemetry",
+ "argv": [
+  "-p",
+  "Say the secret word please",
+  "--output-format",
+  "json"
+ ],
+ "env": {},
+ "stdin": null,
+ "files": {
+  "$CONFIG/settings.json": "{\"env\": {\"CLAUDE_CODE_ENABLE_TELEMETRY\": \"1\", \"OTEL_METRICS_EXPORTER\": \"otlp\", \"OTEL_LOGS_EXPORTER\": \"otlp\", \"OTEL_EXPORTER_OTLP_PROTOCOL\": \"http/json\", \"OTEL_EXPORTER_OTLP_ENDPOINT\": \"$MOCK_URL\"}}"
+ },
+ "model": {
+  "turns": [
+   {
+    "text": "ZEBRA_RESPONSE_42"
+   }
+  ]
+ },
+ "timeout_ms": 60000,
+ "compare": {
+  "exit": 0,
+  "requests": [
+   {
+    "pathStartsWith": "/v1/messages",
+    "count": 1,
+    "method": "POST"
+   },
+   {
+    "pathStartsWith": "/v1/logs",
+    "method": "POST",
+    "count": 1,
+    "bodyIncludes": [
+     "claude_code.user_prompt",
+     "claude_code.api_request",
+     "claude_code.assistant_response"
+    ]
+   },
+   {
+    "pathStartsWith": "/v1/metrics",
+    "method": "POST",
+    "count": 1,
+    "bodyIncludes": [
+     "claude_code.session.count",
+     "claude_code.token.usage",
+     "claude_code.cost.usage",
+     "claude_code.active_time.total"
+    ]
+   }
+  ]
+ },
+ "skip": [],
+ "not_applicable": {
+  "claude": "Measured on 2.1.312: in -p mode claude ignores CLAUDE_CODE_ENABLE_TELEMETRY and OTEL_* values from user and --settings env, and exports nothing. pi-cc applies the settings env path the way the Claude Code docs describe it."
+ }
+}

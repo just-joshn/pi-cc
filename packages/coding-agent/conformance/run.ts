@@ -195,10 +195,11 @@ async function runCase(testCase: ConformanceCase, sides: Side[], runRoot: string
 
 async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): Promise<SideRun> {
 	const roots = createRoots(runRoot, testCase.id, side.name);
-	seedFiles(roots, testCase.files);
 	const mock =
 		testCase.model === null ? null : await startMockServer({ turns: testCase.model.turns, outDir: roots.out });
+	const mockUrl = mock === null ? undefined : `http://127.0.0.1:${mock.port}`;
 	try {
+		seedFiles(roots, testCase.files, mockUrl);
 		side.prepare(roots, mock?.port ?? null);
 		const profilePath = join(roots.out, "profile.sb");
 		writeFileSync(
@@ -206,10 +207,10 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 			renderProfile({ roots, executableRoots: side.executableRoots(), port: mock?.port ?? null }),
 		);
 		const command = testCase.binary === undefined ? side.command() : [testCase.binary];
-		const argv = [...command, ...testCase.argv.map((argument) => expandPlaceholders(argument, roots))];
+		const argv = [...command, ...testCase.argv.map((argument) => expandPlaceholders(argument, roots, mockUrl))];
 		const env = { ...baseEnv(roots, mock?.port ?? null) };
 		for (const key of testCase.unset) delete env[key];
-		for (const [key, value] of Object.entries(testCase.env)) env[key] = expandPlaceholders(value, roots);
+		for (const [key, value] of Object.entries(testCase.env)) env[key] = expandPlaceholders(value, roots, mockUrl);
 
 		const workspaceBefore = hashTree(roots.workspace);
 		const result = await runSandboxed(profilePath, argv, roots, env, testCase.stdin, testCase.timeout_ms);
