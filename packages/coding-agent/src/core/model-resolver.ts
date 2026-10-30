@@ -494,20 +494,51 @@ export function resolveCliModel(options: {
 
 	const aliasApplies = hasModelEnvironment(modelEnvironment) && (provider === undefined || provider === "anthropic");
 
+	// The gateway route only takes names pi has no syntax for: a `provider/` prefix pi knows resolves
+	// through pi's reference parser below, because pi's model syntax wins over Claude Code compat.
+	const gatewayPrefix = splitProviderPrefix(cliModel, models);
+	const gatewayRouting = !provider && !gatewayPrefix && anthropicGatewayActive(modelRuntime);
+	// The alias table also serves an operator who names the Anthropic provider without any Claude Code
+	// variable set: `--provider anthropic --model opusplan` resolves the way the alias does.
+	const aliasOnAnthropic = aliasApplies || provider === "anthropic" || gatewayPrefix?.provider === "anthropic";
+
+	// A trailing `:<thinking>` is pi's syntax, so the level is split off before Claude Code alias
+	// resolution and applied to the resolved model instead of riding along on the wire id.
+	const suffix = gatewayRouting || aliasOnAnthropic ? splitThinkingSuffix(cliModel) : undefined;
+	const aliasName = suffix?.base ?? cliModel;
+	// With a suffix stripped the prefix is recomputed on the base, which finds the same provider.
+	const prefixed = suffix ? splitProviderPrefix(aliasName, models) : gatewayPrefix;
+
 	// With a base URL and an Anthropic credential the operator runs Claude Code compat: an unprefixed
 	// --model names the Anthropic session model, aliases and unknown ids alike, because Claude Code sends
 	// every such name to its endpoint instead of searching other providers.
-	if (!provider && anthropicGatewayActive(modelRuntime)) {
-		const gatewayModel = anthropicCcModel(modelRuntime, cliModel);
-		if (gatewayModel) return { model: gatewayModel, warning: undefined, error: undefined };
+	if (gatewayRouting) {
+		const gatewayModel = anthropicCcModel(modelRuntime, aliasName);
+		if (gatewayModel) {
+			return { model: gatewayModel, thinkingLevel: suffix?.thinkingLevel, warning: undefined, error: undefined };
+		}
+	}
+
+	let referenceText = aliasName;
+	let bareAlias = false;
+	if (aliasOnAnthropic) {
+		if (prefixed) {
+			if (prefixed.provider === "anthropic") {
+				// Claude Code never sends a context marker, so the aliased reference drops it too.
+				referenceText = `${prefixed.provider}/${stripContextMarkers(ccModelAlias(prefixed.modelText, modelEnvironment))}`;
+			}
+		} else if (provider === "anthropic" || aliasApplies) {
+			referenceText = stripContextMarkers(ccModelAlias(aliasName, modelEnvironment));
+			bareAlias = isModelAlias(aliasName);
+		}
 	}
 
 	const result = resolveModelReference(
 		{
 			// A bare `haiku` and friends are Claude Code aliases once its model variables are in play, and an
 			// alias names a model on the Anthropic provider rather than a model to search every provider for.
-			text: aliasApplies ? ccModelAlias(cliModel, modelEnvironment) : cliModel,
-			provider: provider ?? (aliasApplies && isModelAlias(cliModel) ? "anthropic" : undefined),
+			text: referenceText,
+			provider: provider ?? (bareAlias ? "anthropic" : undefined),
 			thinkingSuffix: "strict",
 			fuzzy: true,
 		},
@@ -516,7 +547,12 @@ export function resolveCliModel(options: {
 		inlineApiKey ? () => false : (providerId) => modelRuntime.hasConfiguredAuth(providerId),
 	);
 	if (result.status === "resolved") {
-		return { model: result.model, thinkingLevel: result.thinkingLevel, warning: result.warning, error: undefined };
+		return {
+			model: result.model,
+			thinkingLevel: result.thinkingLevel ?? suffix?.thinkingLevel,
+			warning: result.warning,
+			error: undefined,
+		};
 	}
 	if (result.status === "ambiguous") {
 		const matches = result.candidates
@@ -548,7 +584,7 @@ export function resolveCliModel(options: {
 	// stays part of the custom model id.
 	// e.g. "zai-org/GLM-5.1-FP8:high" → modelId="zai-org/GLM-5.1-FP8", fallbackThinking="high"
 	const modelId = cliThinking ? target.modelText : target.modelId;
-	const fallbackThinking = cliThinking ? undefined : target.thinkingLevel;
+	const fallbackThinking = cliThinking ? undefined : (target.thinkingLevel ?? suffix?.thinkingLevel);
 	const fallbackModel = buildFallbackModel(target.providerModels, modelId);
 	const requestedThinking = cliThinking ?? fallbackThinking;
 	return {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	ccModelAlias,
 	ccSettingsModelMigration,
+	ccSettingsSessionModel,
 	hasModelEnvironment,
 	isModelAlias,
 	parseAnthropicModelEnv,
@@ -127,6 +128,29 @@ describe("ccModelAlias", () => {
 		expect(ccModelAlias("claude-opus-4-0", disabled)).toBe("claude-opus-4-0");
 		expect(parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: "" }).legacyRemapDisabled).toBe(false);
 	});
+
+	it("reads the remap switch with Claude Code's boolean rule", () => {
+		const disabled = (value: string) =>
+			parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: value }).legacyRemapDisabled;
+
+		expect(disabled("1")).toBe(true);
+		expect(disabled(" true ")).toBe(true);
+		expect(disabled("YES")).toBe(true);
+		expect(disabled("On")).toBe(true);
+		expect(disabled("0")).toBe(false);
+		expect(disabled("false")).toBe(false);
+		expect(disabled("no")).toBe(false);
+		expect(disabled("off")).toBe(false);
+		expect(disabled("")).toBe(false);
+	});
+
+	it("still remaps a retired id when the switch is 0 or false", () => {
+		for (const value of ["0", "false", "no", ""]) {
+			const env = parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: value });
+
+			expect(ccModelAlias("claude-opus-4-0", env)).toBe("claude-opus-5-5");
+		}
+	});
 });
 
 describe("ccSettingsModelMigration", () => {
@@ -135,6 +159,25 @@ describe("ccSettingsModelMigration", () => {
 		expect(ccSettingsModelMigration("sonnet")).toBe("sonnet");
 		expect(ccSettingsModelMigration("SONNET[1M]")).toBe("SONNET[1M]");
 		expect(ccSettingsModelMigration("sonnet-4-5-20250929[1m]")).toBe("sonnet-4-5-20250929[1m]");
+	});
+});
+
+describe("ccSettingsSessionModel", () => {
+	it("migrates the raw user-tier value, so a padded one misses the migration", () => {
+		expect(ccSettingsSessionModel("sonnet[1m]", "user")).toBe("sonnet-4-5-20250929[1m]");
+		expect(ccSettingsSessionModel("  sonnet[1m]  ", "user")).toBe("sonnet[1m]");
+	});
+
+	it("migrates only the user tier's value", () => {
+		for (const tier of ["project", "local", "flag", "policy", undefined]) {
+			expect(ccSettingsSessionModel("sonnet[1m]", tier)).toBe("sonnet[1m]");
+		}
+	});
+
+	it("trims the name and drops an empty one", () => {
+		expect(ccSettingsSessionModel("  glm-4.6  ", "user")).toBe("glm-4.6");
+		expect(ccSettingsSessionModel("   ", "user")).toBeUndefined();
+		expect(ccSettingsSessionModel(undefined, "user")).toBeUndefined();
 	});
 });
 

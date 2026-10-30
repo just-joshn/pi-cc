@@ -20,6 +20,9 @@ const FAMILIES = ["opus", "sonnet", "haiku", "fable"] as const;
 /** Retired Opus ids Claude Code remaps to the Opus default (`chunk-3xe0k172.js` `hK`). */
 const RETIRED_OPUS_IDS = ["claude-opus-4-20250514", "claude-opus-4-1-20250805", "claude-opus-4-0", "claude-opus-4-1"];
 
+/** The values Claude Code's boolean env parsing reads as true, trimmed and case-insensitive. */
+const TRUTHY_BOOL_VALUES = new Set(["1", "true", "yes", "on"]);
+
 /** The dated Sonnet 4.5 id Claude Code's startup migration rewrites a settings `sonnet[1m]` into. */
 const SONNET_1M_LEGACY = "sonnet-4-5-20250929[1m]";
 
@@ -28,7 +31,7 @@ export type AnthropicModelFamily = (typeof FAMILIES)[number];
 export interface AnthropicModelEnv {
 	model?: string;
 	family: Partial<Record<AnthropicModelFamily, string>>;
-	/** `CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP` set to a non-empty value. */
+	/** `CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP`, read with Claude Code's boolean rule. */
 	legacyRemapDisabled: boolean;
 }
 
@@ -63,7 +66,7 @@ export function parseAnthropicModelEnv(env: Record<string, string | undefined>):
 	return {
 		...(model ? { model } : {}),
 		family,
-		legacyRemapDisabled: disabled !== undefined && disabled !== "",
+		legacyRemapDisabled: TRUTHY_BOOL_VALUES.has(disabled?.trim().toLowerCase() ?? ""),
 	};
 }
 
@@ -128,6 +131,15 @@ export function ccModelAlias(name: string, env: AnthropicModelEnv): string {
  */
 export function ccSettingsModelMigration(name: string): string {
 	return name === "sonnet[1m]" ? SONNET_1M_LEGACY : name;
+}
+
+/**
+ * The session model name from the CC settings: Claude Code compares the raw value for the migration and
+ * only migrates the user tier's value, so a padded or repo-tier `sonnet[1m]` stays the alias written.
+ */
+export function ccSettingsSessionModel(model: string | undefined, tier: string | undefined): string | undefined {
+	if (!model?.trim()) return undefined;
+	return (tier === "user" ? ccSettingsModelMigration(model) : model).trim();
 }
 
 /** The id a request carries: Claude Code never sends a `[1m]`/`[2m]` context marker. */
