@@ -550,6 +550,12 @@ describe("containment declarations", () => {
 		).toThrow(/must be relative to the workspace, without "\.\."/);
 	});
 
+	test.each(["unreaped", "workspace-unmovable"])("rejects %s, a harness failure no case may declare", (kind) => {
+		expect(() => loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind }] } })).toThrow(
+			/harness failure/,
+		);
+	});
+
 	test.each(["survivor", "unreaped", "workspace-unmovable"])("rejects a path on %s, which names no path", (kind) => {
 		expect(() =>
 			loadOne({ ...MINIMAL_CASE, compare: { exit: 0, containment: [{ kind, path: "late.txt" }] } }),
