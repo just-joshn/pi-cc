@@ -18,6 +18,8 @@ const CORPORA = [
 	"removal-fuzz-blind2",
 	"removal-fuzz-review1",
 	"removal-fuzz-review2",
+	"removal-fuzz-round6a",
+	"removal-fuzz-round6b",
 ];
 const root = join(realpathSync(tmpdir()), "p04-removal-replay");
 const cwd = join(root, "workspace");

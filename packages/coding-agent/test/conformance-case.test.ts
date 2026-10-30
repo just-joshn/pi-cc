@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(498);
+		expect(cases.length).toBe(562);
 	});
 
 	test("requires a known side and a deviation for side-specific request assertions", () => {
