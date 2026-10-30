@@ -1,0 +1,161 @@
+{
+	"id": "sdk/interrupt-then-next-message",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}",
+			"#sleep 2500",
+			"{\"type\": \"control_request\", \"request_id\": \"r1\", \"request\": {\"subtype\": \"interrupt\"}}",
+			"#sleep 1500",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"again\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"sse": [
+					{
+						"type": "message_start",
+						"message": {
+							"id": "msg_h",
+							"type": "message",
+							"role": "assistant",
+							"model": "claude-haiku-4-5",
+							"content": [],
+							"stop_reason": null,
+							"stop_sequence": null,
+							"usage": {
+								"input_tokens": 12,
+								"output_tokens": 0
+							}
+						}
+					},
+					{
+						"type": "content_block_start",
+						"index": 0,
+						"content_block": {
+							"type": "text",
+							"text": ""
+						}
+					},
+					{
+						"type": "content_block_delta",
+						"index": 0,
+						"delta": {
+							"type": "text_delta",
+							"text": "PARTIAL TEXT"
+						}
+					}
+				],
+				"hold_ms": 8000
+			},
+			{
+				"text": "AFTER"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"type": "control_response",
+					"response": {
+						"subtype": "success",
+						"request_id": "r1",
+						"response": {
+							"still_queued": []
+						}
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.id": "msg_h",
+						"message.content": [
+							{
+								"type": "text",
+								"text": "PARTIAL TEXT"
+							}
+						],
+						"aborted": true
+					}
+				},
+				{
+					"$ref": "cc-user-interrupt",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "[Request interrupted by user]"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result-error",
+					"set": {
+						"subtype": "error_during_execution",
+						"terminal_reason": "aborted_streaming",
+						"stop_reason": null,
+						"num_turns": 2,
+						"total_cost_usd": 0,
+						"modelUsage": {},
+						"model_usage_since_last_result": {},
+						"usage.input_tokens": 0,
+						"usage.output_tokens": 0,
+						"errors": [
+							"[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"
+						]
+					}
+				},
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "AFTER"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"permission_denials": [],
+						"is_error": false,
+						"num_turns": 1,
+						"subtype": "success",
+						"result": "AFTER",
+						"terminal_reason": "completed",
+						"stop_reason": "end_turn",
+						"usage.input_tokens": 12,
+						"usage.output_tokens": 8,
+						"result_index": 1
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

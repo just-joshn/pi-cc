@@ -238,7 +238,7 @@ describe("SdkHost", () => {
 		expect(response.pending_permission_requests).toEqual([]);
 	});
 
-	it("set_model switches to a known model and rejects an unknown one", async () => {
+	it("set_model switches to a known model, rejects an unknown one, and goes back to the default without a model", async () => {
 		const input = new PassThrough();
 		input.end(
 			`${[
@@ -257,7 +257,7 @@ describe("SdkHost", () => {
 		);
 
 		expect(frames[0].response).toMatchObject({ subtype: "error", request_id: "a", error_code: "invalid_model" });
-		expect(frames[1].response).toMatchObject({ subtype: "error", request_id: "b", error_code: "invalid_model" });
+		expect(frames[1].response).toEqual({ subtype: "success", request_id: "b", response: { model: "faux-a" } });
 		expect(frames[2].response).toEqual({ subtype: "success", request_id: "c", response: { model: "faux-b" } });
 		expect(harness.session.model?.id).toBe("faux-b");
 		expect(frames[3].model).toBe("faux-b");
@@ -315,7 +315,7 @@ describe("SdkHost", () => {
 		expect(results[1].modelUsage["faux-b"]).toMatchObject({ contextWindow: 2000, maxOutputTokens: 200 });
 	});
 
-	it("interrupt during a running turn aborts it, answers, and still writes the turn's result", async () => {
+	it("an interrupt during a tool rejects it, writes the notice, and ends the turn as aborted_tools", async () => {
 		const input = new PassThrough();
 		const blockingTool: AgentTool = {
 			name: "block",
@@ -323,15 +323,13 @@ describe("SdkHost", () => {
 			description: "waits for abort",
 			parameters: Type.Object({}),
 			execute: (_id, _params, signal) =>
-				new Promise((resolve) => {
+				new Promise((_resolve, reject) => {
 					input.write(`${controlLine("stop", "interrupt")}\n`);
 					input.end();
-					signal?.addEventListener("abort", () =>
-						resolve({ content: [{ type: "text", text: "aborted" }], details: {} }),
-					);
+					signal?.addEventListener("abort", () => reject(new Error("Command aborted")));
 				}),
 		};
-		const { frames } = await run(
+		const { frames, exitCode } = await run(
 			{ inputFormat: "stream-json" },
 			[],
 			(h) =>
@@ -346,12 +344,212 @@ describe("SdkHost", () => {
 			{ tools: [blockingTool] },
 		);
 
-		expect(frames.find((frame) => frame.type === "control_response")?.response).toEqual({
-			subtype: "success",
-			request_id: "stop",
-			response: { still_queued: [] },
+		expect(frames.map(label)).toEqual([
+			"system/init",
+			"assistant",
+			"control_response",
+			"user",
+			"user",
+			"result/error_during_execution",
+		]);
+		expect(frames[2].response).toEqual({ subtype: "success", request_id: "stop", response: { still_queued: [] } });
+		expect(frames[3]).toMatchObject({
+			tool_use_result: "User rejected tool use",
+			tool_result_meta: [{ id: "toolu_1", non_execution_kind: "user-rejected" }],
 		});
-		expect(frames.at(-1)).toMatchObject({ type: "result" });
+		expect(frames[4].message.content).toEqual([{ type: "text", text: "[Request interrupted by user for tool use]" }]);
+		expect(frames[5]).toMatchObject({
+			is_error: true,
+			terminal_reason: "aborted_tools",
+			stop_reason: "tool_use",
+			num_turns: 3,
+			errors: ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"],
+		});
+		expect(frames[5]).not.toHaveProperty("result");
+		expect(frames[5]).not.toHaveProperty("ttft_ms");
+		expect(exitCode).toBe(1);
+	});
+
+	it("turns a failed request into the synthetic API error row and a result without timings", async () => {
+		const { frames, exitCode } = await run({}, ["go"], (h) =>
+			h.setResponses([
+				fauxAssistantMessage([], {
+					stopReason: "error",
+					errorMessage:
+						'400 {"type":"error","error":{"type":"invalid_request_error","message":"bad request probe"}}',
+				}),
+			]),
+		);
+
+		expect(frames.map(label)).toEqual(["system/init", "assistant", "result/success"]);
+		expect(frames[1]).toMatchObject({ error: "unknown", api_error_status: 400, is_api_error_message: true });
+		expect(frames[2]).toMatchObject({
+			is_error: true,
+			subtype: "success",
+			terminal_reason: "api_error",
+			stop_reason: "stop_sequence",
+			api_error_status: 400,
+			result: "API Error: 400 bad request probe",
+			total_cost_usd: 0,
+			modelUsage: {},
+			num_turns: 1,
+		});
+		for (const key of ["ttft_ms", "ttft_stream_ms", "time_to_request_ms", "first_content_frame_ms"]) {
+			expect(frames[2]).not.toHaveProperty(key);
+		}
+		expect(exitCode).toBe(1);
+	});
+
+	it("ends a message with error_max_turns after the tool results of the capped request", async () => {
+		const { frames, exitCode, harness } = await run({ maxTurns: 1 }, ["go"], (h) =>
+			h.setResponses([
+				fauxAssistantMessage([fauxToolCall("echo", { value: "a" }, { id: "toolu_1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("never"),
+			]),
+		);
+
+		expect(frames.map(label)).toEqual(["system/init", "assistant", "user", "result/error_max_turns"]);
+		expect(frames[3]).toMatchObject({
+			is_error: true,
+			terminal_reason: "max_turns",
+			stop_reason: "tool_use",
+			num_turns: 2,
+			errors: ["Reached maximum number of turns (1)"],
+		});
+		expect(frames[3]).not.toHaveProperty("result");
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(exitCode).toBe(1);
+	});
+
+	it("counts the turns of each user message on their own, and lets a text-only answer finish", async () => {
+		const input = new PassThrough();
+		input.end(`${[userLine("one"), userLine("two")].join("\n")}\n`);
+		const { frames } = await run(
+			{ inputFormat: "stream-json", maxTurns: 1 },
+			[],
+			(h) =>
+				h.setResponses([
+					fauxAssistantMessage([fauxToolCall("echo", { value: "a" }, { id: "toolu_1" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("fine"),
+				]),
+			input,
+		);
+
+		const results = frames.filter((frame) => frame.type === "result");
+		expect(results.map((frame) => frame.subtype)).toEqual(["error_max_turns", "success"]);
+		expect(results[1]).toMatchObject({ result: "fine", num_turns: 1, result_index: 1 });
+	});
+
+	it("never caps a turn when --max-turns is zero", async () => {
+		const { frames } = await run({ maxTurns: 0 }, ["go"], (h) =>
+			h.setResponses([
+				fauxAssistantMessage([fauxToolCall("echo", { value: "a" }, { id: "toolu_1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]),
+		);
+		expect(frames.at(-1)).toMatchObject({ subtype: "success", result: "done", num_turns: 2 });
+	});
+
+	it("fails with Claude Code's role message on a user line that is not from the user, running nothing before it", async () => {
+		for (const [line, got] of [
+			[JSON.stringify({ type: "user" }), "undefined"],
+			[JSON.stringify({ type: "user", message: { role: "assistant", content: "x" } }), "assistant"],
+		]) {
+			const input = new PassThrough();
+			input.end(`${line}\n${userLine("go")}\n`);
+			const { written, failures, exitCode, harness } = await run(
+				{ inputFormat: "stream-json" },
+				[],
+				(h) => h.setResponses([fauxAssistantMessage("never")]),
+				input,
+			);
+			expect(written).toEqual([]);
+			expect(failures).toEqual([`Error: Expected message role 'user', got '${got}'`]);
+			expect(exitCode).toBe(1);
+			expect(harness.getPendingResponseCount()).toBe(1);
+		}
+	});
+
+	it("answers a control request without a subtype as an unsupported one", async () => {
+		const input = new PassThrough();
+		input.end(`${JSON.stringify({ type: "control_request", request_id: "r4", request: {} })}\n`);
+		const { frames } = await run({ inputFormat: "stream-json" }, [], () => {}, input);
+		expect(frames).toEqual([
+			{
+				type: "control_response",
+				response: { subtype: "error", request_id: "r4", error: "Unsupported control request subtype: undefined" },
+			},
+		]);
+	});
+
+	it("set_model without a model returns to the startup model, and an error names the model in use", async () => {
+		const input = new PassThrough();
+		input.end(
+			`${[
+				controlLine("a", "set_model", { model: "faux-b" }),
+				controlLine("b", "set_model", { model: "no-such-model" }),
+				controlLine("c", "set_model"),
+				userLine("go"),
+			].join("\n")}\n`,
+		);
+		const { frames, harness } = await run(
+			{ inputFormat: "stream-json" },
+			[],
+			(h) => h.setResponses([fauxAssistantMessage("ok")]),
+			input,
+			{ models: [{ id: "faux-a" }, { id: "faux-b" }] },
+		);
+
+		expect(frames[0].response).toEqual({ subtype: "success", request_id: "a", response: { model: "faux-b" } });
+		expect(frames[1].response).toMatchObject({
+			subtype: "error",
+			request_id: "b",
+			error_code: "invalid_model",
+			model: "faux-b",
+		});
+		expect(frames[2].response).toEqual({ subtype: "success", request_id: "c", response: { model: "faux-a" } });
+		expect(harness.session.model?.id).toBe("faux-a");
+		expect(frames[3].model).toBe("faux-a");
+	});
+
+	it("answers mcp_status, get_context_usage and set_max_thinking_tokens", async () => {
+		const input = new PassThrough();
+		input.end(
+			`${[
+				controlLine("m", "mcp_status"),
+				controlLine("u", "get_context_usage"),
+				controlLine("t", "set_max_thinking_tokens", { max_thinking_tokens: 0 }),
+				controlLine("n", "set_max_thinking_tokens", { max_thinking_tokens: null }),
+			].join("\n")}\n`,
+		);
+		const { frames, harness } = await run({ inputFormat: "stream-json" }, [], () => {}, input, {
+			models: [{ id: "faux-a", reasoning: true, contextWindow: 1000 }],
+		});
+
+		expect(frames[0].response).toEqual({ subtype: "success", request_id: "m", response: { mcpServers: [] } });
+		expect(frames[1].response.response).toMatchObject({
+			maxTokens: 1000,
+			rawMaxTokens: 1000,
+			model: "faux-a",
+			categories: [
+				{ id: "messages", kind: "used" },
+				{ id: "free_space", kind: "free" },
+			],
+		});
+		expect(frames[2].response).toEqual({ subtype: "success", request_id: "t" });
+		expect(frames[3].response).toEqual({ subtype: "success", request_id: "n" });
+		expect(harness.session.thinkingLevel).toBe("off");
+	});
+
+	it("maps a positive thinking budget to the largest level it reaches", async () => {
+		const input = new PassThrough();
+		input.end(`${controlLine("t", "set_max_thinking_tokens", { max_thinking_tokens: 9000 })}\n`);
+		const { harness } = await run({ inputFormat: "stream-json" }, [], () => {}, input, {
+			models: [{ id: "faux-a", reasoning: true }],
+		});
+		expect(harness.session.thinkingLevel).toBe("medium");
 	});
 
 	it("end_session answers and stops without running the queued message", async () => {

@@ -1,0 +1,97 @@
+{
+	"id": "sdk/max-turns-zero-is-unlimited",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"go now",
+		"--max-turns",
+		"0",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"a.txt": "AAA\n",
+		"b.txt": "BBB\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "a.txt"
+					}
+				}
+			},
+			{
+				"text": "DONE"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-tool-use",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_use",
+								"id": "toolu_conformance_0_0",
+								"name": "Read",
+								"input": {
+									"file_path": "a.txt"
+								}
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-user-tool-result",
+					"set": {
+						"message.content": [
+							{
+								"tool_use_id": "toolu_conformance_0_0",
+								"type": "tool_result",
+								"content": "1\tAAA\n2\t"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "DONE"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"permission_denials": [],
+						"is_error": false,
+						"num_turns": 2,
+						"subtype": "success",
+						"result": "DONE",
+						"terminal_reason": "completed",
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}

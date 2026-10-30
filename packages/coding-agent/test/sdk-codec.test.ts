@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { invalidLineMessage, parseInputLine } from "../src/modes/sdk/codec.ts";
+import { parseInputLine } from "../src/modes/sdk/codec.ts";
 
 describe("parseInputLine", () => {
 	test("reads a user message with string content", () => {
@@ -50,22 +50,42 @@ describe("parseInputLine", () => {
 		});
 	});
 
-	test("ignores keep_alive, unknown types, control answers and malformed user messages", () => {
+	test("ignores keep_alive, unknown types, control answers and user content that is not text or blocks", () => {
 		for (const record of [
 			{ type: "keep_alive" },
 			{ type: "bogus" },
 			{ type: "control_response", response: { subtype: "success", request_id: "r" } },
-			{ type: "user", message: "not an object" },
 			{ type: "user", message: { role: "user", content: 7 } },
-			{ type: "control_request", request_id: "r", request: {} },
 		]) {
 			expect(parseInputLine(JSON.stringify(record))).toEqual({ kind: "ignored" });
 		}
 		expect(parseInputLine("[1,2]")).toEqual({ kind: "ignored" });
 	});
 
-	test("marks a line that is not JSON invalid and counts its characters", () => {
-		expect(parseInputLine("not json")).toEqual({ kind: "invalid", characters: 8 });
-		expect(invalidLineMessage(8)).toBe("Error parsing streaming input line (type=unknown, 8 chars): SyntaxError");
+	test("keeps a control request that has no subtype, which is answered as an unsupported one", () => {
+		const line = JSON.stringify({ type: "control_request", request_id: "r4", request: {} });
+		expect(parseInputLine(line)).toEqual({ kind: "control", requestId: "r4", request: {} });
+	});
+
+	test("marks a line that is not JSON invalid with Claude Code's message", () => {
+		expect(parseInputLine("not json")).toEqual({
+			kind: "invalid",
+			message: "Error parsing streaming input line (type=unknown, 8 chars): SyntaxError",
+		});
+	});
+
+	test("marks a user message without a user role invalid, naming the role it found", () => {
+		const expected = (role: string) => ({
+			kind: "invalid",
+			message: `Error: Expected message role 'user', got '${role}'`,
+		});
+		expect(parseInputLine(JSON.stringify({ type: "user" }))).toEqual(expected("undefined"));
+		expect(parseInputLine(JSON.stringify({ type: "user", message: "text" }))).toEqual(expected("undefined"));
+		expect(parseInputLine(JSON.stringify({ type: "user", message: { content: "x" } }))).toEqual(
+			expected("undefined"),
+		);
+		expect(parseInputLine(JSON.stringify({ type: "user", message: { role: "assistant", content: "x" } }))).toEqual(
+			expected("assistant"),
+		);
 	});
 });

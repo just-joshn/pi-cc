@@ -1,0 +1,126 @@
+{
+	"id": "sdk/interrupt-during-tool",
+	"area": "sdk",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}",
+			"#waitfor tool_use",
+			"#sleep 500",
+			"{\"type\": \"control_request\", \"request_id\": \"r1\", \"request\": {\"subtype\": \"interrupt\"}}",
+			"#sleep 3000"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sleep 2",
+						"description": "slow"
+					}
+				}
+			},
+			{
+				"text": "AFTER"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-tool-use",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_use",
+								"id": "toolu_conformance_0_0",
+								"name": "Bash",
+								"input": {
+									"command": "sleep 2",
+									"description": "slow"
+								}
+							}
+						]
+					}
+				},
+				{
+					"type": "control_response",
+					"response": {
+						"subtype": "success",
+						"request_id": "r1",
+						"response": {
+							"still_queued": []
+						}
+					}
+				},
+				{
+					"$ref": "cc-user-tool-result",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_result",
+								"content": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+								"is_error": true,
+								"tool_use_id": "toolu_conformance_0_0"
+							}
+						],
+						"tool_use_result": "User rejected tool use",
+						"tool_result_meta": [
+							{
+								"id": "toolu_conformance_0_0",
+								"non_execution_kind": "user-rejected"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-user-interrupt",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "[Request interrupted by user for tool use]"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-result-error",
+					"set": {
+						"subtype": "error_during_execution",
+						"terminal_reason": "aborted_tools",
+						"stop_reason": "tool_use",
+						"num_turns": 3,
+						"usage.input_tokens": 12,
+						"usage.output_tokens": 8,
+						"errors": [
+							"[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"
+						]
+					}
+				}
+			]
+		}
+	},
+	"skip": []
+}
