@@ -9,7 +9,7 @@ type Frame = Record<string, any>;
 
 function renderer(includePartial: boolean) {
 	const frames: Frame[] = [];
-	const tally = new TurnTally(0);
+	const tally = new TurnTally(0, () => ({ usd: 0, basis: "list" }));
 	const instance = new FrameRenderer({
 		sessionId: () => "session",
 		includePartial,
@@ -216,7 +216,7 @@ describe("assistant usage", () => {
 		const { instance, frames } = renderer(false);
 		const written = {
 			...partialWith([{ type: "text", text: "t" }]),
-			usage: { ...usage, cacheWrite: 2000, cacheRead: 3000, cacheWrite1h: 500 },
+			usage: { ...usage, cacheWrite: 2000, cacheRead: 3000, cacheWrite1h: 500, cacheWrite5m: 1500 },
 		} as AssistantMessage;
 		instance.onEvent(update(written, { type: "text_start", contentIndex: 0 }));
 		instance.onEvent(update(written, { type: "text_end", contentIndex: 0, content: "t" }));
@@ -227,6 +227,32 @@ describe("assistant usage", () => {
 			cache_read_input_tokens: 3000,
 			cache_creation: { ephemeral_5m_input_tokens: 1500, ephemeral_1h_input_tokens: 500 },
 		});
+	});
+
+	test("reports the 5m figure the response gave, zero when it gave only the 1h one", () => {
+		const { instance, frames } = renderer(false);
+		const written = {
+			...partialWith([{ type: "text", text: "t" }]),
+			usage: { ...usage, cacheWrite: 2000, cacheWrite1h: 500 },
+		} as AssistantMessage;
+		instance.onEvent(update(written, { type: "text_start", contentIndex: 0 }));
+		expect(frames).toEqual([]);
+		instance.onEvent(update(written, { type: "text_end", contentIndex: 0, content: "t" }));
+		expect(frames[0].message.usage.cache_creation).toEqual({
+			ephemeral_5m_input_tokens: 0,
+			ephemeral_1h_input_tokens: 500,
+		});
+	});
+
+	test("leaves cache_creation out when the response gave no split", () => {
+		const { instance, frames } = renderer(false);
+		const written = {
+			...partialWith([{ type: "text", text: "t" }]),
+			usage: { ...usage, cacheWrite: 2000 },
+		} as AssistantMessage;
+		instance.onEvent(update(written, { type: "text_start", contentIndex: 0 }));
+		instance.onEvent(update(written, { type: "text_end", contentIndex: 0, content: "t" }));
+		expect(frames[0].message.usage).not.toHaveProperty("cache_creation");
 	});
 
 	test("leaves cache_creation out when nothing was written", () => {

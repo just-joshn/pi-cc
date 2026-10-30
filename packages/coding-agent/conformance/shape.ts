@@ -11,6 +11,7 @@
  * - `{"$oneOf": [shape, ...]}` a value matching at least one shape
  * - `{"$includes": [literal, ...]}` an array holding each literal, in any order, with any extras
  * - `{"$match": "regex"}` a string the pattern matches
+ * - `{"$near": [number, tolerance]}` a number within the tolerance of the first, for costs that sum floats
  * - `{"$ref": "name", "set": {"a.b": shape}}` the shape in `shapes/name.json`, with the shape at each
  *   dotted path replaced, so the frames every case repeats are written once
  */
@@ -38,7 +39,7 @@ const TOKENS: Record<string, (value: unknown) => boolean> = {
 	$iso8601: (value) => typeof value === "string" && ISO_8601.test(value),
 };
 
-const COMBINATORS = ["$each", "$map", "$oneOf", "$includes", "$match"];
+const COMBINATORS = ["$each", "$map", "$oneOf", "$includes", "$match", "$near"];
 
 /** The problems where `value` departs from `shape`, each naming a path. An empty list is a match. */
 export function shapeProblems(shape: Shape, value: unknown, path = "$"): string[] {
@@ -117,6 +118,12 @@ function combinatorProblems(name: string, argument: unknown, value: unknown, pat
 			if (!Array.isArray(value)) return [`${path}: expected array, got ${describe(value)}`];
 			const missing = (argument as unknown[]).filter((literal) => !value.includes(literal));
 			return missing.length === 0 ? [] : [`${path}: missing ${missing.map((m) => JSON.stringify(m)).join(", ")}`];
+		}
+		case "$near": {
+			const [expected, tolerance] = argument as [number, number];
+			return typeof value === "number" && Math.abs(value - expected) <= tolerance
+				? []
+				: [`${path}: expected a number within ${tolerance} of ${expected}, got ${describe(value)}`];
 		}
 		default:
 			return typeof value === "string" && new RegExp(argument as string).test(value)

@@ -104,6 +104,10 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"project",
 		// the model id PR #5's `--model` case writes
 		"claude-haiku-4-5",
+		// P11: model id and budget values the usage cases write
+		"claude-haiku-5-5",
+		"0.0001",
+		"5",
 		// the model PR #7's notice case runs, one that takes mid-conversation system messages
 		"claude-opus-5-5",
 		// values `--permission-mode` writes in PR #7's cases

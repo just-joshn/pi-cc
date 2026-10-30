@@ -191,7 +191,6 @@ describe("Anthropic Messages stream", () => {
 			output: 89,
 			cacheRead: 2048,
 			cacheWrite: 128,
-			cacheWrite1h: 0,
 			totalTokens: 472 + 89 + 2048 + 128,
 		});
 		expect(result.usage.cost.total).toBeCloseTo(0.0038454, 9);

@@ -22,6 +22,7 @@ import type {
 	TextContent,
 	Tool,
 	ToolResultMessage,
+	Usage,
 } from "../types.ts";
 import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
@@ -66,6 +67,7 @@ import type {
 	AnthropicStreamEvent,
 	AnthropicThinkingDisplay,
 	AnthropicTool,
+	AnthropicUsage,
 } from "./anthropic-wire.ts";
 import {
 	getJsonSchemaToolParameters,
@@ -548,6 +550,20 @@ async function* iterateAnthropicEvents(response: Response, signal?: AbortSignal)
 	}
 }
 
+/** Records the TTL split of cache writes exactly as the response reported it, each figure only when present. */
+function recordCacheSplit(target: Usage, split: AnthropicUsage["cache_creation"]): void {
+	if (split?.ephemeral_1h_input_tokens != null) target.cacheWrite1h = split.ephemeral_1h_input_tokens;
+	if (split?.ephemeral_5m_input_tokens != null) target.cacheWrite5m = split.ephemeral_5m_input_tokens;
+}
+
+/** Copies the billing facts beyond token counts (web searches, serving region, speed tier) the usage reports. */
+function recordServedFields(target: Usage, wire: AnthropicUsage): void {
+	const searches = wire.server_tool_use?.web_search_requests;
+	if (searches != null) target.webSearchRequests = searches;
+	if (wire.inference_geo != null) target.inferenceGeo = wire.inference_geo;
+	if (wire.speed != null) target.speed = wire.speed;
+}
+
 export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 	model: Model<"anthropic-messages">,
 	context: TranscriptContext,
@@ -685,7 +701,8 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					output.usage.output = event.message.usage.output_tokens || 0;
 					output.usage.cacheRead = event.message.usage.cache_read_input_tokens || 0;
 					output.usage.cacheWrite = event.message.usage.cache_creation_input_tokens || 0;
-					output.usage.cacheWrite1h = event.message.usage.cache_creation?.ephemeral_1h_input_tokens || 0;
+					recordCacheSplit(output.usage, event.message.usage.cache_creation);
+					recordServedFields(output.usage, event.message.usage);
 					// Anthropic doesn't provide total_tokens, compute from components
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
@@ -826,13 +843,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 						if (event.usage.cache_creation_input_tokens != null) {
 							output.usage.cacheWrite = event.usage.cache_creation_input_tokens;
 						}
-						// Vercel AI Gateway includes the TTL breakdown in deltas, though the SDK only types it on message_start.
-						const cacheCreation = (
-							event.usage as typeof event.usage & { cache_creation?: { ephemeral_1h_input_tokens?: number } }
-						).cache_creation;
-						if (cacheCreation?.ephemeral_1h_input_tokens != null) {
-							output.usage.cacheWrite1h = cacheCreation.ephemeral_1h_input_tokens;
-						}
+						// Vercel AI Gateway includes the TTL breakdown in deltas.
+						recordCacheSplit(output.usage, event.usage.cache_creation);
+						recordServedFields(output.usage, event.usage);
 						// Anthropic reports reasoning tokens as a subset of output tokens.
 						const thinkingTokens = event.usage.output_tokens_details?.thinking_tokens;
 						if (thinkingTokens != null) {

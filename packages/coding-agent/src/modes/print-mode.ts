@@ -10,6 +10,8 @@
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
+import { budgetExhausted, budgetStopLine, gateBudget } from "../core/usage/budget.ts";
+import { chargeFor, hasNativeRates, type PricingPolicy } from "../core/usage/cost.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { toJsonEvent } from "./json-event.ts";
 import { limitTurns } from "./max-turns.ts";
@@ -27,6 +29,10 @@ interface PrintModeBase {
 	initialImages?: ImageContent[];
 	/** Claude Code's `--max-turns`, for the text mode. The SDK host takes it in `sdk`. */
 	maxTurns?: number;
+	/** Claude Code's `--max-budget-usd`, for the text mode. The SDK host takes it in `sdk`. */
+	maxBudgetUsd?: number;
+	/** The operator's `modelPricing` policy setting, for the text mode's budget. */
+	pricing?: PricingPolicy;
 }
 
 export type PrintModeOptions =
@@ -55,6 +61,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 				})
 			: undefined;
 	let exitCode = 0;
+	let spentUsd = 0;
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
@@ -128,6 +135,13 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				const message = event.message as AssistantMessage;
+				if (message.stopReason !== "error" && message.stopReason !== "aborted") {
+					const model = session.modelRuntime.getModel(message.provider, message.model);
+					spentUsd += chargeFor(message.model, message.usage, hasNativeRates(model?.cost), options.pricing).usd;
+				}
+			}
 			if (sdkHost !== undefined) {
 				sdkHost.onEvent(event);
 			} else if (mode === "json") {
@@ -161,12 +175,15 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			return await sdkHost.run(prompts);
 		}
 
+		const maxBudgetUsd = mode === "text" ? options.maxBudgetUsd : undefined;
 		let reachedMaxTurns = false;
 		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<void> => {
 			const limit = limitTurns(session.agent, mode === "text" ? options.maxTurns : undefined);
+			const budget = gateBudget(session.agent, () => budgetExhausted(spentUsd, maxBudgetUsd));
 			try {
 				await session.prompt(text, { images });
 			} finally {
+				budget.release();
 				limit.release();
 			}
 			reachedMaxTurns ||= limit.reached();
@@ -177,8 +194,13 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		}
 
 		for (const message of messages) {
-			if (reachedMaxTurns) break;
+			if (reachedMaxTurns || budgetExhausted(spentUsd, maxBudgetUsd)) break;
 			await promptWithinLimit(message);
+		}
+
+		if (maxBudgetUsd !== undefined && budgetExhausted(spentUsd, maxBudgetUsd)) {
+			writeRawStdout(budgetStopLine(maxBudgetUsd));
+			return 1;
 		}
 
 		if (reachedMaxTurns) {
