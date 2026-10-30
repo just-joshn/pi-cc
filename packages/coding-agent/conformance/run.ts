@@ -1,6 +1,5 @@
 /** Runs each case against the pinned claude binary and the built pi-cc CLI, then prints a scoreboard. */
 
-import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -27,12 +26,12 @@ import {
 import type { RecordedRequest } from "./mock/messages.ts";
 import { startMockServer } from "./mock/messages.ts";
 import { beginWatch } from "./processes.ts";
-import type { ReapResult } from "./reap.ts";
-import { killGroup, reap, WARNINGS } from "./reap.ts";
+import { WARNINGS } from "./reap.ts";
+import type { ProcessResult } from "./sandboxed.ts";
+import { runSandboxed } from "./sandboxed.ts";
 import type { ClaudeIdentity } from "./sides/claude.ts";
 import { CLAUDE_BANNER, CLAUDE_SHA256, CLAUDE_VERSION, createClaudeSide, hashClaude } from "./sides/claude.ts";
 import { CLI_PATH, piCcSide } from "./sides/pi-cc.ts";
-import { writeStdin } from "./stdin.ts";
 
 type Verdict = "PASS" | "FAIL" | "SKIP" | "UNVERIFIED";
 
@@ -53,16 +52,7 @@ interface CaseRun {
 	skip: string | null;
 }
 
-interface ProcessResult {
-	exitCode: number | null;
-	stdout: string;
-	stderr: string;
-	timedOut: boolean;
-	reaped: ReapResult;
-}
-
 const CONFORMANCE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
 async function main(): Promise<number> {
 	const { values } = parseArgs({
@@ -300,75 +290,6 @@ function summarize(result: ProcessResult, requests: RecordedRequest[]) {
 		timed_out: result.timedOut,
 		requests: requests.map((request) => ({ index: request.index, method: request.method, path: request.path })),
 	};
-}
-
-function runSandboxed(
-	profilePath: string,
-	argv: string[],
-	cwd: string,
-	roots: Roots,
-	env: Record<string, string>,
-	stdin: StdinSpec,
-	timeoutMs: number,
-): Promise<ProcessResult> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(SANDBOX_EXEC, ["-f", profilePath, ...argv], {
-			cwd,
-			env,
-			detached: true,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
-		const stdout: Buffer[] = [];
-		const stderr: Buffer[] = [];
-		let timedOut = false;
-		child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-		child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-		// A child that exits before reading stdin closes the pipe under us; that is not a case failure.
-		child.stdin.on("error", () => {});
-		let stdinFailure: unknown;
-		const stdinAbort = new AbortController();
-		const stdinDone = writeStdin(
-			child.stdin,
-			stdin,
-			() => Buffer.concat(stdout).toString("utf8"),
-			stdinAbort.signal,
-		).then(
-			() => child.stdin.end(),
-			(error: unknown) => {
-				stdinFailure = error;
-				if (child.pid !== undefined) killGroup(child.pid);
-			},
-		);
-		const timer = setTimeout(() => {
-			timedOut = true;
-			if (child.pid !== undefined) killGroup(child.pid);
-		}, timeoutMs);
-		child.on("error", (error) => {
-			stdinAbort.abort();
-			clearTimeout(timer);
-			reject(error);
-		});
-		child.on("close", async (code) => {
-			stdinAbort.abort();
-			await stdinDone;
-			clearTimeout(timer);
-			const reaped =
-				child.pid === undefined
-					? { survived: false, converged: true }
-					: await reap(roots.root, { group: child.pid });
-			if (stdinFailure !== undefined) {
-				reject(stdinFailure);
-				return;
-			}
-			resolve({
-				exitCode: code,
-				stdout: Buffer.concat(stdout).toString("utf8"),
-				stderr: Buffer.concat(stderr).toString("utf8"),
-				timedOut,
-				reaped,
-			});
-		});
-	});
 }
 
 function skipReason(testCase: ConformanceCase, claudeAbsent: boolean): string | null {
