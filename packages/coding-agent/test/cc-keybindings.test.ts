@@ -45,6 +45,11 @@ function load(file: unknown) {
 }
 
 const cc = (bindings: Record<string, string | null>) => ({ bindings: [{ context: "Chat", bindings }] });
+const ccGlobal = (bindings: Record<string, string | null>) => ({ bindings: [{ context: "Global", bindings }] });
+
+function writeCcFile(bindings: unknown) {
+	writeFileSync(join(process.env.CLAUDE_CONFIG_DIR!, "keybindings.json"), JSON.stringify(bindings));
+}
 
 describe("CC keybinding file import", () => {
 	it("validates the CC array envelope and rejects malformed blocks atomically", () => {
@@ -504,5 +509,118 @@ describe("CC imports keep pi input behavior", () => {
 		editor.onSubmit = (text) => submitted.push(text);
 		editor.handleInput("\r");
 		expect(submitted).toEqual(["/command-0"]);
+	});
+});
+
+describe("CC imports keep the built-in input layer", () => {
+	it("deletes forward when CC imports app:exit on ctrl+d, and exits on an empty prompt", () => {
+		writeCcFile(ccGlobal({ "ctrl+d": "app:exit" }));
+		const { manager, editor } = load({});
+		editor.setText("abc");
+		editor.handleInput("\x01");
+		editor.handleInput("\x04");
+		expect(editor.getText()).toBe("bc");
+		const empty = new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, manager);
+		let exits = 0;
+		empty.onCtrlD = () => exits++;
+		empty.handleInput("\x04");
+		expect(exits).toBe(1);
+	});
+
+	it("deletes forward when a pi file restates app.exit alongside any CC file", () => {
+		writeCcFile(cc({ "ctrl+y": "chat:submit" }));
+		const { editor } = load({ "app.exit": "ctrl+d" });
+		editor.setText("abc");
+		editor.handleInput("\x01");
+		editor.handleInput("\x04");
+		expect(editor.getText()).toBe("bc");
+	});
+
+	it("keeps the input layer when CC replaces an application action on the same key", () => {
+		writeCcFile(cc({ "ctrl+c": "app:exit" }));
+		const { manager } = load({});
+		const bound: string[] = [];
+		manager.dispatchInput("\x03", "Chat", () => {
+			for (const action of ["tui.input.copy", "app.exit", "app.clear"] as Keybinding[]) {
+				if (manager.matches("\x03", action)) bound.push(action);
+			}
+		});
+		expect(bound.sort()).toEqual(["app.exit", "tui.input.copy"]);
+	});
+
+	it("keeps input actions bound under CC null unbindings", () => {
+		writeCcFile(cc({ "ctrl+c": null, "ctrl+d": null, "ctrl+-": null }));
+		const { manager } = load({});
+		const bound: string[] = [];
+		const probes: [string, Keybinding[]][] = [
+			["\x03", ["tui.input.copy", "app.clear"]],
+			["\x04", ["tui.editor.deleteCharForward", "app.exit"]],
+			["\x1f", ["tui.editor.undo"]],
+		];
+		for (const [data, actions] of probes) {
+			manager.dispatchInput(data, "Chat", () => {
+				for (const action of actions) if (manager.matches(data, action)) bound.push(action);
+			});
+		}
+		expect(bound).toEqual(["tui.input.copy", "tui.editor.deleteCharForward", "tui.editor.undo"]);
+	});
+
+	it("restating CC's default table changes no prompt keys except the chord prefixes it adds", () => {
+		const { manager } = load({});
+		const mapped = [
+			"tui.input.submit",
+			"tui.input.newLine",
+			"tui.editor.undo",
+			"tui.editor.cursorUp",
+			"tui.editor.cursorDown",
+			"app.interrupt",
+			"app.clipboard.pasteImage",
+			"app.model.select",
+			"app.editor.external",
+			"app.exit",
+		] as const satisfies Keybinding[];
+		const before = new Map(mapped.map((action) => [action, manager.getPromptKeys(action)]));
+		writeCcFile({
+			bindings: [
+				{ context: "Global", bindings: { "ctrl+c": "app:interrupt", "ctrl+d": "app:exit" } },
+				{
+					context: "Chat",
+					bindings: {
+						enter: "chat:submit",
+						"ctrl+j": "chat:newline",
+						"ctrl+-": "chat:undo",
+						up: "history:previous",
+						down: "history:next",
+						escape: "chat:cancel",
+						"ctrl+g": "chat:externalEditor",
+						"ctrl+v": "chat:imagePaste",
+						"ctrl+l": "chat:modelPicker",
+						"ctrl+x ctrl+e": "chat:externalEditor",
+					},
+				},
+			],
+		});
+		manager.reload();
+		for (const action of mapped) {
+			const expected = before.get(action)!.concat(action === "app.editor.external" ? ["ctrl+x ctrl+e"] : []);
+			expect(manager.getPromptKeys(action)).toEqual(expected);
+		}
+	});
+
+	it("logs when an imported chord prefix hides a pi single-key action", () => {
+		const { root } = load(cc({ "ctrl+x ctrl+e": "chat:externalEditor" }));
+		expect(readFileSync(join(root, "pi-debug.log"), "utf-8")).toContain(
+			`imported chord prefix "ctrl+x" hides pi action "app.message.copy"`,
+		);
+	});
+
+	it("shows chord status only on the editor that received the prefix", () => {
+		const { manager, editor } = load(cc({ "ctrl+k ctrl+s": "chat:submit" }));
+		const second = new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, manager);
+		editor.handleInput("\x0b");
+		expect(editor.render(80).join("\n")).toContain("Waiting for next key");
+		expect(second.render(80).join("\n")).not.toContain("Waiting for next key");
+		second.handleInput("\x13");
+		expect(editor.render(80).join("\n")).not.toContain("Waiting for next key");
 	});
 });
