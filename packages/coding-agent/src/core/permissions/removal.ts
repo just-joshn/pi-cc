@@ -13,6 +13,7 @@ import { canonicalPath, isInside } from "./paths.ts";
 
 export interface Word {
 	readonly text: string;
+	readonly literalDollars?: readonly number[];
 }
 
 /** What the line has set a variable to by the time a command runs: its text, or `null` when unknowable. */
@@ -26,6 +27,7 @@ export interface SimpleCommand {
 	readonly variables: Variables;
 	/** Variables an earlier command in the line gave a non-empty literal value, wherever they were set. */
 	readonly assigned: ReadonlySet<string>;
+	readonly substitution?: true;
 }
 
 /** Substitutions counted across a line, nested and quoted ones included. */
@@ -38,6 +40,7 @@ export interface ScanOptions {
 	readonly tally?: Tally;
 	/** What an enclosing line had set, for a script it hands to a shell or `eval`. */
 	readonly inherited?: Pick<SimpleCommand, "variables" | "assigned">;
+	readonly home?: string;
 }
 
 const SUBSTITUTION = "__CMDSUB__";
@@ -45,7 +48,7 @@ const KEYWORDS = new Set(["{", "}", "do", "then", "else", "elif", "fi", "done", 
 const WRAPPERS = new Set(["sudo", "doas", "env", "nice", "nohup", "command", "builtin", "exec", "timeout", "stdbuf"]);
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const MAX_DEPTH = 4;
+const MAX_INLINE_DEPTH = 4;
 
 const DECLARATIONS = new Set(["export", "local", "readonly", "declare", "typeset"]);
 const LOOPS = new Set(["for", "select"]);
@@ -108,7 +111,10 @@ class Tracker {
 		compound: number;
 	}[] = [];
 
-	constructor(inherited?: Pick<SimpleCommand, "variables" | "assigned">) {
+	private readonly home: string;
+
+	constructor(home: string, inherited?: Pick<SimpleCommand, "variables" | "assigned">) {
+		this.home = home;
 		if (inherited) {
 			this.variables = inherited.variables;
 			this.assigned = inherited.assigned;
@@ -154,12 +160,12 @@ class Tracker {
 		const rest = texts.slice(first);
 		if (rest.length === 0) return;
 		if (rest.every((text) => ASSIGNMENT.test(text))) {
-			for (const text of rest) this.assign(text);
+			for (const word of words.slice(first)) this.assign(word);
 			return;
 		}
 		const head = basename(rest[0] as string);
 		if (DECLARATIONS.has(head)) {
-			for (const text of rest.slice(1)) if (ASSIGNMENT.test(text)) this.assign(text);
+			for (const word of words.slice(first + 1)) if (ASSIGNMENT.test(word.text)) this.assign(word);
 		} else if (head === "unset" || head === "read") {
 			for (const text of rest.slice(1)) if (!text.startsWith("-")) this.forget(text);
 		}
@@ -234,10 +240,15 @@ class Tracker {
 		this.variables = next;
 	}
 
-	private assign(text: string): void {
-		const equals = text.indexOf("=");
-		const name = text.slice(0, equals);
-		const value = this.expanded(text.slice(equals + 1));
+	private assign(word: Word): void {
+		const equals = word.text.indexOf("=");
+		const name = word.text.slice(0, equals);
+		const source = word.text.slice(equals + 1);
+		if (source.startsWith("~")) this.untrackable = true;
+		const value = this.expanded(
+			source,
+			(word.literalDollars ?? []).map((index) => index - equals - 1),
+		);
 		this.stageAssigned.add(name);
 		if (this.inPipeline) return;
 		const known = this.variables.get(name);
@@ -251,15 +262,19 @@ class Tracker {
 	}
 
 	/** A value with the variables it names put in, or `null` when one of them is not a known text. */
-	private expanded(value: string): string | null {
+	private expanded(value: string, literals: readonly number[]): string | null {
 		if (value === "") return null;
 		let known = true;
-		const text = value.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name: string) => {
-			const found = this.variables.get(name);
-			if (typeof found !== "string") known = false;
-			return found ?? "";
-		});
-		return known && !text.includes("$") ? text : null;
+		const text = value.replace(
+			/\$([A-Za-z_][A-Za-z0-9_]*)|\$/g,
+			(match, name: string | undefined, offset: number) => {
+				if (literals.includes(offset)) return match;
+				const found = name === "HOME" ? this.home : name === undefined ? undefined : this.variables.get(name);
+				if (typeof found !== "string") known = false;
+				return found ?? "";
+			},
+		);
+		return known ? text : null;
 	}
 }
 
@@ -269,16 +284,17 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 	const tally = options.tally ?? { substitutions: 0 };
 	/** Commands in the order they appear, a substitution's commands ahead of the command that holds it. */
 	const found: { command: SimpleCommand; own: boolean; top: boolean }[] = [];
-	if (depth > MAX_DEPTH) return [];
-	const tracker = new Tracker(options.inherited);
+	const tracker = new Tracker(options.home ?? homedir(), options.inherited);
 	let words: Word[] = [];
 	let text = "";
+	let literalDollars: number[] = [];
 	let started = false;
 	let brace = -1;
 	let commandStart = 0;
 	const endWord = (): void => {
-		if (started) words.push({ text });
+		if (started) words.push({ text, literalDollars });
 		text = "";
+		literalDollars = [];
 		started = false;
 		brace = -1;
 	};
@@ -295,8 +311,8 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		commandStart = index + operator.length;
 	};
 	const nested = (inner: string, counted = true): void => {
-		for (const command of simpleCommands(inner, { depth: depth + 1, tally }))
-			found.push({ command, own: false, top: false });
+		for (const command of simpleCommands(inner, { depth: depth + 1, tally, home: options.home }))
+			found.push({ command: { ...command, substitution: true }, own: false, top: false });
 		if (counted) {
 			tally.substitutions++;
 			tracker.untrackable = true;
@@ -321,12 +337,15 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		const char = line[index] as string;
 		const next = line[index + 1];
 		if (char === "\\" && next !== undefined) {
+			if (next === "$") literalDollars.push(text.length);
 			text += next;
 			started = true;
 			index += 2;
 		} else if (char === "'") {
 			const close = line.indexOf("'", index + 1);
 			const end = close === -1 ? line.length : close;
+			for (let at = index + 1; at < end; at++)
+				if (line[at] === "$") literalDollars.push(text.length + at - index - 1);
 			text += line.slice(index + 1, end);
 			started = true;
 			index = end + 1;
@@ -336,6 +355,7 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 			while (index < line.length && line[index] !== '"') {
 				const inner = line[index] as string;
 				if (inner === "\\" && line[index + 1] !== undefined) {
+					if (line[index + 1] === "$") literalDollars.push(text.length);
 					text += line[index + 1];
 					index += 2;
 				} else if (inner === "$" && line[index + 1] === "(") {
@@ -366,7 +386,7 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 			nested(line.slice(index + 2, end));
 			index = end + 1;
 		} else if (char === "<" || char === ">") {
-			index = skipRedirection(line, index, tally);
+			index = skipRedirection(line, index, nested);
 			endWord();
 		} else if (char === "#" && !started) {
 			const newline = line.indexOf("\n", index);
@@ -417,7 +437,7 @@ function closingBacktick(line: string, open: number): number {
 }
 
 /** Past a redirection operator and its target word, and past a here-document's body. */
-function skipRedirection(line: string, start: number, tally: Tally): number {
+function skipRedirection(line: string, start: number, nested: (inner: string) => void): number {
 	let index = start;
 	while (line[index] === "<" || line[index] === ">" || line[index] === "&" || line[index] === "|") index++;
 	const heredoc = line.slice(start, index).startsWith("<<") && !line.slice(start, index).startsWith("<<<");
@@ -432,7 +452,18 @@ function skipRedirection(line: string, start: number, tally: Tally): number {
 	const body = new RegExp(`^\\t*${delimiter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*$`, "m").exec(rest);
 	if (word === delimiter && !word.includes("\\")) {
 		const text = body === null ? rest : rest.slice(0, body.index);
-		tally.substitutions += (text.match(/\$\((?!\()|(?<!\\)`[^`]*`/g) ?? []).length;
+		for (let at = 0; at < text.length; at++) {
+			if (text[at] === "\\") at++;
+			else if (text[at] === "$" && text[at + 1] === "(" && text[at + 2] !== "(") {
+				const end = matching(text, at + 1);
+				nested(text.slice(at + 2, end));
+				at = end;
+			} else if (text[at] === "`") {
+				const end = closingBacktick(text, at);
+				nested(text.slice(at + 1, end));
+				at = end;
+			}
+		}
 	}
 	return body === null ? line.length : newline + 1 + body.index + body[0].length;
 }
@@ -473,7 +504,7 @@ export interface Removal {
 
 export function dangerousRemoval(line: string, scope: RemovalScope): Removal | undefined {
 	const tally: Tally = { substitutions: 0 };
-	const found = dangerousIn(simpleCommands(line, { tally }), scope, 0);
+	const found = dangerousIn(simpleCommands(line, { tally, home: scope.home }), scope, 0);
 	if (tally.substitutions <= MAX_SUBSTITUTIONS || found?.emptyVariable) return found;
 	return {
 		command: "rm",
@@ -490,12 +521,12 @@ function dangerousIn(commands: readonly SimpleCommand[], scope: RemovalScope, de
 		if (head === "rm" || head === "rmdir") {
 			const found = inspectRemoval(head, words.slice(1), command, changedDirectory, scope);
 			if (found) return found;
-		} else if (depth < MAX_DEPTH) {
+		} else if (depth < MAX_INLINE_DEPTH) {
 			const script = inlineScript(head, words);
 			const found =
 				script === undefined
 					? undefined
-					: dangerousIn(simpleCommands(script, { inherited: command }), scope, depth + 1);
+					: dangerousIn(simpleCommands(script, { inherited: command, home: scope.home }), scope, depth + 1);
 			if (found) return found;
 		}
 	}
@@ -583,7 +614,7 @@ function inspectRemoval(
 				message: `Dangerous rm operation detected: the target is the output of a command substitution (\`$(...)\` or backticks) and cannot be checked before the command runs. ${NO_AUTO_ALLOW}\n\nRun the substitution on its own first, then remove the literal paths it prints.`,
 			};
 		}
-		const target = { ...operand, text: followed(operand.text, line.variables) };
+		const target = { ...operand, text: followed(operand, line.variables) };
 		const emptied = target.text.replace(/(.)(?:__CMDSUB__(?:(?!\.\.)[/*.])*)+((?:\/\.\.)*)\/*$/, "$1$2");
 		for (const candidate of emptied === target.text ? [target] : [{ ...target, text: emptied }, target]) {
 			const found = inspectOperand(command, candidate, line, recursive, flags, changedDirectory, scope);
@@ -602,10 +633,12 @@ function inspectOperand(
 	changedDirectory: boolean,
 	scope: RemovalScope,
 ): Removal | undefined {
-	const variable = variableTarget(command, operand.text, line, scope);
+	const variable = operand.literalDollars?.includes(0)
+		? undefined
+		: variableTarget(command, operand.text, line, scope);
 	if (variable) return variable;
-	const written = expand(operand.text, scope);
-	const absolute = isAbsolute(written) ? normalize(written) : resolve(scope.cwd, written);
+	const written = operand.literalDollars?.includes(0) ? operand.text : expand(operand.text, scope);
+	const absolute = isAbsolute(written) ? written : resolve(scope.cwd, written);
 	let stem = absolute;
 	for (let previous = ""; previous !== stem; ) {
 		previous = stem;
@@ -647,7 +680,7 @@ function inspectOperand(
 	let mounted: Removal | undefined;
 	if (!wildcard || !/[*?[]/.test(remainder)) {
 		const targets = [stem];
-		const real = canonicalPath(stem, scope.cwd);
+		const real = wildcard ? canonicalPath(stem, scope.cwd) : stem;
 		if (real !== stem) targets.push(real);
 		for (const target of targets) {
 			if (isCriticalPath(target, scope.home)) {
@@ -658,7 +691,7 @@ function inspectOperand(
 				);
 			}
 			const directories = wildcard ? scope.directories : [scope.cwd, canonicalPath(scope.cwd, scope.cwd)];
-			if (directories.some((directory) => isInside(target, directory))) {
+			if (directories.some((directory) => isInside(normalize(target), directory))) {
 				return refusal(
 					command,
 					absolute,
@@ -712,7 +745,7 @@ function isCriticalPath(path: string, home: string): boolean {
 	const flat = (value: string): string =>
 		macOS ? value.replace(/^\/private\/(etc|var|tmp|home)(\/|$)/i, "/$1$2") : value;
 	if (path === "*" || path.endsWith("/*")) return true;
-	const target = flat(path);
+	const target = flat(path).replace(/\/{2,}/g, "/");
 	const trimmed = target === "/" ? target : target.replace(/\/$/, "");
 	if (trimmed === "/") return true;
 	if (macOS && /^\/\.(?:vol|file)(?:\/|$)/i.test(trimmed)) return true;
@@ -760,14 +793,15 @@ function variableTarget(
 	return {
 		command: command as Removal["command"],
 		emptyVariable: true,
-		message: `Dangerous ${command} operation detected in \`${text}\`. The target '${target}' is a shell variable expansion: when ${joined} is unset or empty it ${becomes}${NO_AUTO_ALLOW}\n\n${doesNotFire}: ${advice}.`,
+		message: `Dangerous ${command} operation detected in \`${text}\`${line.substitution ? " (inside a command substitution)" : ""}. The target '${target}' is a shell variable expansion: when ${joined} is unset or empty it ${becomes}${NO_AUTO_ALLOW}\n\n${doesNotFire}: ${advice}.`,
 	};
 }
 
 /** `$NAME` put in as the value Claude Code followed the line to give it. */
-function followed(text: string, variables: Variables): string {
-	if (variables.size === 0) return text;
-	return text.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name: string) => {
+function followed(word: Word, variables: Variables): string {
+	if (variables.size === 0) return word.text;
+	return word.text.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name: string, offset: number) => {
+		if (word.literalDollars?.includes(offset)) return match;
 		const value = variables.get(name);
 		return typeof value === "string" ? value : match;
 	});
