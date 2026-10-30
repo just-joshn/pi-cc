@@ -207,7 +207,57 @@ describe("vim insert mode", () => {
 		assert.strictEqual(run("|", "ab<Esc>.", INSERT_STATE).text.replace("|", ""), "aabb");
 	});
 
-	it("u asks the editor to undo once, ignoring a count", () => {
+	describe("dot repeat after an empty insert", () => {
+	it("i<Esc> leaves . doing nothing", () => {
+		const result = run("|ab", "i<Esc>.");
+		assert.strictEqual(result.text, "|ab");
+		assert.strictEqual(result.mode, "normal");
+	});
+
+	it("o<Esc> leaves . opening another empty line below, in insert mode", () => {
+		const result = run("|ab", "o<Esc>.");
+		assert.strictEqual(result.text, "ab\n\n|");
+		assert.strictEqual(result.mode, "insert");
+	});
+
+	it("O<Esc> leaves . opening another empty line above, in insert mode", () => {
+		const result = run("|ab", "O<Esc>.");
+		assert.strictEqual(result.text, "|\n\nab");
+		assert.strictEqual(result.mode, "insert");
+	});
+
+	it("s<Esc> leaves . substituting again, in insert mode", () => {
+		const result = run("|ab", "s<Esc>.");
+		assert.strictEqual(result.text, "|");
+		assert.strictEqual(result.mode, "insert");
+	});
+
+	it("cw<Esc> leaves . changing again, in insert mode", () => {
+		const result = run("|foo bar", "cw<Esc>.");
+		assert.strictEqual(result.text, "|bar");
+		assert.strictEqual(result.mode, "insert");
+	});
+
+	it("o with typed text repeats the open line plus the text, in insert mode", () => {
+		const result = run("|ab", "oX<Esc>.");
+		assert.strictEqual(result.text, "ab\nX\n|X");
+		assert.strictEqual(result.mode, "insert");
+	});
+
+	it("x then i<Esc> leaves . doing nothing", () => {
+		const result = run("|ab", "xi<Esc>.");
+		assert.strictEqual(result.text, "|b");
+		assert.strictEqual(result.mode, "normal");
+	});
+
+	it("a replay that opens insert keeps insert mode after more typing and Escape records only the new typing", () => {
+		const result = run("|ab", "o<Esc>.Z<Esc>");
+		assert.strictEqual(result.text, "ab\n\n|Z");
+		assert.strictEqual(result.mode, "normal");
+	});
+});
+
+it("u asks the editor to undo once, ignoring a count", () => {
 		assert.strictEqual(run("|a", "u3u").undos, 2);
 	});
 
