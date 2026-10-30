@@ -1,0 +1,97 @@
+{
+	"duration_api_ms": "$number",
+	"stop_reason": "$string",
+	"session_id": "$uuid",
+	"total_cost_usd": "$number",
+	"usage": {
+		"input_tokens": "$number",
+		"cache_creation_input_tokens": "$number",
+		"cache_read_input_tokens": "$number",
+		"output_tokens": "$number",
+		"output_tokens_details": {
+			"thinking_tokens": "$number"
+		},
+		"server_tool_use": {
+			"web_search_requests": "$number",
+			"web_fetch_requests": "$number"
+		},
+		"service_tier": "$string",
+		"cache_creation": {
+			"ephemeral_1h_input_tokens": "$number",
+			"ephemeral_5m_input_tokens": "$number"
+		},
+		"inference_geo": "$string",
+		"iterations": {
+			"$each": "$any"
+		},
+		"speed": "$string",
+		"fallback_credit": "$null"
+	},
+	"modelUsage": {
+		"$map": {
+			"inputTokens": "$number",
+			"outputTokens": "$number",
+			"cacheReadInputTokens": "$number",
+			"cacheCreationInputTokens": "$number",
+			"webSearchRequests": "$number",
+			"costUSD": "$number",
+			"contextWindow": "$number",
+			"maxOutputTokens": "$number",
+			"thinkingTokens": "$number",
+			"cacheCreationEphemeral5mInputTokens": "$number",
+			"cacheCreationEphemeral1hInputTokens": "$number",
+			"canonicalModel": "$string",
+			"provider": "$string",
+			"costBasis": "$string"
+		}
+	},
+	"permission_denials": {
+		"$each": {
+			"tool_name": "$string",
+			"tool_use_id": "$string",
+			"tool_input": "$object"
+		}
+	},
+	"terminal_reason": "$string",
+	"fast_mode_state": "$string",
+	"fast_mode_disabled_reason": "$string",
+	"subagent_stats": {
+		"spawned": "$number",
+		"requested": {
+			"background": "$number",
+			"foreground": "$number",
+			"unset": "$number"
+		},
+		"started_in_background": "$number",
+		"max_depth": "$number",
+		"spawned_by_subagents": "$number",
+		"completed": "$number",
+		"failed": "$number",
+		"killed": {
+			"parent": "$number",
+			"user": "$number",
+			"system": "$number"
+		},
+		"refused": {
+			"depth_limit": "$number",
+			"concurrency_limit": "$number",
+			"budget": "$number"
+		},
+		"by_type": "$object"
+	},
+	"safety_stops": "$number",
+	"is_error": "$boolean",
+	"num_turns": "$number",
+	"subtype": "$string",
+	"api_error_status": "$null",
+	"result": "$string",
+	"ttft_ms": "$number",
+	"type": "result",
+	"duration_ms": "$number",
+	"uuid": "$uuid",
+	"ttft_stream_ms": "$number",
+	"time_to_request_ms": "$number",
+	"first_content_frame_ms": "$number",
+	"queued_turn_count": "$number",
+	"result_index": "$number"
+}

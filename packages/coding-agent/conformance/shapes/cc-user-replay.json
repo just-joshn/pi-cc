@@ -1,0 +1,19 @@
+{
+	"type": "user",
+	"message": {
+		"role": "user",
+		"content": {
+			"$oneOf": [
+				"$string",
+				{
+					"$each": "$object"
+				}
+			]
+		}
+	},
+	"session_id": "$uuid",
+	"parent_tool_use_id": "$null",
+	"uuid": "$uuid",
+	"timestamp": "$iso8601",
+	"isReplay": true
+}

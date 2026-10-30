@@ -5,6 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { argvProblem, envProblem, unsetProblem } from "./allowlist.ts";
 import { toRegExp } from "./compare.ts";
 import { PROBES, type ProbeName, type SideName, VIOLATION_KINDS, type ViolationKind } from "./isolate.ts";
+import type { Shape } from "./shape.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
 
@@ -17,8 +18,9 @@ export type Turn =
 export type StdoutSpec =
 	| { kind: "text"; equals?: string; match?: string[]; normalize?: NormalizeRule[] }
 	| { kind: "help"; requireFlags?: string[]; requireCommands?: string[]; allowExtra?: boolean }
-	| { kind: "json"; records?: string[] }
-	| { kind: "jsonl"; minRecords?: number; records?: string[] };
+	| { kind: "json"; records?: string[]; shape?: Shape }
+	| { kind: "jsonl"; minRecords?: number; records?: string[] }
+	| { kind: "frames"; frames: Shape[] };
 
 export interface RequestSpec {
 	pathStartsWith?: string;
@@ -141,7 +143,8 @@ const CONTAINMENT_KEYS = ["kind", "path"];
 const SIDE_NAMES: readonly SideName[] = ["claude", "pi-cc"];
 const TEXT_STDOUT_KEYS = ["kind", "equals", "match", "normalize"];
 const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra"];
-const JSON_STDOUT_KEYS = ["kind", "records"];
+const JSON_STDOUT_KEYS = ["kind", "records", "shape"];
+const FRAMES_STDOUT_KEYS = ["kind", "frames"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
 const REQUEST_KEYS = [
@@ -365,7 +368,18 @@ function asStdoutSpec(value: unknown, source: string): StdoutSpec | undefined {
 	}
 	if (kind === "json") {
 		assertKnownKeys(object, JSON_STDOUT_KEYS, source, "compare.stdout");
-		return { kind, records: asOptionalStringArray(object.records, source, "compare.stdout.records") };
+		return {
+			kind,
+			records: asOptionalStringArray(object.records, source, "compare.stdout.records"),
+			shape: object.shape,
+		};
+	}
+	if (kind === "frames") {
+		assertKnownKeys(object, FRAMES_STDOUT_KEYS, source, "compare.stdout");
+		if (!Array.isArray(object.frames) || object.frames.length === 0) {
+			return fail(source, "compare.stdout.frames must be a non-empty array of shapes");
+		}
+		return { kind, frames: object.frames };
 	}
 	if (kind === "jsonl") {
 		assertKnownKeys(object, JSONL_STDOUT_KEYS, source, "compare.stdout");

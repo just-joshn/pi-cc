@@ -1,0 +1,7 @@
+{
+	"type": "system",
+	"subtype": "status",
+	"status": "requesting",
+	"session_id": "$uuid",
+	"uuid": "$uuid"
+}

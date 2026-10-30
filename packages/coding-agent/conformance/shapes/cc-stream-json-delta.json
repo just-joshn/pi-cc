@@ -1,0 +1,15 @@
+{
+	"type": "stream_event",
+	"event": {
+		"type": "content_block_delta",
+		"index": "$int",
+		"delta": {
+			"type": "input_json_delta",
+			"partial_json": "$string"
+		}
+	},
+	"session_id": "$uuid",
+	"parent_tool_use_id": "$null",
+	"uuid": "$uuid",
+	"api_message_id": "$string"
+}

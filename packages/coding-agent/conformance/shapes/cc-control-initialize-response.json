@@ -1,0 +1,77 @@
+{
+	"type": "control_response",
+	"response": {
+		"subtype": "success",
+		"request_id": "$string",
+		"response": {
+			"commands": {
+				"$each": {
+					"name": "$string",
+					"description": "$string",
+					"?argumentHint": "$string",
+					"?aliases": {
+						"$each": "$string"
+					},
+					"builtin": "$boolean"
+				}
+			},
+			"agents": {
+				"$each": {
+					"name": "$string",
+					"description": "$string",
+					"?model": "$string"
+				}
+			},
+			"output_style": "$string",
+			"available_output_styles": {
+				"$each": "$string"
+			},
+			"user_output_styles_dir": "$string",
+			"models": {
+				"$each": {
+					"value": "$string",
+					"resolvedModel": "$string",
+					"displayName": "$string",
+					"description": "$string",
+					"supportsEffort": "$boolean",
+					"supportedEffortLevels": {
+						"$each": "$string"
+					},
+					"supportsAdaptiveThinking": "$boolean",
+					"supportsAutoMode": "$boolean",
+					"supportsThinkingOff": "$boolean",
+					"?supportsFastMode": "$boolean"
+				}
+			},
+			"account": {
+				"tokenSource": "$string",
+				"apiKeySource": "$string",
+				"apiProvider": "$string"
+			},
+			"pid": "$number",
+			"claude_code_version": "$string",
+			"current_permission_mode": "$string",
+			"feedback_mode": {
+				"kind": "$string"
+			},
+			"analytics_disabled": "$boolean",
+			"remote_control_auto_enable": "$boolean",
+			"remote_control_auto_connect_default": "$boolean",
+			"remote_control_available": "$boolean",
+			"remote_control_auto_on_by_default": "$boolean",
+			"ide_rc_auto_enable_gate": "$boolean",
+			"fast_mode_state": "$string",
+			"fast_mode_disabled_reason": "$string",
+			"session_state": "$string",
+			"capabilities": {
+				"$each": "$string"
+			}
+		},
+		"pending_permission_requests": {
+			"$each": "$any"
+		},
+		"pending_user_dialog_requests": {
+			"$each": "$any"
+		}
+	}
+}

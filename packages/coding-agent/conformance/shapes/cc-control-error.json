@@ -1,0 +1,9 @@
+{
+	"type": "control_response",
+	"response": {
+		"subtype": "error",
+		"request_id": "$string",
+		"error": "$string",
+		"?error_code": "$string"
+	}
+}
