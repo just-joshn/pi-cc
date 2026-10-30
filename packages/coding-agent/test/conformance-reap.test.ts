@@ -2,18 +2,28 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { baseEnv, createRoots, type Roots } from "../conformance/isolate.ts";
 import { reap } from "../conformance/reap.ts";
 
 const darwin = process.platform === "darwin";
 const roots: string[] = [];
+const bases: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const root of roots.splice(0)) {
 		writeFileSync(join(root, "stop"), "");
-		spawnSync("/usr/bin/pkill", ["-9", "-f", join(root, "hop.sh")]);
+		for (const pidFile of [join(root, "pid"), join(root, "workspace", "pid")]) {
+			if (existsSync(pidFile)) spawnSync("/bin/kill", ["-9", readFileSync(pidFile, "utf8").trim()]);
+		}
+		for (let attempt = 0; attempt < 30; attempt++) {
+			spawnSync("/usr/bin/pkill", ["-9", "-f", root]);
+			if (spawnSync("/usr/bin/pgrep", ["-f", root]).status !== 0) break;
+			await delay(100);
+		}
 		rmSync(root, { recursive: true, force: true });
 	}
+	for (const base of bases.splice(0)) rmSync(base, { recursive: true, force: true });
 });
 
 const HOP = "[ -e ./stop ] && exit 0\necho x >> gen.log\n/bin/sh ./hop.sh &\nexit 0\n";
@@ -116,5 +126,129 @@ describe.skipIf(!darwin)("a reap and the harness's own process group", () => {
 		bystander.kill("SIGKILL");
 		expect(alive).toBe(true);
 		expect(reaped).toEqual({ survived: false, converged: true });
+	});
+});
+
+interface SideChain {
+	roots: Roots;
+	pgid: number;
+}
+
+/** Starts a side the way the runner does (harness env, cwd in the workspace) whose only child is `command`. */
+function startSideChain(command: (roots: Roots) => string, files: (roots: Roots) => Record<string, string>): SideChain {
+	const base = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+	const sideRoots = createRoots(base, "reap", "claude");
+	bases.push(base);
+	roots.push(sideRoots.root);
+	for (const [name, content] of Object.entries(files(sideRoots)))
+		writeFileSync(join(sideRoots.workspace, name), content);
+	const side = spawn(process.execPath, ["-e", SIDE_SIMULATOR, command(sideRoots)], {
+		cwd: sideRoots.workspace,
+		env: baseEnv(sideRoots, null),
+		detached: true,
+		stdio: "ignore",
+	});
+	side.unref();
+	return { roots: sideRoots, pgid: side.pid ?? 0 };
+}
+
+function hopScript(roots: Roots, preamble: string): string {
+	const hop = join(roots.workspace, "hop.sh");
+	return [
+		preamble,
+		`[ -e ${join(roots.root, "stop")} ] && exit 0`,
+		`echo x >> ${join(roots.workspace, "gen.log")}`,
+		`/bin/sh ${hop} &`,
+		"exit 0",
+		"",
+	].join("\n");
+}
+
+describe.skipIf(!darwin)("reaping a chain that leaves the root before it forks", () => {
+	test("a chain that changes directory to / in every generation is gone after the reap", async () => {
+		const chain = startSideChain(
+			(side) => `/bin/sh ${join(side.workspace, "hop.sh")} & exit 0`,
+			(side) => ({ "hop.sh": hopScript(side, "cd /") }),
+		);
+		await delay(150);
+		expect(generations(chain.roots.workspace)).toBeGreaterThan(1);
+
+		const reaped = await reap(chain.pgid, chain.roots.root);
+		const afterReap = generations(chain.roots.workspace);
+		await delay(400);
+
+		expect(generations(chain.roots.workspace)).toBe(afterReap);
+		expect(reaped).toEqual({ survived: true, converged: true });
+	}, 30_000);
+
+	test("a process that only holds a file open inside the root, with its environment cleared, is gone after the reap", async () => {
+		const chain = startSideChain(
+			(side) =>
+				`/usr/bin/env -i /bin/sh -c 'echo $$ > "$0/pid"; cd /; exec 3>>"$0/held.log"; exec /bin/sleep 60' ${side.workspace} & exit 0`,
+			() => ({}),
+		);
+		await delay(300);
+		const pid = Number.parseInt(readFileSync(join(chain.roots.workspace, "pid"), "utf8"), 10);
+		expect(isAlive(pid)).toBe(true);
+
+		const reaped = await reap(chain.pgid, chain.roots.root);
+
+		expect(isAlive(pid)).toBe(false);
+		expect(reaped).toEqual({ survived: true, converged: true });
+	}, 30_000);
+
+	test("a chain that changes process group in every generation is either gone or reported unconverged", async () => {
+		const chain = startSideChain(
+			(side) => `/bin/sh ${join(side.workspace, "hop.sh")} & exit 0`,
+			(side) => ({ "hop.sh": hopScript(side, "set -m\ncd /") }),
+		);
+		await delay(150);
+
+		const reaped = await reap(chain.pgid, chain.roots.root);
+		const afterReap = generations(chain.roots.workspace);
+		await delay(400);
+
+		if (reaped.converged) expect(generations(chain.roots.workspace)).toBe(afterReap);
+		expect(reaped.survived).toBe(true);
+	}, 40_000);
+});
+
+function isAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+describe.skipIf(!darwin)("the signals a reap sends", () => {
+	test("only the group a sweep saw working inside the root, and only while it was seen", async () => {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-fake-lsof-")));
+		roots.push(dir);
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+		roots.push(root);
+		const lsof = join(dir, "lsof");
+		const seen = join(dir, "seen");
+		writeFileSync(
+			lsof,
+			`#!/bin/sh\nif [ -e ${seen} ]; then printf 'p1\\ng1\\nfcwd\\nn/elsewhere\\n'; else : > ${seen}; printf 'p4242423\\ng4242424\\nfcwd\\nn${root}\\n'; fi\n`,
+			{ mode: 0o755 },
+		);
+		const signalled: unknown[][] = [];
+		const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+			if (signal === 0) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+			signalled.push([pid, signal]);
+			return true;
+		});
+
+		try {
+			const reaped = await reap(2 ** 22, root, lsof);
+			expect(reaped).toEqual({ survived: true, converged: true });
+		} finally {
+			kill.mockRestore();
+		}
+
+		expect(signalled).toEqual([[-4242424, "SIGKILL"]]);
 	});
 });
