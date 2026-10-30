@@ -62,3 +62,13 @@ export function isStaleSinceRead(record: ReadRecord, mtimeMs: number | undefined
 	if (mtimeMs === undefined || record.timestamp === undefined) return !unchanged;
 	return mtimeMs > record.timestamp && !(!record.partial && unchanged);
 }
+
+/**
+ * Whether an Edit or Write over an existing file is refused because the model never read it. A read
+ * cut at the token cap is an unfinished view: Write refuses it on every model, Edit only where a
+ * prior read is required (`gated`).
+ */
+export function mutationNeedsRead(tool: "edit" | "write", record: ReadRecord | undefined, gated: boolean): boolean {
+	if (tool === "edit") return gated && (record === undefined || record.unfinished === true);
+	return record?.unfinished === true || (gated && record === undefined);
+}

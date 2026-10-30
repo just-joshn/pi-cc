@@ -62,6 +62,8 @@ import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dis
 import { anthropicCcModel, resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from "./core/output-guard.ts";
+import { permissionSetup } from "./core/permissions/cli.ts";
+import { PermissionState } from "./core/permissions/context.ts";
 import {
 	type AppMode,
 	readInitialProjectTrust,
@@ -1119,6 +1121,10 @@ export async function main(args: string[], options?: MainOptions) {
 			}
 		}
 
+		const permission = permissionSetup(parsed, ccAdmission.run.settings.values, parsed.addDir ?? [], cwd);
+		for (const warning of permission.warnings) {
+			console.error(chalk.yellow(warning));
+		}
 		const created = await createAgentSessionFromServices({
 			services,
 			sessionManager,
@@ -1133,9 +1139,10 @@ export async function main(args: string[], options?: MainOptions) {
 				entrypoint: appMode === "interactive" ? "cli" : "sdk-cli",
 				customPrompt: parsed.systemPrompt !== undefined,
 			}),
-			excludeTools: sessionOptions.excludeTools,
+			excludeTools: [...(sessionOptions.excludeTools ?? []), ...permission.deniedToolPatterns],
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
+			permissions: { state: new PermissionState(permission.init), prompts: permission.prompts },
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {

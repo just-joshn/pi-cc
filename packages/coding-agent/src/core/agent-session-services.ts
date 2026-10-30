@@ -65,6 +65,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	fixedTools?: boolean;
 	ccPolicy?: CcPolicy;
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
+	permissions?: CreateAgentSessionOptions["permissions"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
 }
@@ -236,6 +237,7 @@ export async function createAgentSessionFromServices(
 		fixedTools: options.fixedTools,
 		ccPolicy: options.ccPolicy,
 		excludeTools: options.excludeTools,
+		permissions: options.permissions,
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,

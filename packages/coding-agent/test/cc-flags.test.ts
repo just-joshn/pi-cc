@@ -141,9 +141,7 @@ describe("validation diagnostics", () => {
 	});
 
 	test("validates --permission-prompts against host and none", () => {
-		expect(parseArgs(["--permission-prompts", "host"]).diagnostics.map(render)).toEqual([
-			"Warning: --permission-prompts is accepted but not implemented yet",
-		]);
+		expect(parseArgs(["--permission-prompts", "host"]).diagnostics.map(render)).toEqual([]);
 		expect(parseArgs(["--permission-prompts", "nonsense"]).diagnostics.map(render)).toEqual([
 			"error: option '--permission-prompts <target>' argument 'nonsense' is invalid. Allowed choices are host, none.",
 		]);
@@ -252,9 +250,7 @@ describe("table arity", () => {
 
 	test("--flag=value works for table flags", () => {
 		const result = parseArgs(["--output-format=json", "--permission-mode=plan"]);
-		expect(result.diagnostics.map(render)).toEqual([
-			"Warning: --permission-mode is accepted but not implemented yet",
-		]);
+		expect(result.diagnostics.map(render)).toEqual([]);
 		expect(result.outputFormat).toBe("json");
 		expect(result.permissionMode).toBe("plan");
 		expect(result.print).toBe(true);
