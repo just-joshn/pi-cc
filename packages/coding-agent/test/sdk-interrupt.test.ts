@@ -135,10 +135,10 @@ describe("an interrupt that cuts off a tool", () => {
 		} as AgentSessionEvent;
 	}
 
-	test("writes the rejected tool result, then the notice for tool use", () => {
+	test.each([true, false])("writes the rejected tool result even when isError is %s", (isError) => {
 		const { instance, frames, tally } = renderer(false);
 		instance.markInterrupted();
-		instance.onEvent(toolResult(true));
+		instance.onEvent(toolResult(isError));
 		instance.onEvent(assistantEnd("aborted"));
 
 		expect(labels(frames)).toEqual(["user", "user"]);

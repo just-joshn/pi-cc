@@ -315,7 +315,12 @@ describe("SdkHost", () => {
 		expect(results[1].modelUsage["faux-b"]).toMatchObject({ contextWindow: 2000, maxOutputTokens: 200 });
 	});
 
-	it("an interrupt during a tool rejects it, writes the notice, and ends the turn as aborted_tools", async () => {
+	it.each([
+		{ maxTurns: undefined, resolves: false },
+		{ maxTurns: undefined, resolves: true },
+		{ maxTurns: 1, resolves: false },
+		{ maxTurns: 1, resolves: true },
+	])("an interrupt during a tool wins over maxTurns=$maxTurns with resolves=$resolves", async ({ maxTurns, resolves }) => {
 		const input = new PassThrough();
 		const blockingTool: AgentTool = {
 			name: "block",
@@ -323,14 +328,17 @@ describe("SdkHost", () => {
 			description: "waits for abort",
 			parameters: Type.Object({}),
 			execute: (_id, _params, signal) =>
-				new Promise((_resolve, reject) => {
+				new Promise((resolve, reject) => {
 					input.write(`${controlLine("stop", "interrupt")}\n`);
 					input.end();
-					signal?.addEventListener("abort", () => reject(new Error("Command aborted")));
+					signal?.addEventListener("abort", () => {
+						if (resolves) resolve({ content: [{ type: "text", text: "stopped" }], details: {} });
+						else reject(new Error("Command aborted"));
+					});
 				}),
 		};
 		const { frames, exitCode } = await run(
-			{ inputFormat: "stream-json" },
+			{ inputFormat: "stream-json", maxTurns },
 			[],
 			(h) =>
 				h.setResponses([
