@@ -113,6 +113,10 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-opus-4-7",
 		"gpt-5",
 		"openai/gpt-5",
+		// values `--model` writes in the model-alias cases
+		"glm-4.6",
+		"opusplan",
+		"best",
 		// a value of `--setting-sources` in the memory cases, which narrows memory with the settings tiers
 		"user",
 	],
@@ -155,6 +159,8 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"ANTHROPIC_DEFAULT_SONNET_MODEL",
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
+	// PR #13: the retired-id remap switch, whose value a case pins as `1`, `0` or `false`.
+	"CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP",
 	// P39: the administrator switch `update` honors, which only a pi-cc-only case sets.
 	"DISABLE_UPDATES",
 	// P38 (`cc/p38-telemetry`): the operator-owned OpenTelemetry export, aimed at the mock with `$MOCK_URL`.

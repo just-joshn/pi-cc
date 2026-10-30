@@ -51,6 +51,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "./core/agent-session-services.ts";
+import { ccSettingsSessionModel } from "./core/anthropic-model-env.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
@@ -576,10 +577,12 @@ export async function createSessionManager(
 }
 
 /** Claude Code's session model: `ANTHROPIC_MODEL`, then the settings `model`. */
-function ccSessionModel(settingsModel: string | undefined): { name: string; source: string } | undefined {
+function ccSessionModel(settings: CcSettings): { name: string; source: string } | undefined {
 	const envModel = process.env.ANTHROPIC_MODEL?.trim();
 	if (envModel) return { name: envModel, source: "ANTHROPIC_MODEL" };
-	return settingsModel === undefined ? undefined : { name: settingsModel, source: "Claude Code settings" };
+	const name = ccSettingsSessionModel(settings.model, settings.sources.get("model"));
+	if (!name) return undefined;
+	return { name, source: "Claude Code settings" };
 }
 
 function buildSessionOptions(
@@ -1053,7 +1056,7 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.buildSessionContext().messages.length > 0,
 			modelRuntime,
 			settingsManager,
-			ccSessionModel(ccAdmission.run.settings.model),
+			ccSessionModel(ccAdmission.run.settings),
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
 

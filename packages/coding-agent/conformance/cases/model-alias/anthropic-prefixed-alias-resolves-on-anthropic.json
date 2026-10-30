@@ -1,0 +1,40 @@
+{
+	"area": "model-alias",
+	"argv": [
+		"--model",
+		"anthropic/opusplan",
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"bodyEquals": {
+					"model": "claude-sonnet-5-5"
+				}
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "Claude Code has no provider/model syntax, so it sends \"anthropic/opusplan\" verbatim; PR #13's fix round gives pi's model syntax the win for prefixes pi knows."
+	},
+	"id": "model-alias/anthropic-prefixed-alias-resolves-on-anthropic"
+}

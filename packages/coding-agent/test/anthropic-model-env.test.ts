@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
 	ccModelAlias,
+	ccSettingsModelMigration,
+	ccSettingsSessionModel,
 	hasModelEnvironment,
 	isModelAlias,
 	parseAnthropicModelEnv,
+	stripContextMarkers,
 } from "../src/core/anthropic-model-env.ts";
 
 describe("parseAnthropicModelEnv", () => {
@@ -19,6 +22,7 @@ describe("parseAnthropicModelEnv", () => {
 		expect(env).toEqual({
 			model: "haiku",
 			family: { opus: "opus-id", sonnet: "sonnet-id", haiku: "haiku-id", fable: "fable-id" },
+			legacyRemapDisabled: false,
 		});
 	});
 
@@ -26,6 +30,7 @@ describe("parseAnthropicModelEnv", () => {
 		expect(parseAnthropicModelEnv({ ANTHROPIC_MODEL: "  haiku  ", ANTHROPIC_DEFAULT_HAIKU_MODEL: "   " })).toEqual({
 			model: "haiku",
 			family: {},
+			legacyRemapDisabled: false,
 		});
 	});
 
@@ -70,6 +75,118 @@ describe("ccModelAlias", () => {
 		expect(ccModelAlias("sonnet", bare)).toBe("claude-sonnet-5-5");
 		expect(ccModelAlias("haiku", bare)).toBe("claude-haiku-5-5");
 		expect(ccModelAlias("fable", bare)).toBe("claude-fable-5-1");
+	});
+
+	it("resolves opusplan to the Sonnet default, which its variable redefines", () => {
+		const bare = parseAnthropicModelEnv({});
+		const pinned = parseAnthropicModelEnv({ ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-4.6" });
+
+		expect(ccModelAlias("opusplan", bare)).toBe("claude-sonnet-5-5");
+		expect(ccModelAlias("opusplan", pinned)).toBe("glm-4.6");
+	});
+
+	it("resolves best to the Fable default, which its variable redefines", () => {
+		const bare = parseAnthropicModelEnv({});
+		const pinned = parseAnthropicModelEnv({ ANTHROPIC_DEFAULT_FABLE_MODEL: "glm-4.6" });
+
+		expect(ccModelAlias("best", bare)).toBe("claude-fable-5-1");
+		expect(ccModelAlias("best", pinned)).toBe("glm-4.6");
+	});
+
+	it("carries a [1m] marker from an alias through to the resolved id", () => {
+		const bare = parseAnthropicModelEnv({});
+
+		expect(ccModelAlias("opus[1m]", bare)).toBe("claude-opus-5-5[1m]");
+		expect(ccModelAlias("OPUS[1M]", bare)).toBe("claude-opus-5-5[1m]");
+		expect(ccModelAlias("opusplan[1m]", bare)).toBe("claude-sonnet-5-5[1m]");
+		expect(ccModelAlias("best[1m]", bare)).toBe("claude-fable-5-1[1m]");
+		// A doubled marker is not an alias form; it collapses like any other name's trailing run.
+		expect(ccModelAlias("opus[1m][1m]", bare)).toBe("opus[1m]");
+	});
+
+	it("collapses a trailing [1m] run on a non-alias name and leaves anything else as written", () => {
+		const bare = parseAnthropicModelEnv({});
+
+		expect(ccModelAlias("claude-sonnet-5-5[1m]", bare)).toBe("claude-sonnet-5-5[1m]");
+		expect(ccModelAlias("pi-unknown[1m]", bare)).toBe("pi-unknown[1m]");
+		expect(ccModelAlias("default", bare)).toBe("default");
+		expect(ccModelAlias("pi-unknown", bare)).toBe("pi-unknown");
+	});
+
+	it("remaps a retired Opus id to the Opus default", () => {
+		const bare = parseAnthropicModelEnv({});
+
+		expect(ccModelAlias("claude-opus-4-0", bare)).toBe("claude-opus-5-5");
+		expect(ccModelAlias("claude-opus-4-1", bare)).toBe("claude-opus-5-5");
+		expect(ccModelAlias("claude-opus-4-1-20250805", bare)).toBe("claude-opus-5-5");
+		expect(ccModelAlias("claude-opus-4-0[1m]", bare)).toBe("claude-opus-5-5[1m]");
+	});
+
+	it("keeps a retired id as written when the legacy remap is disabled", () => {
+		const disabled = parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: "1" });
+
+		expect(ccModelAlias("claude-opus-4-0", disabled)).toBe("claude-opus-4-0");
+		expect(parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: "" }).legacyRemapDisabled).toBe(false);
+	});
+
+	it("reads the remap switch with Claude Code's boolean rule", () => {
+		const disabled = (value: string) =>
+			parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: value }).legacyRemapDisabled;
+
+		expect(disabled("1")).toBe(true);
+		expect(disabled(" true ")).toBe(true);
+		expect(disabled("YES")).toBe(true);
+		expect(disabled("On")).toBe(true);
+		expect(disabled("0")).toBe(false);
+		expect(disabled("false")).toBe(false);
+		expect(disabled("no")).toBe(false);
+		expect(disabled("off")).toBe(false);
+		expect(disabled("")).toBe(false);
+	});
+
+	it("still remaps a retired id when the switch is 0 or false", () => {
+		for (const value of ["0", "false", "no", ""]) {
+			const env = parseAnthropicModelEnv({ CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: value });
+
+			expect(ccModelAlias("claude-opus-4-0", env)).toBe("claude-opus-5-5");
+		}
+	});
+});
+
+describe("ccSettingsModelMigration", () => {
+	it("rewrites exactly sonnet[1m] to the dated Sonnet 4.5 id", () => {
+		expect(ccSettingsModelMigration("sonnet[1m]")).toBe("sonnet-4-5-20250929[1m]");
+		expect(ccSettingsModelMigration("sonnet")).toBe("sonnet");
+		expect(ccSettingsModelMigration("SONNET[1M]")).toBe("SONNET[1M]");
+		expect(ccSettingsModelMigration("sonnet-4-5-20250929[1m]")).toBe("sonnet-4-5-20250929[1m]");
+	});
+});
+
+describe("ccSettingsSessionModel", () => {
+	it("migrates the raw user-tier value, so a padded one misses the migration", () => {
+		expect(ccSettingsSessionModel("sonnet[1m]", "user")).toBe("sonnet-4-5-20250929[1m]");
+		expect(ccSettingsSessionModel("  sonnet[1m]  ", "user")).toBe("sonnet[1m]");
+	});
+
+	it("migrates only the user tier's value", () => {
+		for (const tier of ["project", "local", "flag", "policy", undefined]) {
+			expect(ccSettingsSessionModel("sonnet[1m]", tier)).toBe("sonnet[1m]");
+		}
+	});
+
+	it("trims the name and drops an empty one", () => {
+		expect(ccSettingsSessionModel("  glm-4.6  ", "user")).toBe("glm-4.6");
+		expect(ccSettingsSessionModel("   ", "user")).toBeUndefined();
+		expect(ccSettingsSessionModel(undefined, "user")).toBeUndefined();
+	});
+});
+
+describe("stripContextMarkers", () => {
+	it("strips every [1m]/[2m] marker wherever it appears", () => {
+		expect(stripContextMarkers("pi-unknown[1m]")).toBe("pi-unknown");
+		expect(stripContextMarkers("claude-sonnet-5-5[1m]")).toBe("claude-sonnet-5-5");
+		expect(stripContextMarkers("weird[1m]id[2m]")).toBe("weirdid");
+		expect(stripContextMarkers("glm-4.6")).toBe("glm-4.6");
 	});
 });
 

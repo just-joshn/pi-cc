@@ -1,0 +1,43 @@
+{
+	"area": "model-alias",
+	"argv": [
+		"--model",
+		"opusplan:high",
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"json"
+	],
+	"env": {
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-5"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"method": "POST",
+				"bodyEquals": {
+					"model": "claude-sonnet-4-5"
+				},
+				"bodyIncludes": ["\"budget_tokens\":16384"]
+			}
+		]
+	},
+	"skip": [],
+	"not_applicable": {
+		"claude": "Claude Code has no :thinking suffix, so it sends \"opusplan:high\" verbatim; PR #13's fix round applies pi's trailing level before alias resolution."
+	},
+	"id": "model-alias/thinking-suffix-applies-before-alias-resolution"
+}
