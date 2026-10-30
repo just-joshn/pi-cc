@@ -184,19 +184,26 @@ export function seedFiles(roots: Roots, files: Record<string, string>, mockUrl?:
 	}
 }
 
-/** Every violation the harness can report against a side. Case data names one of these. */
-export const VIOLATION_KINDS = [
+/** Violations a case can plant on purpose, so case data may name them. */
+export const PLANTABLE_VIOLATION_KINDS = [
 	"symlink",
 	"escaping-symlink",
 	"dangling-symlink",
 	"not-regular-file",
 	"unreadable",
 	"survivor",
-	"unreaped",
-	"workspace-unmovable",
 ] as const;
 
-export type ViolationKind = (typeof VIOLATION_KINDS)[number];
+/**
+ * The harness could not establish what the side left behind: a process it could not remove, or a
+ * workspace it could not move out of the side's reach. No case plants these, so case data cannot name
+ * them and they always fail the case.
+ */
+export const HARNESS_FAILURE_KINDS = ["unreaped", "workspace-unmovable"] as const;
+
+export type PlantableViolationKind = (typeof PLANTABLE_VIOLATION_KINDS)[number];
+
+export type ViolationKind = PlantableViolationKind | (typeof HARNESS_FAILURE_KINDS)[number];
 
 export interface Violation {
 	kind: ViolationKind;

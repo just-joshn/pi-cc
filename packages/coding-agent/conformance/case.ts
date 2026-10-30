@@ -4,7 +4,14 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { argvProblem, envProblem, unsetProblem } from "./allowlist.ts";
 import { toRegExp } from "./compare.ts";
-import { PROBES, type ProbeName, type SideName, VIOLATION_KINDS, type ViolationKind } from "./isolate.ts";
+import {
+	HARNESS_FAILURE_KINDS,
+	PLANTABLE_VIOLATION_KINDS,
+	type PlantableViolationKind,
+	PROBES,
+	type ProbeName,
+	type SideName,
+} from "./isolate.ts";
 import type { Shape } from "./shape.ts";
 
 export type NormalizeRule = "paths" | "whitespace" | "version" | "session-id";
@@ -80,7 +87,7 @@ export interface CompareSpec {
 
 /** One escape attempt a case plants: what the harness must report, and where it was planted. */
 export interface ContainmentSpec {
-	kind: ViolationKind;
+	kind: PlantableViolationKind;
 	/** Workspace-relative. Omitted when the violation is the workspace itself, as in a swapped anchor. */
 	path?: string;
 }
@@ -315,24 +322,31 @@ function asContainmentSpecs(value: unknown, source: string): ContainmentSpec[] |
 		const field = `compare.containment[${index}]`;
 		const object = asCheckedObject(entry, source, field, CONTAINMENT_KEYS);
 		const kind = asString(object.kind, source, `${field}.kind`);
-		if (!VIOLATION_KINDS.includes(kind as ViolationKind)) {
-			fail(source, `${field}.kind "${kind}" is not a violation kind (${VIOLATION_KINDS.join(", ")})`);
+		if ((HARNESS_FAILURE_KINDS as readonly string[]).includes(kind)) {
+			fail(
+				source,
+				`${field}.kind "${kind}" is a harness failure that always fails the case, so a case cannot declare it`,
+			);
+		}
+		if (!isPlantable(kind)) {
+			fail(source, `${field}.kind "${kind}" is not a violation kind (${PLANTABLE_VIOLATION_KINDS.join(", ")})`);
 		}
 		const path = asOptionalString(object.path, source, `${field}.path`);
-		if (kind === "survivor" || kind === "unreaped" || kind === "workspace-unmovable") {
+		if (kind === "survivor") {
 			if (path !== undefined)
-				fail(
-					source,
-					`${field}.path is a process or the whole workspace, not a path in the tree, so it cannot be named`,
-				);
-			return { kind: kind as ViolationKind };
+				fail(source, `${field}.path is a process, not a path in the tree, so it cannot be named`);
+			return { kind };
 		}
 		if (path === undefined && (kind === "escaping-symlink" || kind === "dangling-symlink")) {
 			fail(source, `${field}.path is required: a link that escapes or dangles is always inside the tree`);
 		}
 		if (path !== undefined) assertWorkspaceRelative(path, source, `${field}.path`);
-		return { kind: kind as ViolationKind, path };
+		return { kind, path };
 	});
+}
+
+function isPlantable(kind: string): kind is PlantableViolationKind {
+	return (PLANTABLE_VIOLATION_KINDS as readonly string[]).includes(kind);
 }
 
 function asNotApplicable(value: unknown, source: string): Partial<Record<SideName, string>> {

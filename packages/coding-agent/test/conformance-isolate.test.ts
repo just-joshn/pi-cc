@@ -262,7 +262,7 @@ describe("what a side can plant without crashing the scan", () => {
 
 		const scan = hashTree(workspace);
 
-		expect([...scan.entries.keys()]).toEqual([Array.from({ length: 400 }, () => "d").join("/") + "/leaf.txt"]);
+		expect([...scan.entries.keys()]).toEqual([`${Array.from({ length: 400 }, () => "d").join("/")}/leaf.txt`]);
 		expect(scan.violations).toEqual([]);
 	});
 

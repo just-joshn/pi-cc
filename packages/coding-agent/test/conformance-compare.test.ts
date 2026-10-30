@@ -115,8 +115,14 @@ describe("compare.containment", () => {
 		const moved = { violations: [{ kind: "workspace-unmovable" as const, path: null }] };
 
 		expect(checks({ containment: [{ kind: "unreadable" }] }, moved)).toEqual(["containment", "containment"]);
-		expect(checks({ containment: [{ kind: "workspace-unmovable" }] }, moved)).toEqual([]);
 		expect(checks({}, moved)).toEqual(["containment"]);
+	});
+
+	test("an unreaped process fails the case that planted a survivor", () => {
+		const unreaped = { violations: [{ kind: "unreaped" as const, path: null }] };
+
+		expect(checks({ containment: [{ kind: "survivor" }] }, unreaped)).toEqual(["containment", "containment"]);
+		expect(checks({}, unreaped)).toEqual(["containment"]);
 	});
 
 	test("matches the workspace anchor by kind alone", () => {
