@@ -158,6 +158,163 @@ describe("dangerous removal targets", () => {
 	});
 });
 
+const brace = (inner: string) => ["$", "{", inner, "}"].join("");
+
+describe("a removal target an earlier assignment in the line makes dangerous", () => {
+	it.each([
+		"X=/; rm -rf $X",
+		"X=/usr; rm -rf $X",
+		"X=/usr; rmdir $X",
+		'X=/usr; rm -rf "$X"',
+		"X=/usr; rm -rf $X/",
+		"X=/usr && rm -rf $X",
+		"X=/usr;\nrm -rf $X",
+		"X=/usr; true; rm -rf $X",
+		"export X=/usr; rm -rf $X",
+		"local X=/usr; rm -rf $X",
+		"readonly X=/usr; rm -rf $X",
+		"declare X=/usr; rm -rf $X",
+		"export X=/usr; export Y=1; rm -rf $X",
+		"X=/; Y=$X; rm -rf $Y",
+		"X=/; Y=$X/usr; rm -rf $Y",
+		"X=/usr; X=/usr; rm -rf $X",
+		"X=/usr; if true; then rm -rf $X; fi",
+		"X=/usr; for i in 1; do rm -rf $X; done",
+		"X=/usr; while false; do :; done; rm -rf $X",
+		"X=/usr; echo x | rm -rf $X",
+		"X=/usr; rm -rf $X | cat",
+		"(X=/usr; rm -rf $X)",
+		"X=/usr; (rm -rf $X)",
+		"X=/usr; echo $((1 + 1)); rm -rf $X",
+		"X=/usr; echo $HOME; rm -rf $X",
+		`X=/usr; echo 'a${brace("Y")}'; rm -rf $X`,
+		"X=/usr; true || rm -rf $X",
+		"X=/usr; bash -c 'rm -rf $X'",
+		"X=/usr; echo hi && sudo rm -rf $X",
+	])("refuses %s", (command) => {
+		const found = removal(command);
+		expect(found?.message, command).toContain("would remove a critical system directory");
+	});
+
+	it("names the expanded target, as Claude Code does", () => {
+		expect(removal("X=/usr; rmdir $X")?.message).toContain("Dangerous rmdir operation detected: '/usr'");
+		expect(removal("X=/; rm -rf $X")?.message).toContain(
+			"Dangerous rm operation detected: '/'\n\nThis command would",
+		);
+	});
+
+	it.each([
+		"(X=/usr); rm -rf $X",
+		"X=/usr || true; rm -rf $X",
+		"true || X=/usr; rm -rf $X",
+		"X=/usr | cat; rm -rf $X",
+		"cat | X=/usr; rm -rf $X",
+		"X=/usr & rm -rf $X",
+		"X=/usr rm -rf $X",
+		"echo hi; X=/usr; rm -rf $X",
+		"export A=1; export X=/usr; rm -rf $X",
+		"X=/usr; X=/tmp/scratch; rm -rf $X",
+		"X=/tmp/scratch; X=/usr; rm -rf $X",
+		"X=/usr; unset X; rm -rf $X",
+		"X=/usr; read X; rm -rf $X",
+		"X=/usr; for X in a; do rm -rf $X; done",
+		"X=/usr; if true; then X=/lib; rm -rf $X; fi",
+		"X=/usr; true || true; rm -rf $X",
+		"X=/usr; { rm -rf $X; }",
+		`X=/usr; echo ${brace("Y")}; rm -rf $X`,
+		`X=/usr; rm -rf ${brace("X")}`,
+		"X=/usr; echo $(date); rm -rf $X",
+		'X=/usr; echo "$(date)"; rm -rf $X',
+		"X=/usr; echo `date`; rm -rf $X",
+		"X=/usr; cat <(:); rm -rf $X",
+		"X=/usr; echo $FOO; rm -rf $X",
+		'X=/usr; echo "$FOO"; rm -rf $X',
+		"X=/usr; echo $?; rm -rf $X",
+		"X=/usr; echo $PWD; rm -rf $X",
+		"X=/usr; echo $'a'; rm -rf $X",
+		"X=/usr; case a in a) rm -rf $X;; esac",
+		"X=/usr; f() { :; }; rm -rf $X",
+		'X="/ usr"; rm -rf $X',
+		"X=/usr; rm -rf $X; X=/lib",
+		"X=/tmp/scratch; rm -rf $X",
+		"X=/tmp/scratch; rm -rf $X/",
+	])("lets %s through, because Claude Code cannot follow the variable there", (command) => {
+		expect(removal(command), command).toBeUndefined();
+	});
+});
+
+describe("a line with too many command substitutions", () => {
+	const repeated = (piece: string, count: number, lead = "echo") => `${lead} ${Array(count).fill(piece).join(" ")}`;
+	const message = (count: number) =>
+		`This command contains ${count} command substitutions \u2014 too many to analyze for catastrophic removals. This requires explicit approval.`;
+
+	it("asks once there are more than 64, with or without a removal", () => {
+		expect(removal(repeated("$(:)", 65))?.message).toBe(message(65));
+		expect(removal(repeated("$(:)", 65, "echo rmdir"))?.message).toBe(message(65));
+		expect(removal(repeated("$(:)", 64))).toBeUndefined();
+	});
+
+	it("counts backticks, process substitutions, quoted and nested ones and function substitutions", () => {
+		expect(removal(repeated("`:`", 65))?.message).toBe(message(65));
+		expect(removal(repeated("<(:)", 65, "cat"))?.message).toBe(message(65));
+		expect(removal(repeated(">(:)", 65, "tee"))?.message).toBe(message(65));
+		expect(removal(repeated('"$(:)"', 65))?.message).toBe(message(65));
+		expect(removal(repeated(brace(" :; "), 65))?.message).toBe(message(65));
+		expect(removal(repeated("$(echo $(:))", 33))?.message).toBe(message(66));
+		expect(removal(repeated("$(echo $(:))", 32))).toBeUndefined();
+		expect(removal(`${repeated("`:`", 32)} ${repeated("$(:)", 32)} <(:) <(:)`)?.message).toBe(message(66));
+	});
+
+	it("does not count arithmetic, single-quoted text or a quoted here-document", () => {
+		expect(removal(repeated("$((1 + 1))", 65))).toBeUndefined();
+		expect(removal(`echo '${Array(65).fill("$(:)").join(" ")}'`)).toBeUndefined();
+		expect(removal(`cat <<'EOF'\n${Array(65).fill("$(:)").join("\n")}\nEOF`)).toBeUndefined();
+	});
+
+	it("counts the substitutions in an unquoted here-document", () => {
+		expect(removal(`cat <<EOF\n${Array(65).fill("$(:)").join("\n")}\nEOF`)?.message).toBe(message(65));
+	});
+
+	it("gives way to a variable that may be empty, which Claude Code checks first", () => {
+		expect(removal(`${repeated("$(:)", 65)}; rm -rf $X/`)?.message).toContain("is a shell variable expansion");
+	});
+
+	it("is a bypass-immune dangerous-removal ask, and the waiver releases it", () => {
+		const command = repeated("$(:)", 65);
+		const held = evaluate(bash(command), "bypassPermissions", { allowedTools: ["Bash"] });
+		expect(held.decision.behavior).toBe("ask");
+		expect(held.decision.behavior === "ask" && held.decision.reason).toMatchObject({
+			type: "safetyCheck",
+			breaker: "dangerousRemoval",
+		});
+		expect(evaluate(bash(command), "bypassPermissions", { removalWaiverRequested: true }).decision.behavior).toBe(
+			"allow",
+		);
+	});
+});
+
+describe("a removal target in quotes", () => {
+	it.each(['rm -rf "*"', "rm -rf '*'", "rmdir \\*", 'rm -rf "./*"', 'rm -rf "/*"'])("refuses %s", (command) => {
+		expect(removal(command)?.message, command).toMatch(/^Dangerous (?:rm|rmdir) operation detected/);
+	});
+
+	it("explains a quoted trailing glob the way an unquoted one is explained", () => {
+		expect(removal('rmdir "*/"')?.message).toContain("cannot be statically resolved");
+		expect(removal("rmdir */")?.message).toContain("cannot be statically resolved");
+	});
+
+	it.each(['rm -rf "sub/*"', 'rm -f "*.txt"', "rm -f '*.txt'"])("lets %s through", (command) => {
+		expect(removal(command), command).toBeUndefined();
+	});
+
+	it.each(['ls "*.txt"', 'cat "*.txt"', 'find . -name "*.txt"', "find . -name '*.txt'"])(
+		"allows the quoted glob %s in default mode, as Claude Code does",
+		(command) => {
+			expect(evaluate(bash(command), "default").decision.behavior, command).toBe("allow");
+		},
+	);
+});
+
 describe("a dangerous removal against rules, modes and bypass", () => {
 	const targets = ["rm -rf .", "rm -rf *", "rm -rf ~", "rm -rf /", "rm -rf /*", "rm -rf ..", "rm -rf /etc"];
 
