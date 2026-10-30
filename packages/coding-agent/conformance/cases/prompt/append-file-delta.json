@@ -1,0 +1,55 @@
+{
+	"id": "prompt/append-file-delta",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--append-system-prompt-file",
+		"$WORKSPACE/aprompt.md"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"aprompt.md": "PROBE_FILE_APPEND_MARKER. Always mention pancakes.\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyAt": {
+					"system.1.text": {
+						"notMatch": [
+							"PROBE_FILE_APPEND_MARKER"
+						]
+					},
+					"system.2.text": {
+						"match": [
+							"PROBE_FILE_APPEND_MARKER\\. Always mention pancakes\\.\\n$"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.1.text": {
+						"around": 94,
+						"tolerance": 0.08
+					},
+					"system.2.text": {
+						"around": 5961
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,43 @@
+{
+	"id": "prompt/effort-on-wire-opus-4-8",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--model",
+		"claude-opus-4-8"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-opus-4-8",
+					"max_tokens": 64000,
+					"thinking": {
+						"type": "adaptive",
+						"display": "omitted"
+					},
+					"output_config": {
+						"effort": "high"
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,33 @@
+{
+	"id": "model-alias/default-model-is-claude-opus-5-5",
+	"area": "model-alias",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-opus-5-5"
+				}
+			}
+		]
+	},
+	"skip": []
+}

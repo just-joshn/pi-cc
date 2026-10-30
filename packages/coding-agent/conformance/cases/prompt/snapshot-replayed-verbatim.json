@@ -1,0 +1,65 @@
+{
+	"id": "prompt/snapshot-replayed-verbatim",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"one\"}}",
+			"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"two\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "A"
+			},
+			{
+				"text": "B"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 2,
+				"bodySame": [
+					"system"
+				],
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					]
+				},
+				"bodyLength": {
+					"system.2.text": {
+						"around": 5894
+					}
+				},
+				"index": 1
+			}
+		]
+	},
+	"skip": []
+}

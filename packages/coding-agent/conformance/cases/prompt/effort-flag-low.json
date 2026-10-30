@@ -1,0 +1,43 @@
+{
+	"id": "prompt/effort-flag-low",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--effort",
+		"low"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-opus-5-5",
+					"max_tokens": 128000,
+					"thinking": {
+						"type": "adaptive",
+						"display": "omitted"
+					},
+					"output_config": {
+						"effort": "low"
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

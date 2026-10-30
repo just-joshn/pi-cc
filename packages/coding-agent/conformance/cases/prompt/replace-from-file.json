@@ -1,0 +1,47 @@
+{
+	"id": "prompt/replace-from-file",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--system-prompt-file",
+		"$WORKSPACE/sprompt.md"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"sprompt.md": "PROBE_FILE_PROMPT_MARKER. Answer concisely.\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyAt": {
+					"system.2.text": {
+						"match": [
+							"^PROBE_FILE_PROMPT_MARKER\\. Answer concisely\\.\\n$"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.2.text": {
+						"around": 44,
+						"tolerance": 0.05
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}
