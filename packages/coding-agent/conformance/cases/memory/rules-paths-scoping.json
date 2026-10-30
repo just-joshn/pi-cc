@@ -84,8 +84,5 @@
 			}
 		]
 	},
-	"skip": [],
-	"not_applicable": {
-		"pi-cc": "needs the Read tool, which lands with P03 (PR #7); proven locally on main merged with #7"
-	}
+	"skip": []
 }

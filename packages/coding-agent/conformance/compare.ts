@@ -346,6 +346,8 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 
 function serializeBody(body: unknown): string {
 	return typeof body === "string" ? body : JSON.stringify(body);
+}
+
 /** The text at a dotted path, or undefined when the path leads nowhere. */
 function bodyText(body: unknown, path: string): string | undefined {
 	let value = body;
@@ -389,7 +391,6 @@ function bodyTextDiffs(where: string, spec: BodyTextSpec, text: string | undefin
 	}
 	return diffs;
 }
-
 
 function recordedHeader(headers: IncomingHttpHeaders, name: string): string | undefined {
 	const value = headers[name.toLowerCase()];
