@@ -235,11 +235,11 @@ describe("CC keybinding file import", () => {
 	it("keeps native submit working under a CC unbinding of the same sequence", () => {
 		const overrides = importCcKeybindings(cc({ enter: null }), new Set()).bindings;
 		const resolved = resolveBindings(
-			[{ context: "Global", keys: ["enter"], action: "tui.input.submit" }],
+			[{ context: "Global", keys: ["enter"], action: "tui.input.submit", origin: "pi-base" }],
 			overrides,
 			"Chat",
 		);
-		expect(resolved).toContainEqual({ context: "Global", keys: ["enter"], action: "tui.input.submit" });
+		expect(resolved).toContainEqual({ context: "Global", keys: ["enter"], action: "tui.input.submit", origin: "pi-base" });
 		expect(resolved.at(-1)).toMatchObject({ keys: ["enter"], action: null });
 	});
 
@@ -432,11 +432,11 @@ describe("prompt chord dispatch", () => {
 
 	it("starts a chord only when a longer binding has an action", () => {
 		const bindings: Binding[] = [
-			{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null },
-			{ context: "Chat", keys: ["ctrl+x", "ctrl+s"], action: "app.exit" },
+			{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null, origin: "cc-import" },
+			{ context: "Chat", keys: ["ctrl+x", "ctrl+s"], action: "app.exit", origin: "cc-import" },
 		];
 		expect(new ChordResolver().resolve("\x18", bindings, 0)).toEqual({ kind: "pending" });
-		const nullOnly: Binding[] = [{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null }];
+		const nullOnly: Binding[] = [{ context: "Chat", keys: ["ctrl+x", "ctrl+k"], action: null, origin: "cc-import" }];
 		expect(new ChordResolver().resolve("\x18", nullOnly, 0)).toEqual({ kind: "input", actions: new Set() });
 	});
 
@@ -622,5 +622,88 @@ describe("CC imports keep the built-in input layer", () => {
 		expect(second.render(80).join("\n")).not.toContain("Waiting for next key");
 		second.handleInput("\x13");
 		expect(editor.render(80).join("\n")).not.toContain("Waiting for next key");
+	});
+});
+
+describe("CC binding identity", () => {
+	const submitsOnEnter = (editor: CustomEditor) => {
+		const submitted: string[] = [];
+		editor.onSubmit = (text) => submitted.push(text);
+		editor.handleInput("h");
+		editor.handleInput("\r");
+		return submitted;
+	};
+	const boundActions = (manager: KeybindingsManager, data: string, actions: Keybinding[]) => {
+		const bound: string[] = [];
+		manager.dispatchInput(data, "Chat", () => {
+			for (const action of actions) if (manager.matches(data, action)) bound.push(action);
+		});
+		return bound;
+	};
+
+	it("keeps Return submitting when a later null follows a restated submit", () => {
+		const { editor } = load({
+			bindings: [
+				{ context: "Chat", bindings: { enter: "chat:submit" } },
+				{ context: "Chat", bindings: { enter: null } },
+			],
+		});
+		expect(submitsOnEnter(editor)).toEqual(["h"]);
+	});
+
+	it("keeps Return submitting under a lone null", () => {
+		const { editor } = load(cc({ enter: null }));
+		expect(submitsOnEnter(editor)).toEqual(["h"]);
+	});
+
+	it("inserts a newline for chat:newline on Ctrl+C instead of clearing or doing nothing", () => {
+		const { editor } = load(cc({ "ctrl+c": "chat:newline" }));
+		let clears = 0;
+		editor.onAction("app.clear", () => clears++);
+		editor.setText("a");
+		editor.handleInput("\x03");
+		expect(editor.getText()).toBe("a\n");
+		expect(clears).toBe(0);
+	});
+
+	it("inserts a newline for chat:newline on Ctrl+D instead of deleting forward", () => {
+		const { editor } = load(cc({ "ctrl+d": "chat:newline" }));
+		editor.setText("abc");
+		editor.handleInput("\x01");
+		editor.handleInput("\x04");
+		expect(editor.getText()).toBe("\nabc");
+	});
+
+	it("keeps input actions on other keys when chat:newline takes Ctrl+D", () => {
+		const { manager, editor } = load(cc({ "ctrl+d": "chat:newline" }));
+		editor.setText("abc");
+		editor.handleInput("\x01");
+		editor.handleInput("\x1b[3~");
+		expect(editor.getText()).toBe("bc");
+		expect(boundActions(manager, "\x03", ["tui.input.copy"])).toEqual(["tui.input.copy"]);
+	});
+
+	it("inserts a newline for chat:newline on Ctrl+L", () => {
+		const { editor } = load(cc({ "ctrl+l": "chat:newline" }));
+		editor.setText("a");
+		editor.handleInput("\x0c");
+		expect(editor.getText()).toBe("a\n");
+	});
+
+	it("restores the displaced input action when a later null removes the import", () => {
+		const { manager } = load({
+			bindings: [
+				{ context: "Chat", bindings: { "ctrl+c": "chat:newline" } },
+				{ context: "Chat", bindings: { "ctrl+c": null } },
+			],
+		});
+		expect(boundActions(manager, "\x03", ["tui.input.copy", "tui.input.newLine", "app.clear"])).toEqual([
+			"tui.input.copy",
+		]);
+	});
+
+	it("tags each binding with its origin and layer", () => {
+		const imported = importCcKeybindings(cc({ enter: "chat:submit", "ctrl+y": "tui.editor.undo" }), new Set(["tui.editor.undo"]));
+		expect(imported.bindings.map((binding) => binding.origin)).toEqual(["cc-import", "pi-file"]);
 	});
 });
