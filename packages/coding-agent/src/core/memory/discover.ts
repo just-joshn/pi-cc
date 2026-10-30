@@ -3,7 +3,7 @@
  * memory) and the files a file access below the working directory brings in.
  */
 
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { minimatch } from "minimatch";
 import { parse as parseYaml } from "yaml";
@@ -298,7 +298,34 @@ export function memoryForFileAccess(file: string, location: MemoryLocation, load
 			}
 		}
 	}
+	files.push(...nestedAgentsFiles(load, target, files));
 	return files;
+}
+
+/**
+ * The `AGENTS.md` files of the directories below cwd down to the accessed file's own, as Claude Code's
+ * AGENTS.md plugin loads them on a read. The default mode skips them in a project with any `CLAUDE.md`
+ * on the walk from cwd up, and in a directory that holds a CLAUDE file of its own.
+ */
+function nestedAgentsFiles(load: Load, target: FileInCwd, held: readonly MemoryFile[]): MemoryFile[] {
+	const { location } = load;
+	const mode = location.instructionFiles;
+	if (!location.sources.project || (mode !== "claude-md-or-agents-md" && mode !== "claude-md-and-agents-md")) {
+		return [];
+	}
+	const fallback = mode === "claude-md-or-agents-md";
+	if (fallback && ancestorsTopDown(location.cwd).some(hasClaudeFile)) {
+		return [];
+	}
+	const texts = new Set(held.filter(isProjectOwn).map((file) => file.content.trim()));
+	return nestedDirs(target)
+		.filter((dir) => !fallback || !hasClaudeFile(dir))
+		.flatMap((dir) => AGENTS_NAMES.flatMap((name) => loadMemoryFile(load, join(dir, name), PROJECT)))
+		.filter((file) => !texts.has(file.content.trim()));
+}
+
+function hasClaudeFile(dir: string): boolean {
+	return CLAUDE_NAMES.some((name) => existsSync(join(dir, name)));
 }
 
 /** The memory type a file gets and whether its imports may leave the working directory. */
