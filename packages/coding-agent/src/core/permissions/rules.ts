@@ -20,7 +20,6 @@ export interface PermissionRule {
 	readonly source: RuleSource;
 	readonly behavior: RuleBehavior;
 	readonly toolName: string;
-	/** Absent for a whole-tool rule. */
 	readonly content?: string;
 }
 
@@ -49,7 +48,6 @@ export function formatRule(rule: Pick<PermissionRule, "toolName" | "content">): 
 	return `${rule.toolName}(${rule.content.replace(/([()\\])/g, "\\$1")})`;
 }
 
-/** Rules from one source, parsed. Text that is not a rule is dropped. */
 export function rulesFromTexts(texts: readonly string[], behavior: RuleBehavior, source: RuleSource): PermissionRule[] {
 	const rules: PermissionRule[] = [];
 	for (const text of texts) {
@@ -59,7 +57,6 @@ export function rulesFromTexts(texts: readonly string[], behavior: RuleBehavior,
 	return rules;
 }
 
-/** Every rule of a context, walked in source order within a behavior. */
 export class RuleSet {
 	private readonly rules: readonly PermissionRule[];
 
@@ -67,17 +64,14 @@ export class RuleSet {
 		this.rules = [...rules].sort((a, b) => RULE_SOURCES.indexOf(a.source) - RULE_SOURCES.indexOf(b.source));
 	}
 
-	/** The rules of one behavior, first source first. */
 	of(behavior: RuleBehavior): readonly PermissionRule[] {
 		return this.rules.filter((rule) => rule.behavior === behavior);
 	}
 
-	/** The first rule of the behavior that has no content and names the tool. */
 	wholeTool(behavior: RuleBehavior, toolName: string): PermissionRule | undefined {
 		return this.of(behavior).find((rule) => rule.content === undefined && coversTool(rule.toolName, toolName));
 	}
 
-	/** The rules of the behavior that name the tool and carry content, for the tool's own check to interpret. */
 	withContent(behavior: RuleBehavior, toolName: string): PermissionRule[] {
 		return this.of(behavior).filter((rule) => rule.content !== undefined && rule.toolName === toolName);
 	}

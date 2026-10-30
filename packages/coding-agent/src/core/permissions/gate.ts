@@ -12,16 +12,13 @@ import { applyDontAsk, evaluatePermission } from "./evaluate.ts";
 import { applyUpdates, type PermissionAnswer, type PermissionPrompter, suggestionsFor } from "./prompt.ts";
 import { checkTool, type PermissionCall } from "./tool-checks.ts";
 
-/** What the session does with the call: run it, or refuse it with the text the model reads. */
 export type GateOutcome =
 	| { readonly action: "run" }
 	| { readonly action: "refuse"; readonly message: string; readonly interrupt?: boolean };
 
 export interface PermissionGateOptions {
 	readonly state: PermissionState;
-	/** The surface that can answer an ask. Absent when nobody can. */
 	readonly prompter?: () => PermissionPrompter | undefined;
-	/** `none` refuses every ask without prompting (`--permission-prompts none`). */
 	readonly prompts?: "host" | "none";
 }
 
@@ -37,7 +34,6 @@ export class PermissionGate {
 		this.prompts = options.prompts ?? "host";
 	}
 
-	/** Decides one call. */
 	async decide(call: PermissionCall, toolCallId: string): Promise<GateOutcome> {
 		const first = this.evaluate(call);
 		if (first.behavior !== "ask") return outcomeOf(first);

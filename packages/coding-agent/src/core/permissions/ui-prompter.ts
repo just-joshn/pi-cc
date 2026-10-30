@@ -1,5 +1,3 @@
-/** The terminal and RPC prompt: Yes, the "don't ask again" choices, and No. */
-
 import type { ExtensionUIContext } from "../extensions/types.ts";
 import {
 	NO,
@@ -19,7 +17,6 @@ function summary(request: PermissionRequest): string {
 	return JSON.stringify(input);
 }
 
-/** A prompter that asks through the extension UI, which the terminal and RPC modes both provide. */
 export function createUiPrompter(ui: ExtensionUIContext): PermissionPrompter {
 	return async (request): Promise<PermissionAnswer> => {
 		const labels = [YES, ...request.suggestions.map((suggestion) => suggestion.label), NO];

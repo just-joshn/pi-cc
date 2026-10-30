@@ -57,6 +57,7 @@ describe("splitting a command line", () => {
 		expect(parseCommand("echo hi >|/tmp/x").writeTargets).toEqual(["/tmp/x"]);
 		expect(parseCommand("echo hi 2>&1").writeTargets).toEqual([]);
 		expect(parseCommand("echo hi >&2").writeTargets).toEqual([]);
+		expect(parseCommand("echo hi >&-").writeTargets).toEqual([]);
 		expect(parseCommand("echo hi>/tmp/x").parts).toEqual(["echo hi"]);
 		expect(parseCommand("cat <<EOF>/tmp/x").heredoc).toBe(true);
 	});
@@ -231,5 +232,122 @@ describe("checking a command", () => {
 	it("does not auto-allow sed that edits in place outside acceptEdits, but allows sed -n as read-only", () => {
 		expect(check("sed -n 1p b.txt").behavior).toBe("allow");
 		expect(check("sed -i s/a/b/ b.txt").behavior).toBe("ask");
+	});
+});
+
+describe("redirections that name a file", () => {
+	it("writes the word after >& unless it is a descriptor", () => {
+		expect(parseCommand("echo hi >& pwn.txt").writeTargets).toEqual(["pwn.txt"]);
+		expect(parseCommand("echo hi>&pwn.txt").writeTargets).toEqual(["pwn.txt"]);
+		expect(parseCommand("echo hi &> pwn.txt").writeTargets).toEqual(["pwn.txt"]);
+		expect(parseCommand("echo hi 2>&1 >&2").writeTargets).toEqual([]);
+		expect(check("echo hi >& pwn.txt")).toMatchObject({
+			behavior: "ask",
+			message: expect.stringContaining("Output redirection to"),
+		});
+	});
+
+	it("reads the word after <", () => {
+		expect(parseCommand("cat < in.txt").readTargets).toEqual(["in.txt"]);
+		expect(parseCommand("cat </dev/null").readTargets).toEqual([]);
+		expect(parseCommand("cat <<< word").readTargets).toEqual([]);
+		expect(check("cat < in.txt").behavior).toBe("allow");
+		expect(check("cat < /etc/hosts")).toMatchObject({
+			behavior: "deny",
+			message: expect.stringMatching(/^Input redirection from '(\/private)?\/etc\/hosts' was blocked\./),
+		});
+	});
+});
+
+describe("options on a read-only command", () => {
+	it("accepts only the options Claude Code lists", () => {
+		expect(check("sort -r b.txt").behavior).toBe("allow");
+		expect(check("sort -k 2,3 -t , b.txt").behavior).toBe("allow");
+		expect(check("sort --compress-program=/usr/bin/true b.txt").behavior).toBe("ask");
+		expect(check("sort -T /tmp b.txt").behavior).toBe("ask");
+		expect(check("grep -rn --include=x a .").behavior).toBe("allow");
+		expect(check("grep -A5 a b.txt").behavior).toBe("allow");
+		expect(check("grep --no-such-option a b.txt").behavior).toBe("ask");
+		expect(check("date +%s").behavior).toBe("allow");
+		expect(check("date -s tomorrow").behavior).toBe("ask");
+		expect(check("test -f b.txt").behavior).toBe("allow");
+		expect(check("test -v HOME").behavior).toBe("ask");
+	});
+
+	it("keeps the value of a pattern option out of the path operands", () => {
+		for (const command of ["grep --regexp=a /etc/hosts", "grep -e a /etc/hosts", "grep -f /etc/hosts b.txt"]) {
+			expect(check(command), command).toMatchObject({
+				behavior: "deny",
+				message: expect.stringMatching(/^grep in '(\/private)?\/etc\/hosts' was blocked/),
+			});
+		}
+		expect(check("grep --regexp=a b.txt").behavior).toBe("allow");
+		expect(check("grep a b.txt").behavior).toBe("allow");
+		expect(check("grep a /etc/hosts").behavior).toBe("deny");
+	});
+
+	it("reads only the paths before the first find expression", () => {
+		expect(check("find . -name b.txt").behavior).toBe("allow");
+		expect(check("find /etc -name b.txt").behavior).toBe("ask");
+	});
+});
+
+describe("a path the file tools treat as sensitive", () => {
+	it("asks before a shell command writes it, even under acceptEdits", () => {
+		const sensitive = /sensitive file\.$/;
+		for (const command of [
+			"echo x > .git/config",
+			"touch .vscode/settings.json",
+			"rm .git/HEAD",
+			"sed -i s/a/b/ .envrc",
+		]) {
+			expect(check(command, {}, true), command).toMatchObject({
+				behavior: "ask",
+				safety: true,
+				message: expect.stringMatching(sensitive),
+			});
+		}
+		expect(check("cp b.txt .claude/settings.json", {}, true)).toMatchObject({
+			behavior: "ask",
+			safety: true,
+			message: expect.stringContaining("requested permissions to write to"),
+		});
+		expect(check("cp .git/config b.txt", {}, true).behavior).toBe("allow");
+		expect(check("touch ok.txt", {}, true).behavior).toBe("allow");
+	});
+});
+
+describe("a prefix rule", () => {
+	it("does not allow the options that run programs or write files", () => {
+		const allow = ["Bash(find:*)", "Bash(jq:*)", "Bash(awk:*)", "Bash(sort:*)"];
+		expect(check("find . -name b.txt", { allow }).behavior).toBe("allow");
+		for (const command of [
+			"find . -name b.txt -delete",
+			"find . -exec rm {} ;",
+			"find . -fprint out.txt",
+			"find . -name *.txt",
+			"jq -f prog.jq b.txt",
+			"jq 'system(\"id\")' b.txt",
+			"awk 'BEGIN{system(\"id\")}'",
+		]) {
+			expect(check(command, { allow }), command).toMatchObject({ behavior: "ask" });
+		}
+		expect(check("find . -delete", { allow })).toMatchObject({
+			message:
+				"find with '-delete' executes commands or modifies files \u2014 cannot be auto-allowed by a Bash(find:*) prefix rule",
+		});
+		expect(check("sort -o out.txt b.txt", { allow }).behavior).toBe("allow");
+	});
+
+	it("still allows an exact rule for the same command", () => {
+		expect(check("find . -delete", { allow: ["Bash(find . -delete)"] }).behavior).toBe("allow");
+	});
+});
+
+describe("whether an allowed command is read-only", () => {
+	it("says so for the plan-mode floor", () => {
+		expect(check("cat b.txt")).toMatchObject({ behavior: "allow", readOnly: true });
+		expect(check("touch a", { allow: ["Bash(touch:*)"] })).toMatchObject({ behavior: "allow", readOnly: false });
+		expect(check("echo a > f.txt", {}, true)).toMatchObject({ behavior: "allow", readOnly: false });
 	});
 });

@@ -32,14 +32,12 @@ export type StageName = (typeof STAGE_NAMES)[number];
 
 export interface Evaluation {
 	readonly decision: Decision;
-	/** The stage that answered, for tests and the audit trail. */
 	readonly stage: StageName;
 }
 
 interface Pipeline {
 	readonly call: PermissionCall;
 	readonly ctx: PermissionContext;
-	/** Set by `toolCheck` for the stages after it. */
 	check?: CheckResult;
 }
 
@@ -107,7 +105,6 @@ function effectiveMode(call: PermissionCall, ctx: PermissionContext): Permission
 		: ctx.mode;
 }
 
-/** Runs the pipeline for one call. */
 export function evaluatePermission(call: PermissionCall, ctx: PermissionContext): Evaluation {
 	const pipeline: Pipeline = { call, ctx };
 	for (const name of STAGE_NAMES) {
@@ -117,7 +114,6 @@ export function evaluatePermission(call: PermissionCall, ctx: PermissionContext)
 	throw new Error("The permission pipeline ended without a decision: its last stage always answers.");
 }
 
-/** What `dontAsk` mode makes of a decision: an ask is a denial, nothing else changes. */
 export function applyDontAsk(decision: Decision, call: PermissionCall, ctx: PermissionContext): Decision {
 	if (decision.behavior !== "ask" || ctx.mode !== "dontAsk") return decision;
 	return { behavior: "deny", message: dontAskMessage(call.name), reason: { type: "mode", mode: "dontAsk" } };

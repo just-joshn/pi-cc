@@ -17,7 +17,6 @@ import { type PermissionCall, toolTraits } from "./tool-checks.ts";
 
 export type GrantScope = "once" | "session" | "always";
 
-/** One change an answer asks for. */
 export type PermissionUpdate =
 	| {
 			readonly type: "addRules";
@@ -31,16 +30,13 @@ export type PermissionAnswer =
 	| { readonly behavior: "allow"; readonly updates?: readonly PermissionUpdate[] }
 	| { readonly behavior: "deny"; readonly message: string; readonly interrupt?: boolean };
 
-/** What a prompt shows and may offer for one ask. */
 export interface PermissionRequest {
 	readonly call: PermissionCall;
 	readonly toolCallId: string;
-	/** Why the call needs an answer: the ask's own message. */
 	readonly message: string;
 	readonly suggestions: readonly Suggestion[];
 }
 
-/** A choice beyond plain Yes and No: its label and the update it applies. */
 export interface Suggestion {
 	readonly label: string;
 	readonly update: PermissionUpdate;
@@ -52,7 +48,6 @@ export type PermissionPrompter = (request: PermissionRequest) => Promise<Permiss
 export const YES = "Yes";
 export const NO = "No, and tell Claude what to do differently (esc)";
 
-/** What the model reads when the user answers No without saying why. */
 export const REJECTED_WITHOUT_REASON =
 	"Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task.";
 
@@ -76,7 +71,6 @@ export function suggestionsFor(call: PermissionCall, cwd: string): Suggestion[] 
 	];
 }
 
-/** The grant scope an answer's updates amount to. */
 export function grantScope(answer: PermissionAnswer): GrantScope {
 	if (answer.behavior === "deny") return "once";
 	const updates = answer.updates ?? [];
@@ -84,7 +78,6 @@ export function grantScope(answer: PermissionAnswer): GrantScope {
 	return updates.length > 0 ? "session" : "once";
 }
 
-/** Applies an answer's updates. Returns the rule texts it refused. */
 export function applyUpdates(state: PermissionState, updates: readonly PermissionUpdate[], project: string): string[] {
 	const refused: string[] = [];
 	for (const update of updates) {

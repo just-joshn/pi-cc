@@ -21,6 +21,8 @@ export interface PermissionContext {
 	readonly directories: readonly string[];
 	/** Whether `bypassPermissions` may take effect. Settings can disable it. */
 	readonly bypassAvailable: boolean;
+	/** Plan mode leaves a Bash command that is not read-only to the auto-mode classifier, so no allow rule runs it. */
+	readonly autoModeDuringPlan: boolean;
 }
 
 /** The inputs a session starts from: settings, flags and the working directory. */
@@ -34,6 +36,8 @@ export interface PermissionInit {
 	readonly cliMode?: PermissionMode;
 	readonly allowedTools?: readonly string[];
 	readonly disallowedTools?: readonly string[];
+	/** `useAutoModeDuringPlan` of the merged settings. Defaults to true, as in Claude Code. */
+	readonly useAutoModeDuringPlan?: boolean;
 }
 
 export interface SettingsPermissions {
@@ -51,12 +55,14 @@ export class PermissionState {
 	private readonly home: string;
 	private readonly directories: readonly string[];
 	private readonly bypassAvailable: boolean;
+	private readonly autoModeDuringPlan: boolean;
 
 	constructor(init: PermissionInit) {
 		this.cwd = init.cwd;
 		this.home = init.home ?? homedir();
 		this.directories = canonicalDirectories(init.cwd, init.additionalDirectories ?? []);
 		this.bypassAvailable = init.settings?.disableBypassPermissionsMode !== "disable";
+		this.autoModeDuringPlan = init.useAutoModeDuringPlan !== false;
 		this.rules = new RuleSet([
 			...rulesFromTexts(init.settings?.allow ?? [], "allow", "settings"),
 			...rulesFromTexts(init.settings?.ask ?? [], "ask", "settings"),
@@ -83,6 +89,7 @@ export class PermissionState {
 			home: this.home,
 			directories: this.directories,
 			bypassAvailable: this.bypassAvailable,
+			autoModeDuringPlan: this.autoModeDuringPlan,
 		};
 	}
 

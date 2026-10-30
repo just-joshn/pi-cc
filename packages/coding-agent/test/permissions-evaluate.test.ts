@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -22,6 +22,7 @@ function run(
 		settings?: SettingsPermissions;
 		allowedTools?: string[];
 		disallowedTools?: string[];
+		useAutoModeDuringPlan?: boolean;
 	} = {},
 ) {
 	const state = new PermissionState({
@@ -31,6 +32,7 @@ function run(
 		...(options.mode === undefined ? {} : { cliMode: options.mode }),
 		allowedTools: options.allowedTools,
 		disallowedTools: options.disallowedTools,
+		...(options.useAutoModeDuringPlan === undefined ? {} : { useAutoModeDuringPlan: options.useAutoModeDuringPlan }),
 	});
 	const ctx = state.current();
 	const evaluation = evaluatePermission(call, ctx);
@@ -202,5 +204,83 @@ describe("path rules", () => {
 		const outside = { name: "Read", input: { file_path: "/etc/hosts" } };
 		expect(run(outside).decision.behavior).toBe("ask");
 		expect(run(outside, { allowedTools: ["Read(//etc/hosts)"] }).decision.behavior).toBe("allow");
+	});
+});
+
+describe("plan mode and Bash", () => {
+	const plan = { mode: "plan" as const, allowedTools: ["Bash"] };
+
+	it("holds a command that is not read-only against a whole-tool allow rule", () => {
+		for (const command of ["echo hi > f.txt", "touch t.txt", "npm test"]) {
+			const result = run(bash(command), plan);
+			expect(stageOf(result), command).toBe("modeHold");
+			expect(result.decision, command).toMatchObject({
+				behavior: "ask",
+				message: "Cannot call Bash while in plan mode.",
+			});
+		}
+	});
+
+	it("holds it against a prefix allow rule and against bypassPermissions' allow", () => {
+		expect(run(bash("touch t.txt"), { mode: "plan", allowedTools: ["Bash(touch:*)"] }).decision.behavior).toBe("ask");
+	});
+
+	it("runs a read-only command", () => {
+		expect(run(bash("cat b.txt"), plan).decision.behavior).toBe("allow");
+		expect(run(bash("ls | wc -l"), { mode: "plan" }).decision.behavior).toBe("allow");
+	});
+
+	it("still refuses a denied command", () => {
+		expect(run(bash("rm a"), { ...plan, settings: { deny: ["Bash(rm:*)"] } }).decision.behavior).toBe("deny");
+	});
+
+	it("runs the allow rule when settings turn off auto mode during plan", () => {
+		expect(run(bash("echo hi > f.txt"), { ...plan, useAutoModeDuringPlan: false }).decision.behavior).toBe("allow");
+	});
+});
+
+describe("a shell write to a sensitive path", () => {
+	it("holds against a whole-tool allow rule and acceptEdits, and yields to bypassPermissions", () => {
+		const held = run(bash("echo x > .git/config"), { mode: "acceptEdits", allowedTools: ["Bash"] });
+		expect(stageOf(held)).toBe("modeHold");
+		expect(held.decision).toMatchObject({ behavior: "ask", message: expect.stringContaining("sensitive file") });
+		expect(run(bash("echo x > .git/config"), { mode: "bypassPermissions" }).decision.behavior).toBe("allow");
+	});
+});
+
+describe("a write through a symbolic link", () => {
+	it("refuses a dangling link and names where it leads", () => {
+		const outside = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-outside-")));
+		try {
+			symlinkSync(join(outside, "target.txt"), join(cwd, "link"));
+			const result = run(write("link"), { mode: "acceptEdits" });
+			expect(result.decision).toMatchObject({
+				behavior: "deny",
+				message: `Refusing to write ${join(cwd, "link")}: it is a symbolic link. Write to the link's target path instead: ${join(outside, "target.txt")}.`,
+			});
+			expect(
+				run(
+					{ name: "Write", input: { file_path: join(outside, "target.txt"), content: "x" } },
+					{ mode: "acceptEdits" },
+				).decision.behavior,
+			).toBe("ask");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("follows a chain of dangling links out of the working directory", () => {
+		const outside = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-outside-")));
+		try {
+			symlinkSync(join(outside, "gone"), join(cwd, "hop"));
+			symlinkSync("hop", join(cwd, "link"));
+			const result = run(
+				{ name: "Write", input: { file_path: join(cwd, "link", "x.txt"), content: "x" } },
+				{ mode: "acceptEdits" },
+			);
+			expect(result.decision.behavior).toBe("ask");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
 	});
 });

@@ -1,5 +1,3 @@
-/** Projects a pi tool call onto the names and fields rules are written against. */
-
 import { ccToolNameFor } from "../tools/cc-surface.ts";
 import type { PermissionCall } from "./tool-checks.ts";
 

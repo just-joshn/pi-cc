@@ -7,19 +7,17 @@
  */
 
 import { resolve } from "node:path";
-import { checkBash } from "./bash.ts";
+import { type BashCheck, checkBash } from "./bash.ts";
 import type { PermissionContext } from "./context.ts";
 import { type CheckResult, defaultAskMessage, FILE_DENIED_BY_RULE, fileCoveredByReadDeny } from "./decision.ts";
-import { canonicalPath, insideDirectories, isSensitivePath, isSettingsFile, pathRuleMatches } from "./paths.ts";
+import { canonicalPath, editSafetyMessage, insideDirectories, isLeafSymlink, pathRuleMatches } from "./paths.ts";
 import type { PermissionRule } from "./rules.ts";
 
-/** One tool call in the model's names and fields. */
 export interface PermissionCall {
 	readonly name: string;
 	readonly input: Readonly<Record<string, unknown>>;
 }
 
-/** What the evaluator needs to know about a tool beyond its check. */
 export interface ToolTraits {
 	readonly kind: "shell" | "read" | "edit" | "other";
 	/** The tool never takes the `bypassPermissions` allow: it asks as in `default`. */
@@ -44,7 +42,6 @@ export function toolTraits(name: string): ToolTraits {
 	return { kind: TOOL_KINDS[name] ?? "other" };
 }
 
-/** Runs the tool's own check. */
 export function checkTool(call: PermissionCall, ctx: PermissionContext): CheckResult {
 	switch (toolTraits(call.name).kind) {
 		case "shell":
@@ -71,6 +68,18 @@ function checkShell(call: PermissionCall, ctx: PermissionContext): CheckResult {
 		directories: ctx.directories,
 		cwd: ctx.cwd,
 	});
+	const verdict = shellVerdict(call, result);
+	if (ctx.mode !== "plan" || !ctx.autoModeDuringPlan || verdict.behavior === "deny") return verdict;
+	if (verdict.behavior === "allow" && result.behavior === "allow" && result.readOnly) return verdict;
+	if (verdict.behavior === "ask" && verdict.reason?.type === "rule") return verdict;
+	return {
+		behavior: "ask",
+		message: `Cannot call ${call.name} while in plan mode.`,
+		reason: { type: "mode", mode: "plan" },
+	};
+}
+
+function shellVerdict(call: PermissionCall, result: BashCheck): CheckResult {
 	switch (result.behavior) {
 		case "deny":
 			return {
@@ -78,20 +87,18 @@ function checkShell(call: PermissionCall, ctx: PermissionContext): CheckResult {
 				message: result.message,
 				reason: result.rule ? { type: "rule", rule: result.rule } : { type: "safetyCheck", reason: result.message },
 			};
-		case "ask":
-			return {
-				behavior: "ask",
-				message: result.message ?? defaultAskMessage(call.name),
-				reason: result.rule
-					? { type: "rule", rule: result.rule }
-					: { type: "other", reason: result.message ?? "This command requires approval" },
-			};
+		case "ask": {
+			const message = result.message ?? defaultAskMessage(call.name);
+			if (result.rule) return { behavior: "ask", message, reason: { type: "rule", rule: result.rule } };
+			const reason = result.safety
+				? { type: "safetyCheck" as const, reason: message }
+				: { type: "other" as const, reason: message };
+			return { behavior: "ask", message, reason };
+		}
 		case "allow":
 			return { behavior: "allow", ...(result.rule ? { reason: { type: "rule", rule: result.rule } } : {}) };
 	}
 }
-
-// -- file tools -------------------------------------------------------------------------------------
 
 /** The path a file tool call targets, as an absolute path in the spelling the model wrote. */
 export function targetOf(call: PermissionCall, cwd: string): string | undefined {
@@ -135,7 +142,19 @@ function checkReadPath(call: PermissionCall, ctx: PermissionContext): CheckResul
 	};
 }
 
+/** A write through a symbolic link is refused, whatever the rules and mode say about the link's own path. */
 function checkEditPath(call: PermissionCall, ctx: PermissionContext): CheckResult {
+	const verdict = checkEditPathRules(call, ctx);
+	const path = targetOf(call, ctx.cwd);
+	if (verdict.behavior === "deny" || path === undefined || !isLeafSymlink(path, ctx.cwd)) return verdict;
+	return {
+		behavior: "deny",
+		message: `Refusing to write ${path}: it is a symbolic link. Write to the link's target path instead: ${canonicalPath(path, ctx.cwd)}.`,
+		reason: { type: "other", reason: "Write target is a symbolic link" },
+	};
+}
+
+function checkEditPathRules(call: PermissionCall, ctx: PermissionContext): CheckResult {
 	const path = targetOf(call, ctx.cwd);
 	if (path === undefined) return { behavior: "passthrough", message: defaultAskMessage(call.name) };
 	const denied = pathRule(familyRules(ctx, "deny", "Edit"), path, ctx);
@@ -151,12 +170,8 @@ function checkEditPath(call: PermissionCall, ctx: PermissionContext): CheckResul
 	const grantMessage = `Claude requested permissions to write to ${path}, but you haven't granted it yet.`;
 	const asked = pathRule(familyRules(ctx, "ask", "Edit"), path, ctx);
 	if (asked) return { behavior: "ask", message: grantMessage, reason: { type: "rule", rule: asked } };
-	if (isSettingsFile(path))
-		return { behavior: "ask", message: grantMessage, reason: { type: "safetyCheck", reason: grantMessage } };
-	if (isSensitivePath(path)) {
-		const message = `Claude requested permissions to edit ${path} which is a sensitive file.`;
-		return { behavior: "ask", message, reason: { type: "safetyCheck", reason: message } };
-	}
+	const unsafe = editSafetyMessage(path);
+	if (unsafe) return { behavior: "ask", message: unsafe, reason: { type: "safetyCheck", reason: unsafe } };
 	if (ctx.mode === "plan") {
 		return {
 			behavior: "ask",
