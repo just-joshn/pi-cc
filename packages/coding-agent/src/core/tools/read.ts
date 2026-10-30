@@ -217,7 +217,6 @@ export function createReadToolDefinition(
 										{ type: "text", text: CC_TOOL_TEXT.readShortOffset(firstLineNumber, totalLines) },
 									];
 								} else {
-									// A nonpositive limit reads to the end, including a trailing empty line.
 									const lineLimit = limit === undefined || limit <= 0 ? undefined : limit;
 									const endIndex =
 										lineLimit === undefined ? totalLines : Math.min(startIndex + lineLimit, totalLines);
