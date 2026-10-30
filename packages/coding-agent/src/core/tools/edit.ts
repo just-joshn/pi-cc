@@ -195,13 +195,13 @@ export function createEditToolDefinition(
 				const record = options?.readState?.get(absolutePath);
 				const raw = await readIfPresent(ops, absolutePath, path);
 				throwIfAborted();
-				// Claude Code appends the file-state suffix when the content is in the model's context:
-				// it supplied the content of a new file, or it read the file and no unread edit followed.
-				const inContext = raw === undefined || (record !== undefined && record.unseen !== true);
-				const suffix = inContext ? ` ${CC_FILE_STATE_SUFFIX}` : "";
-
-				// Older models require a prior read even for an auto-allowed workspace path.
-				if (raw !== undefined && options?.isReadGated?.(absolutePath) === true && record === undefined) {
+				// Older models require a prior read even for an auto-allowed workspace path, and a read
+				// cut at the token cap is an unfinished view that does not count as a read.
+				if (
+					raw !== undefined &&
+					options?.isReadGated?.(absolutePath) === true &&
+					(record === undefined || record.unfinished === true)
+				) {
 					throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				}
 
@@ -229,6 +229,17 @@ export function createEditToolDefinition(
 					raw !== undefined &&
 					isStaleSinceRead(record, await readMtimeMs(ops.mtimeMs, absolutePath), raw);
 				throwIfAborted();
+				// Claude Code appends the file-state suffix when the content is in the model's context:
+				// it supplied the content of a new file, or the model read the whole file, no unread edit
+				// followed, and the bytes on disk are still the bytes it read (`nse` and `CEt`).
+				const inContext =
+					raw === undefined ||
+					(record !== undefined &&
+						record.unseen !== true &&
+						!record.partial &&
+						!stale &&
+						normalizeForComparison(raw) === record.content);
+				const suffix = inContext ? ` ${CC_FILE_STATE_SUFFIX}` : "";
 				if (stale && !creating) {
 					for (const edit of normalizedEdits) {
 						const count = indexesOf(normalizedContent, edit.oldText).length;
@@ -269,9 +280,10 @@ export function createEditToolDefinition(
 				throwIfAborted();
 				options?.readState?.record(absolutePath, {
 					content: normalizeForComparison(finalContent),
-					partial: false,
+					partial: record?.unfinished === true,
+					...(record?.unfinished === true && { unfinished: true }),
 					timestamp: await readMtimeMs(ops.mtimeMs, absolutePath),
-					unseen: !inContext || stale,
+					unseen: !inContext,
 				});
 
 				const diffResult = generateDiffString(normalizedContent, applied.next);

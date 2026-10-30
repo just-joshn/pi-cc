@@ -11,6 +11,8 @@ export interface ReadRecord {
 	readonly partial: boolean;
 	/** The file's modification time in whole milliseconds when the model read or last wrote it, when known. */
 	readonly timestamp?: number;
+	/** True when the Read was cut at the token cap: Claude Code's `isPartialView`, an unfinished view that never counts as a read. */
+	readonly unfinished?: boolean;
 	/** True when an Edit changed the file without the model having read it, so the content is not in its context. */
 	readonly unseen?: boolean;
 }

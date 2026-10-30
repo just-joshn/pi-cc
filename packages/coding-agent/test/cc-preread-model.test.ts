@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@earendil-works/pi-ai/compat";
@@ -266,6 +266,106 @@ describe("CC model-specific prior-read checks", () => {
 			).toBeUndefined();
 		},
 	);
+});
+
+describe("a Read cut at the token cap is an unfinished view", () => {
+	const big = `one\ntwo\nthree\n${"abcdefghijklmnopqrstuvwxyz0123456789\n".repeat(6001)}`;
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "pi-cc-capped-"));
+		writeFileSync(join(dir, "s.txt"), big);
+		writeFileSync(join(dir, "w.txt"), big);
+	});
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+	const editArgs = { path: "s.txt", edits: [{ oldText: "two", newText: "TWO" }] };
+	const writeArgs = { path: "w.txt", content: "after\n" };
+	const notRead = toolUseError(CC_TOOL_TEXT.editNotRead);
+
+	async function cappedRead(id: string, touchAfter: boolean) {
+		const edit = await sessionWithTool(dir, id, "edit");
+		const write = await sessionWithTool(dir, id, "write");
+		const first = await edit.readTool.execute("read", { path: "s.txt" });
+		expect(first.details).toMatchObject({ truncation: { truncated: true } });
+		await write.readTool.execute("read", { path: "w.txt" });
+		if (touchAfter) {
+			const later = new Date(Date.now() + 5000);
+			utimesSync(join(dir, "s.txt"), later, later);
+			utimesSync(join(dir, "w.txt"), later, later);
+		}
+		return {
+			edit,
+			write,
+			dispose: () => {
+				edit.session.dispose();
+				write.session.dispose();
+			},
+		};
+	}
+
+	it.each([true, false])("claude-haiku-4-5 refuses both tools, touched: %s", async (touched) => {
+		const { edit, write, dispose } = await cappedRead("claude-haiku-4-5", touched);
+		try {
+			await expect(edit.tool.execute("edit", editArgs)).rejects.toThrow(notRead);
+			await expect(write.tool.execute("write", writeArgs)).rejects.toThrow(notRead);
+			expect(readFileSync(join(dir, "s.txt"), "utf8")).toBe(big);
+			expect(readFileSync(join(dir, "w.txt"), "utf8")).toBe(big);
+		} finally {
+			dispose();
+		}
+	});
+
+	it("claude-opus-5-5 applies the Edit with no file state suffix and refuses the Write", async () => {
+		const { edit, write, dispose } = await cappedRead("claude-opus-5-5", false);
+		try {
+			const result = await edit.tool.execute("edit", editArgs);
+			expect(result.content[0]).toMatchObject({ text: "The file s.txt has been updated successfully." });
+			await expect(write.tool.execute("write", writeArgs)).rejects.toThrow(notRead);
+			expect(readFileSync(join(dir, "w.txt"), "utf8")).toBe(big);
+		} finally {
+			dispose();
+		}
+	});
+
+	it("claude-opus-5-5 after a touch recovers the Edit with the stale note and refuses the Write as unread", async () => {
+		const { edit, write, dispose } = await cappedRead("claude-opus-5-5", true);
+		try {
+			const result = await edit.tool.execute("edit", editArgs);
+			expect(result.content[0]).toMatchObject({
+				text: expect.stringContaining("the file had been modified on disk"),
+			});
+			await expect(write.tool.execute("write", writeArgs)).rejects.toThrow(notRead);
+		} finally {
+			dispose();
+		}
+	});
+
+	it("an Edit keeps the unfinished view, so a later Write to the same file is refused", async () => {
+		const { edit, dispose } = await cappedRead("claude-opus-5-5", false);
+		try {
+			await edit.tool.execute("edit", editArgs);
+			const write = edit.session.agent.state.tools.find((tool) => tool.name === "write")!;
+			await expect(write.execute("write", { path: "s.txt", content: "after\n" })).rejects.toThrow(notRead);
+		} finally {
+			dispose();
+		}
+	});
+
+	it("an Edit result has no file state suffix when the bytes changed under an unchanged modification time", async () => {
+		const small = join(dir, "t.txt");
+		writeFileSync(small, "one\ntwo\nthree\n");
+		const { session, tool, readTool } = await sessionWithTool(dir, "claude-opus-5-5", "edit");
+		try {
+			await readTool.execute("read", { path: "t.txt" });
+			const { mtime } = statSync(small);
+			writeFileSync(small, "Zone\ntwo\nthree\n");
+			utimesSync(small, mtime, mtime);
+			const result = await tool.execute("edit", { path: "t.txt", edits: [{ oldText: "two", newText: "TWO" }] });
+			expect(result.content[0]).toMatchObject({ text: "The file t.txt has been updated successfully." });
+		} finally {
+			session.dispose();
+		}
+	});
 });
 
 function rewriteLater(file: string, text: string): void {

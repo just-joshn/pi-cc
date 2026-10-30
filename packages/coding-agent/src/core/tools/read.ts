@@ -290,6 +290,7 @@ export function createReadToolDefinition(
 								readState.record(absolutePath, {
 									content: fileContent,
 									partial: !wholeFile,
+									...(details.truncation !== undefined && { unfinished: true }),
 									timestamp: await readMtimeMs(ops.mtimeMs, absolutePath),
 								});
 							}

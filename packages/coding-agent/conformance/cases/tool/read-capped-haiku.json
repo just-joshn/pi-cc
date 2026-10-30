@@ -1,0 +1,104 @@
+{
+	"id": "tool/read-capped-haiku",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--model",
+		"claude-haiku-4-5",
+		"--permission-mode",
+		"acceptEdits",
+		"--allowedTools",
+		"Bash",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "{ printf 'one\\ntwo\\nthree\\n'; yes abcdefghijklmnopqrstuvwxyz0123456789 | head -6001; } > s.txt; cp s.txt w.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "s.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "w.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "s.txt",
+						"old_string": "two",
+						"new_string": "TWO"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "w.txt",
+						"content": "after\n"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File has not been read yet"
+			]
+		},
+		"files": [
+			{
+				"path": "s.txt",
+				"contains": [
+					"one\ntwo"
+				]
+			},
+			{
+				"path": "w.txt",
+				"contains": [
+					"one\ntwo\nthree"
+				]
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"bodyMatch": [
+					"File has not been read yet"
+				]
+			}
+		]
+	}
+}
