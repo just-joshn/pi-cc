@@ -20,6 +20,7 @@ import {
 	parseAnthropicModelEnv,
 	stripContextMarkers,
 } from "./anthropic-model-env.ts";
+import { unknownModelMaxTokens } from "./cc-policy.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
@@ -27,7 +28,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
 	"amazon-bedrock": "us.anthropic.claude-opus-4-6-v1",
 	"ant-ling": "Ring-2.6-1T",
-	anthropic: "claude-opus-4-8",
+	anthropic: "claude-opus-5-5",
 	openai: "gpt-6.1-sol",
 	azure: "gpt-5.4",
 	"openai-codex": "gpt-6.1-sol",
@@ -315,6 +316,7 @@ function buildFallbackModel(providerModels: [Model<Api>, ...Model<Api>[]], model
 		...baseModel,
 		id: modelId,
 		name: modelId,
+		...(baseModel.provider === "anthropic" ? { maxTokens: unknownModelMaxTokens(baseModel) } : {}),
 	};
 }
 
@@ -497,7 +499,11 @@ export function resolveCliModel(options: {
 	// The gateway route only takes names pi has no syntax for: a `provider/` prefix pi knows resolves
 	// through pi's reference parser below, because pi's model syntax wins over Claude Code compat.
 	const gatewayPrefix = splitProviderPrefix(cliModel, models);
-	const gatewayRouting = !provider && !gatewayPrefix && anthropicGatewayActive(modelRuntime);
+	const gatewayRouting =
+		!provider &&
+		!gatewayPrefix &&
+		(anthropicGatewayActive(modelRuntime) ||
+			(isClaudeModelId(cliModel) && modelRuntime.hasConfiguredAuth("anthropic")));
 	// The alias table also serves an operator who names the Anthropic provider without any Claude Code
 	// variable set: `--provider anthropic --model opusplan` resolves the way the alias does.
 	const aliasOnAnthropic = aliasApplies || provider === "anthropic" || gatewayPrefix?.provider === "anthropic";
@@ -612,6 +618,15 @@ export function anthropicCcModel(
 	env: Record<string, string | undefined> = process.env,
 ): Model<Api> | undefined {
 	if (!modelRuntime.hasConfiguredAuth("anthropic")) return undefined;
+	return resolveAnthropicCcModel(modelRuntime, name, env);
+}
+
+/** {@link anthropicCcModel} for a caller that already holds an Anthropic credential, such as a fallback for the session model. */
+export function resolveAnthropicCcModel(
+	modelRuntime: ModelRuntime,
+	name: string,
+	env: Record<string, string | undefined> = process.env,
+): Model<Api> | undefined {
 	const modelId = stripContextMarkers(ccModelAlias(name, parseAnthropicModelEnv(env)));
 	const known = modelRuntime.getModel("anthropic", modelId);
 	if (known) return known;
@@ -623,6 +638,11 @@ export function anthropicCcModel(
 function anthropicGatewayActive(modelRuntime: ModelRuntime): boolean {
 	const baseUrl = process.env.ANTHROPIC_BASE_URL?.trim();
 	return baseUrl !== undefined && baseUrl !== "" && modelRuntime.hasConfiguredAuth("anthropic");
+}
+
+/** A Claude model id written without a provider prefix, which names the Anthropic provider whenever it has a credential. */
+function isClaudeModelId(name: string): boolean {
+	return /^claude-[a-z0-9.-]+(\[1m\])?$/i.test(name.trim());
 }
 
 /** The model `ANTHROPIC_MODEL` selects. */
