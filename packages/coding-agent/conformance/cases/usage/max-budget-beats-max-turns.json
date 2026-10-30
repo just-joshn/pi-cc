@@ -4,6 +4,8 @@
 	"argv": [
 		"-p",
 		"go now",
+		"--model",
+		"claude-sonnet-4-5",
 		"--max-turns",
 		"1",
 		"--max-budget-usd",
