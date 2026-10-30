@@ -498,6 +498,23 @@ describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 		return roots;
 	}
 
+	test("a process some other actor started during the run, outside any sandbox, is not the side's and is not reported", async () => {
+		const roots = sideRoots();
+		const baseline = await takeBaseline();
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-foreign-")));
+		stopDirs.push(dir);
+		spawnSync("/bin/sh", ["-c", `/bin/sleep 45 >/dev/null 2>&1 & echo $! > ${join(dir, "pid")}`]);
+		const foreign = Number.parseInt(readFileSync(join(dir, "pid"), "utf8"), 10);
+
+		try {
+			const scan = await scanWorkspace(roots, ["result.txt"], baseline);
+
+			expect(scan.violations).toEqual([]);
+		} finally {
+			spawnSync("/bin/kill", ["-9", String(foreign)]);
+		}
+	});
+
 	test("a baseline that could not be taken is reported, because nothing can be told apart from it", async () => {
 		const roots = sideRoots();
 
