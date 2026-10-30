@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
 	type Keybinding,
 	type KeybindingDefinitions,
@@ -6,12 +7,15 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "@earendil-works/pi-tui";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { dirname, join } from "path";
 import { Compile } from "typebox/compile";
-import { getAgentDir } from "../config.ts";
+import { getAgentDir, getDebugLogPath } from "../config.ts";
 import { stripBom } from "../utils/text.ts";
 import { KeybindingValueSchema } from "./key-id-schema.ts";
+import { type CcBinding, CcLayer } from "./keybindings/cc-layer.ts";
+import { type CcDeclaration, importCcKeybindings, resolveLayer, sequenceIdentity } from "./keybindings/import-cc.ts";
+import { userSettingsPath } from "./settings/cc/paths.ts";
 
 export function useWindowsKeybindings(
 	platform: NodeJS.Platform = process.platform,
@@ -326,8 +330,24 @@ function loadRawConfig(path: string): Record<string, unknown> | undefined {
 	}
 }
 
+/** Appends an import warning to pi's debug log; write errors are ignored, logging must not break startup. */
+function appendImportWarning(line: string): void {
+	try {
+		const path = getDebugLogPath();
+		mkdirSync(dirname(path), { recursive: true });
+		appendFileSync(path, `${new Date().toISOString()} ${line}\n`);
+	} catch {
+		// Best effort: the log is diagnostic only.
+	}
+}
+
 export class KeybindingsManager extends TuiKeybindingsManager {
 	private configPath: string | undefined;
+	private ccConfigPath: string | undefined;
+	private diagnostics: string[] = [];
+	private forced: { data: string; action: Keybinding } | undefined;
+	/** Claude Code's keybindings as a dispatch layer in front of pi's. Pi's own table is never changed by it. */
+	readonly cc = new CcLayer();
 
 	constructor(userBindings: KeybindingsConfig = {}, configPath?: string) {
 		super(KEYBINDINGS, userBindings);
@@ -337,16 +357,104 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	static create(agentDir: string = getAgentDir()): KeybindingsManager {
 		const configPath = join(agentDir, "keybindings.json");
 		const userBindings = KeybindingsManager.loadFromFile(configPath);
-		return new KeybindingsManager(userBindings, configPath);
+		const manager = new KeybindingsManager(userBindings, configPath);
+		manager.ccConfigPath = join(dirname(userSettingsPath(process.env, homedir())), "keybindings.json");
+		manager.loadCcLayer();
+		return manager;
 	}
 
 	reload(): void {
 		if (!this.configPath) return;
 		this.setUserBindings(KeybindingsManager.loadFromFile(this.configPath));
+		this.loadCcLayer();
 	}
 
+	/** Prompt-editor conflict keys: pi's bindings plus the first stroke of every imported CC binding. */
 	getEffectiveConfig(): KeybindingsConfig {
-		return this.getResolvedBindings();
+		const native = this.getResolvedBindings();
+		if (!this.cc.active) return native;
+		const config: Record<string, KeyId[]> = Object.fromEntries(
+			Object.entries(native).map(([action, value]) => [
+				action,
+				typeof value === "string" ? [value] : [...(value ?? [])],
+			]),
+		);
+		for (const binding of this.cc.getBindings()) config[binding.action].push(binding.keys[0]);
+		return config;
+	}
+
+	getImportDiagnostics(): readonly string[] {
+		return this.diagnostics;
+	}
+
+	/** Runs `run` with only `action` matching `data`, so the editor performs that action for the imported key. */
+	runAs(data: string, action: Keybinding, run: () => void): void {
+		const previous = this.forced;
+		this.forced = { data, action };
+		try {
+			run();
+		} finally {
+			this.forced = previous;
+		}
+	}
+
+	override matches(data: string, keybinding: Keybinding): boolean {
+		return this.forced?.data === data ? this.forced.action === keybinding : super.matches(data, keybinding);
+	}
+
+	/** Load failures become startup warnings; per-entry warnings go to the debug log like CC's validation log. */
+	private loadCcLayer(): void {
+		this.diagnostics = [];
+		const declarations: CcDeclaration[] = [];
+		const nativeActions = new Set(Object.keys(KEYBINDINGS));
+		const take = (path: string, raw: Record<string, unknown>) => {
+			const imported = importCcKeybindings(raw, nativeActions);
+			declarations.push(...imported.bindings);
+			this.diagnostics.push(...imported.diagnostics.map((message) => `${path}: ${message}`));
+			for (const warning of imported.warnings) appendImportWarning(`${path}: ${warning}`);
+		};
+		if (this.ccConfigPath && this.ccConfigPath !== this.configPath) {
+			const ccRaw = loadRawConfig(this.ccConfigPath);
+			if (ccRaw) take(this.ccConfigPath, ccRaw);
+			else if (existsSync(this.ccConfigPath)) {
+				this.diagnostics.push(`${this.ccConfigPath}: CC keybindings file could not be read as JSON`);
+			}
+		}
+		const raw = this.configPath ? loadRawConfig(this.configPath) : undefined;
+		if (raw && Object.hasOwn(raw, "bindings")) take(this.configPath!, raw);
+		const piKeys = new Set(
+			Object.values(this.getUserBindings()).flatMap((value) =>
+				(typeof value === "string" ? [value] : (value ?? [])).map((key) => sequenceIdentity([key])),
+			),
+		);
+		const bindings = resolveLayer(declarations).filter((binding) => !piKeys.has(sequenceIdentity([binding.keys[0]])));
+		this.cc.setBindings(bindings);
+		this.warnHiddenSingleKeyActions(bindings);
+	}
+
+	/** A chord's first stroke is consumed as pending, so pi actions on the prefix key stop firing; CC hides them the same way. */
+	private warnHiddenSingleKeyActions(bindings: readonly CcBinding[]): void {
+		const singleKeyActions = new Map<string, string[]>();
+		for (const [action, value] of Object.entries(this.getResolvedBindings())) {
+			const keys = typeof value === "string" ? [value] : (value ?? []);
+			for (const key of keys) {
+				const sequence = sequenceIdentity([key]);
+				singleKeyActions.set(sequence, [...(singleKeyActions.get(sequence) ?? []), action]);
+			}
+		}
+		const reported = new Set<string>();
+		for (const binding of bindings) {
+			for (let index = 1; index < binding.keys.length; index++) {
+				const prefix = binding.keys.slice(0, index);
+				for (const action of singleKeyActions.get(sequenceIdentity(prefix)) ?? []) {
+					const line = `imported chord prefix "${prefix.join(" ")}" hides pi action "${action}"`;
+					if (!reported.has(line)) {
+						reported.add(line);
+						appendImportWarning(line);
+					}
+				}
+			}
+		}
 	}
 
 	private static loadFromFile(path: string): KeybindingsConfig {

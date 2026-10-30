@@ -1210,6 +1210,10 @@ export class InteractiveMode {
 			}
 		});
 
+		for (const diagnostic of this.keybindings.getImportDiagnostics()) {
+			this.showWarning(`Keybindings: ${diagnostic}`);
+		}
+
 		// Show startup warnings
 		const {
 			migratedProviders,
