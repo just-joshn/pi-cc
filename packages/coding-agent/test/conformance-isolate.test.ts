@@ -383,3 +383,54 @@ describe("scanning the workspace after the side exits", () => {
 		expect(scan.violations).toEqual([{ kind: "unreadable", path: null }]);
 	});
 });
+
+// Regression: `/etc` is a link to `/private/etc` and Seatbelt matches resolved paths, so the managed
+// policy rule for `/etc/claude-code` never matched anything. /etc/claude-code does not exist here and
+// the test makes no system change: it proves the rule form on `/private/etc/hosts`, which does.
+describe.skipIf(!darwin)("the managed policy denial", () => {
+	function profileWith(rule: string, replacement: string): { roots: ReturnType<typeof createRoots>; profile: string } {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-policy-")), "policy", "claude");
+		tempDirs.push(roots.root);
+		const rendered = renderProfile({ roots, executableRoots: ["/bin/cat"], port: null });
+		return { roots, profile: rendered.split(rule).join(replacement) };
+	}
+
+	function cat(target: string, rule: string, replacement: string): SandboxedRun {
+		const { roots, profile } = profileWith(rule, replacement);
+		const profilePath = join(roots.out, "profile.sb");
+		writeFileSync(profilePath, profile);
+		const result = spawnSync(SANDBOX_EXEC, ["-f", profilePath, "/bin/cat", target], {
+			cwd: roots.workspace,
+			env: baseEnv(roots, null),
+			encoding: "utf8",
+		});
+		return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+	}
+
+	test("the profile names the canonical path and keeps the application support path", () => {
+		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-policy-")), "policy", "claude");
+		tempDirs.push(roots.root);
+
+		const profile = renderProfile({ roots, executableRoots: ["/bin/cat"], port: null });
+
+		expect(profile).toContain('(deny file-read* (subpath "/private/etc/claude-code"))');
+		expect(profile).toContain('(deny file-read* (subpath "/Library/Application Support/ClaudeCode"))');
+	});
+
+	test("a rule on the canonical path denies the read through both spellings", () => {
+		for (const target of ["/private/etc/hosts", "/etc/hosts"]) {
+			const run = cat(target, "/private/etc/claude-code", "/private/etc/hosts");
+
+			expect(run.status).not.toBe(0);
+			expect(run.stderr).toContain("Operation not permitted");
+			expect(run.stdout).toBe("");
+		}
+	});
+
+	test("a rule spelled through the /etc link denies nothing", () => {
+		const run = cat("/etc/hosts", '"/etc/claude-code"', '"/etc/hosts"');
+
+		expect(run.status).toBe(0);
+		expect(run.stdout.length).toBeGreaterThan(0);
+	});
+});
