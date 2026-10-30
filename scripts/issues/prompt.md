@@ -26,6 +26,6 @@ Work in this order:
 Signals are short factual tags a maintainer can scan. Use these when they apply, add others only if important:
 "regression", "hit in practice", "theoretical", "repro steps", "no repro", "environment given", "AI-written", "third-party", "upstream", "maybe fixed", "wants to contribute", "spam", "empty", "duplicate cluster" (two or more other reports of the same problem).
 
-You see the issue as it was filed. Judge it on its content. Issues from new contributors are auto-closed by a bot, and `no-action` only means no maintainer picked the issue up; neither is a rejection. A new report of an earlier no-action issue is evidence the problem is real: judge the pair on their merits, and prefer the better-written report. Issues closed as completed are fixed; a new report of one may be a regression or already fixed.
+You see the issue as it was filed. Judge it on its content. The `no-action` label only means no maintainer picked the issue up; it is not a rejection. A new report of an earlier no-action issue is evidence the problem is real: judge the pair on their merits, and prefer the better-written report. Issues closed as completed are fixed; a new report of one may be a regression or already fixed.
 
 The summary is one plain sentence: what breaks or what is requested, and when. No judgment, no restating the title.

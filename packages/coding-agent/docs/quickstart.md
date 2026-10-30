@@ -6,36 +6,20 @@ For native Windows setup, read [Windows Setup](windows.md). For Android, read [T
 
 ## 1. Install Pi
 
-Install Pi with the installer on macOS, Linux, or Windows:
-
-```bash tab="macOS / Linux"
-curl -fsSL https://pi.dev/install.sh | sh
-```
-
-```powershell tab="Windows"
-powershell -c "irm https://pi.dev/install.ps1 | iex"
-```
-
-Both installers pin all dependencies and update Pi with `pi update`. Alternatively, install Pi from npm, which does not pin transitive dependencies. This requires Node.js 22.19 or newer:
+Install `pi-cc` from a source checkout. This requires Node.js 22.19 or newer:
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+git clone https://github.com/just-joshn/pi-cc
+cd pi-cc
+npm install --ignore-scripts
 ```
 
-Pi does not require dependency lifecycle scripts for a normal npm installation.
-
-With Nix on macOS or Linux, install the latest release from Pi's flake. Nix builds Pi from source:
-
-```bash
-nix profile add github:earendil-works/pi/stable
-```
-
-Older Nix versions use `nix profile install` instead. Update with `nix profile upgrade pi`; `pi update` cannot update a Nix installation. To pin a release, use a tag such as `github:earendil-works/pi/v1.0.0`.
+Run Pi from source with `./pi-test.sh`. It can be called from any directory and preserves the caller's working directory. Pi does not require dependency lifecycle scripts.
 
 Verify the installation:
 
 ```bash
-pi --version
+./pi-test.sh --version
 ```
 
 ## 2. Start Pi
@@ -44,7 +28,7 @@ Change to the folder you want Pi to work with, then start it:
 
 ```bash
 cd /path/to/folder
-pi
+/path/to/pi-cc/pi-test.sh
 ```
 
 The working folder helps Pi discover relevant files, instructions, and configuration. Pi also uses it to group saved sessions.
@@ -119,22 +103,6 @@ Start with the least powerful mechanism that meets your need:
 
 ## Uninstall Pi
 
-If you installed Pi with npm, run:
+Delete the `pi-cc` checkout.
 
-```bash
-npm uninstall -g @earendil-works/pi-coding-agent
-```
-
-If you used the installer, run it again and choose **Uninstall Pi**:
-
-```bash
-curl -fsSL https://pi.dev/install.sh | sh
-```
-
-If you installed Pi with Nix, run:
-
-```bash
-nix profile remove pi
-```
-
-None of these methods removes configuration, credentials, sessions, or installed Pi packages from `~/.pi/agent/`.
+This does not remove configuration, credentials, sessions, or installed Pi packages from `~/.pi/agent/`.
