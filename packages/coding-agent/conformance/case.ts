@@ -127,7 +127,17 @@ const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra
 const JSON_STDOUT_KEYS = ["kind", "records"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
-const REQUEST_KEYS = ["pathStartsWith", "count", "method", "headers", "bodyEquals", "bodyIncludes", "bodyExcludes", "bodyMatch", "bodyNotMatch"];
+const REQUEST_KEYS = [
+	"pathStartsWith",
+	"count",
+	"method",
+	"headers",
+	"bodyEquals",
+	"bodyIncludes",
+	"bodyExcludes",
+	"bodyMatch",
+	"bodyNotMatch",
+];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
