@@ -285,6 +285,7 @@ export async function scanWorkspace(
 	roots: Roots,
 	wanted: readonly string[],
 	_baseline: Baseline | null,
+	_options: { ps?: string } = {},
 ): Promise<TreeScan> {
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
 	try {

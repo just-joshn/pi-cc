@@ -442,7 +442,7 @@ describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 	});
 });
 
-describe.skipIf(!darwin)("a chain that no scan of the root can see", () => {
+describe.skipIf(!darwin)("processes that no scan of the root can see", () => {
 	const stopDirs: string[] = [];
 
 	afterEach(async () => {
@@ -489,6 +489,29 @@ describe.skipIf(!darwin)("a chain that no scan of the root can see", () => {
 		writeFileSync(join(roots.workspace, "result.txt"), "result\n");
 		return roots;
 	}
+
+	test("a baseline that could not be taken is reported, because nothing can be told apart from it", async () => {
+		const roots = sideRoots();
+
+		const scan = await scanWorkspace(roots, ["result.txt"], null);
+
+		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
+	});
+
+	test.each([
+		["fails", "#!/bin/sh\nexit 2\n"],
+		["prints nothing a process table has", "#!/bin/sh\necho nonsense\n"],
+	])("a process listing that %s after the run is reported", async (_name, script) => {
+		const roots = sideRoots();
+		const baseline = await takeBaseline();
+		const ps = join(mkdtempSync(join(tmpdir(), "pi-cc-fake-ps-")), "ps");
+		tempDirs.push(dirname(ps));
+		writeFileSync(ps, script, { mode: 0o755 });
+
+		const scan = await scanWorkspace(roots, ["result.txt"], baseline, { ps });
+
+		expect(scan.violations).toContainEqual({ kind: "unreaped", path: null });
+	});
 
 	test.each([
 		["a fast chain", { pause: 0, regroup: false }],
