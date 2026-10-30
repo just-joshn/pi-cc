@@ -245,3 +245,30 @@ describe.skipIf(!darwin)("the signals a reap sends", () => {
 		expect(signalled).toEqual([[-4242424, "SIGKILL"]]);
 	});
 });
+
+describe.skipIf(!darwin)("a reap and the side's own process group", () => {
+	test("kills a child that never left the group, holds nothing under the root, and outlived the side", async () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+		roots.push(root);
+		const script = `
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const sleeper = spawn("/bin/sleep", ["45"], { cwd: "/", stdio: "ignore" });
+writeFileSync(process.argv[1] + "/pid", String(sleeper.pid));
+sleeper.unref();
+`;
+		const side = spawn(process.execPath, ["-e", script, root], { cwd: root, detached: true, stdio: "ignore" });
+		await new Promise((resolve) => side.once("exit", resolve));
+		const pid = Number.parseInt(readFileSync(join(root, "pid"), "utf8"), 10);
+		try {
+			expect(isAlive(pid)).toBe(true);
+
+			const reaped = await reap(root, { group: side.pid });
+
+			expect(isAlive(pid)).toBe(false);
+			expect(reaped.converged).toBe(true);
+		} finally {
+			spawnSync("/bin/kill", ["-9", String(pid)]);
+		}
+	}, 30_000);
+});
