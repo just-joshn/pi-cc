@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { autoMemoryPromptSection } from "../src/core/memory/wrapper.ts";
+import type { Skill } from "../src/core/skills.ts";
 import { assembleCcPrompt } from "../src/core/system-prompt/assemble.ts";
 import type { CcEnvironment } from "../src/core/system-prompt/environment.ts";
 import { snapshotDecision } from "../src/core/system-prompt/snapshot.ts";
@@ -78,17 +79,28 @@ describe("Claude Code prompt assembly", () => {
 		expect(bare.context).toBeUndefined();
 	});
 
-	test("project instructions join the session-specific part and skills and extension sections ride in the context", () => {
+	test("project instructions and skills join the session-specific part and extension sections ride in the context", () => {
 		const record = assembleCcPrompt(
 			options({
 				contextFiles: [{ path: "/work/project/AGENTS.md", content: "PROJECT RULE" }],
 				sections: { extra: "EXTRA NOTE" },
+				skills: [
+					{
+						name: "demo-skill",
+						description: "Demo skill.",
+						filePath: "/s/SKILL.md",
+						baseDir: "/s",
+						disableModelInvocation: false,
+					},
+				] as unknown as Skill[],
 			}),
 			{ bare: false },
 			environment,
 		);
 
 		expect(record.dynamic).toContain("PROJECT RULE");
+		expect(record.dynamic).toContain("demo-skill");
+		expect(record.context).not.toContain("demo-skill");
 		expect(record.context).not.toContain("PROJECT RULE");
 		expect(record.context).toContain("EXTRA NOTE");
 		expect(record.working).not.toContain("PROJECT RULE");

@@ -27,8 +27,17 @@ export interface CcPromptMode {
 	bare: boolean;
 }
 
-/** Sections of pi's own prompt that the Claude Code profile replaces with its own text or drops. */
-const PI_ONLY_SECTIONS = new Set(["preamble", "tools", "docs", "addendum", "cwd", "memory", "project_context"]);
+/** Sections of pi's own prompt that the Claude Code profile replaces, drops, or places in the session-specific part. */
+const PI_ONLY_SECTIONS = new Set([
+	"preamble",
+	"tools",
+	"docs",
+	"addendum",
+	"cwd",
+	"memory",
+	"project_context",
+	"skills",
+]);
 
 /**
  * Assemble the prompt record. An appended instruction lands in the working prompt, and the identity
@@ -61,8 +70,16 @@ export function assembleCcPrompt(
 function renderDynamic(options: NormalizedBuildSystemPromptOptions): string {
 	const memory = options.sections.memory;
 	const memorySection = memory ? `${CC_MEMORY_ENABLED}\n\n${memory}` : CC_MEMORY_DISABLED;
-	const projectContext = buildSystemPromptSections({ ...options, customPrompt: undefined }).project_context;
-	return [CC_SESSION_GUIDANCE, memorySection, ...(projectContext ? [projectContext] : [])].join("\n\n");
+	const { project_context: projectContext, skills } = buildSystemPromptSections({
+		...options,
+		customPrompt: undefined,
+	});
+	return [
+		CC_SESSION_GUIDANCE,
+		memorySection,
+		...(projectContext ? [projectContext] : []),
+		...(skills ? [skills] : []),
+	].join("\n\n");
 }
 
 function renderContext(options: NormalizedBuildSystemPromptOptions, environment: CcEnvironment): string {
