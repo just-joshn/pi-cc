@@ -3,7 +3,8 @@
  * so the kernel writes "Sandbox: <name>(<pid>) allow process-exec* <path>" to the unified log for each exec
  * a sandboxed process makes, and every descendant of the side inherits the profile and cannot shed it.
  * The process table cannot tell the side's descendants from anyone else's once they are orphaned, and the
- * side's own chain can change directory and close every file; this log names them by pid regardless.
+ * side's own chain can change directory and close every file; this log names those that exec by pid
+ * regardless. A descendant that only forks and never execs writes no line, so this log does not name it.
  *
  * One `log stream` runs for the whole harness. A line can reach it late, so `catchUp` runs a program under
  * a reporting profile of its own and waits for that line: lines for earlier execs have been written by then.

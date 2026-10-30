@@ -20,7 +20,12 @@
  * empty result, so each is reported as incomplete.
  *
  * What this cannot see: a process that exits before the listings, and a descendant of a process that
- * predates the side.
+ * predates the side. It also cannot see a fork-only child: one that never execs writes no exec log line,
+ * so if it also leaves the side's process group and session, changes its working directory away from the
+ * root and holds no file under it, nothing detects it. This is a known gap and is not closed here.
+ *
+ * Concurrent conformance runs can report each other's orphans as unreaped, because an orphan cannot be
+ * told from another run's. That fails closed. Run one conformance run at a time.
  */
 
 import { execFile } from "node:child_process";
