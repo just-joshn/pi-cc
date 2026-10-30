@@ -365,7 +365,7 @@ export class FrameRenderer {
 			uuid: randomUUID(),
 			timestamp: new Date(this.context.now()).toISOString(),
 		};
-		if (this.interrupted && message.isError) {
+		if (this.interrupted) {
 			if (this.tally !== undefined) this.tally.outcome = { kind: "aborted_tools" };
 			return {
 				...frame,

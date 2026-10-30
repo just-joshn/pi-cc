@@ -140,7 +140,11 @@ export class SdkHost {
 			limit.release();
 		}
 		if (limit.reached() && this.options.maxTurns !== undefined) {
-			tally.outcome = { kind: "max_turns", limit: this.options.maxTurns };
+			tally.outcome = {
+				kind: "max_turns",
+				limit: this.options.maxTurns,
+				terminalReason: tally.outcome.kind === "aborted_tools" ? "aborted_tools" : "max_turns",
+			};
 		}
 		const result = this.ledger.result(tally, session.sessionId, Date.now());
 		this.emit(result);

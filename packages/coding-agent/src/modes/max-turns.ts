@@ -25,7 +25,7 @@ export function limitTurns(agent: Agent, limit: number | undefined): TurnLimit {
 		finished += 1;
 		if (finished < limit || turn.toolResults.length === 0) return decision;
 		reached = true;
-		return { action: "end" };
+		return signal?.aborted ? decision : { action: "end" };
 	};
 	return {
 		reached: () => reached,

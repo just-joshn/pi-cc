@@ -67,7 +67,7 @@ export type TurnOutcome =
 	| ApiErrorOutcome
 	| { kind: "aborted_streaming" }
 	| { kind: "aborted_tools" }
-	| { kind: "max_turns"; limit: number };
+	| { kind: "max_turns"; limit: number; terminalReason: "max_turns" | "aborted_tools" };
 
 /** What one user message cost: model calls, tokens per model, and the last assistant text. */
 export class TurnTally {
@@ -225,7 +225,7 @@ function terminalReason(outcome: TurnOutcome): string {
 		case "aborted_tools":
 			return "aborted_tools";
 		case "max_turns":
-			return "max_turns";
+			return outcome.terminalReason;
 	}
 }
 

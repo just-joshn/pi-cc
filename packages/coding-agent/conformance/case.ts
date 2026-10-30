@@ -504,6 +504,9 @@ function asTurns(value: unknown, source: string): Turn[] {
 		}
 		const kind = kinds[0];
 		const holdMs = asOptionalInteger(object.hold_ms, source, `${field}.hold_ms`);
+		if (holdMs !== undefined && (holdMs < 0 || holdMs > MAX_TIMER_MS)) {
+			fail(source, `${field}.hold_ms must be between 0 and ${MAX_TIMER_MS}`);
+		}
 		const hold = holdMs === undefined ? {} : { hold_ms: holdMs };
 		if (kind === "error") {
 			if (object.hold_ms !== undefined) fail(source, `${field}.hold_ms does not apply to an error turn`);
@@ -541,7 +544,22 @@ function asStdin(value: unknown, source: string): StdinSpec {
 	}
 	if (kind === "stream-json") {
 		assertKnownKeys(object, ["kind", "lines"], source, "stdin");
-		return { kind, lines: asOptionalStringArray(object.lines, source, "stdin.lines") ?? [] };
+		const lines = asOptionalStringArray(object.lines, source, "stdin.lines") ?? [];
+		for (const line of lines) {
+			if (line.startsWith("#sleep ")) {
+				const value = line.slice("#sleep ".length);
+				if (!/^\d+$/.test(value) || Number(value) > MAX_TIMER_MS) {
+					fail(source, `stdin #sleep must be an integer between 0 and ${MAX_TIMER_MS}`);
+				}
+			} else if (line.startsWith("#waitfor ")) {
+				try {
+					new RegExp(line.slice("#waitfor ".length));
+				} catch {
+					fail(source, "stdin #waitfor must have a valid regular expression");
+				}
+			}
+		}
+		return { kind, lines };
 	}
 	return fail(source, `unknown stdin.kind "${kind}"`);
 }
