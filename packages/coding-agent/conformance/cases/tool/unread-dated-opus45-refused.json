@@ -1,0 +1,71 @@
+{
+	"id": "tool/unread-dated-opus45-refused",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--model",
+		"claude-opus-4-5-20251101",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"edit.txt": "before\n",
+		"write.txt": "before\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "edit.txt",
+						"old_string": "before",
+						"new_string": "after"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "write.txt",
+						"content": "after\n"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File has not been read yet"
+			]
+		},
+		"files": [
+			"edit.txt",
+			"write.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyMatch": [
+					"File has not been read yet"
+				]
+			}
+		]
+	},
+	"skip": []
+}

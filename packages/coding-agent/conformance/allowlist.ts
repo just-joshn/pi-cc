@@ -58,6 +58,7 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--verbose",
 		"--session-id",
 		"--permission-mode",
+		"--allowedTools",
 		// model selection, which both sides share and which PR #6's cases pin
 		"--model",
 		// settings sources, which PR #5's cases read from the case's own roots
@@ -91,6 +92,23 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"claude-opus-5-5",
 		// values `--permission-mode` and `--tools` write in PR #7's cases
 		"acceptEdits",
+		"bypassPermissions",
+		"Bash",
+		"claude-sonnet-4-5",
+		"claude-opus-4-5",
+		"claude-opus-4-1",
+		"claude-opus-4-6",
+		"claude-opus-4-0",
+		"claude-haiku-4-5-20251001",
+		"claude-sonnet-4-5-20250929",
+		"claude-opus-4-5-20251101",
+		"claude-sonnet-4-20250514",
+		"Claude-Haiku-4-5",
+		"claude-sonnet-5-5",
+		"claude-opus-4-7",
+		"gpt-5",
+		"openai/gpt-5",
+
 		"Read",
 	],
 };
@@ -121,6 +139,7 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
  * what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and `BUN_OPTIONS` would do and why they stay refused.
  */
 const CASE_ENV_KEYS: readonly string[] = [
+	"CLAUDE_CODE_TMPDIR",
 	"ANTHROPIC_AUTH_TOKEN",
 	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_CUSTOM_HEADERS",

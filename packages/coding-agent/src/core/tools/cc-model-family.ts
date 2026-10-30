@@ -104,8 +104,6 @@ interface CcParsedId {
 	legacyVersionFirst: boolean;
 	/** The matched `claude-<family>-<major>[-<minor>]` prefix. */
 	base: string;
-	/** An eight-digit date in a recognized suffix form. */
-	date?: string;
 	/** A suffix the grammar does not recognize, which disqualifies the id from catalog matching. */
 	trailer?: string;
 }
@@ -113,8 +111,11 @@ interface CcParsedId {
 /** The canonical family name Claude Code resolves `id` to, before gate and capability tests. */
 export function claudeModelFamily(id: string): string {
 	const e = id.toLowerCase();
-	for (const candidate of CC_CATALOG_IDS) {
-		if (sameShape(parseId(e), parseId(candidate))) return candidate;
+	const parsed = parseId(e);
+	if (parsed !== null) {
+		for (const candidate of CC_CATALOG_IDS) {
+			if (sameShape(parsed, parseId(candidate))) return candidate;
+		}
 	}
 	for (const [pattern, family] of CC_NAME_PATTERNS) {
 		if (typeof pattern === "string" ? e.includes(pattern) : pattern.test(e)) return family;
@@ -181,12 +182,9 @@ function parseId(e: string): CcParsedId | null {
 		base: parsed.base,
 	};
 	if (parsed.minor !== undefined) result.minor = parsed.minor;
-	if (!isCleanSuffix(rest)) {
-		result.trailer = rest;
-	} else {
-		const date = /(?:-v\d+@|[-@])(\d{8})/.exec(rest)?.[1];
-		if (date !== undefined) result.date = date;
-	}
+	// A recognized date or version-tag suffix (`-v1@20251001`, `@20251001`, `-v1:0`, `-latest`) is
+	// accepted and then ignored: it does not disqualify the id and it does not change the shape.
+	if (!isCleanSuffix(rest)) result.trailer = rest;
 	return result;
 }
 

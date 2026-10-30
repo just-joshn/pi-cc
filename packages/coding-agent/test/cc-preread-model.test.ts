@@ -69,9 +69,9 @@ describe("CC model-specific prior-read checks", () => {
 	it.each(["claude-haiku-4-5", "claude-opus-5-5"])(
 		"recovers a stale Edit on %s with Claude Code's note for every model",
 		async (id) => {
-			const { session, tool, args } = await sessionWithTool(cwd, id, "edit");
+			const { session, tool, readTool, args } = await sessionWithTool(cwd, id, "edit");
 			try {
-				await tool.execute("read", { path: "a.txt" });
+				await readTool.execute("read", { path: "a.txt" });
 				writeFileSync(join(cwd, "a.txt"), "changed before\n");
 				const result = await tool.execute("stale", args);
 				const text = result.content[0].type === "text" ? result.content[0].text : "";
@@ -88,9 +88,9 @@ describe("CC model-specific prior-read checks", () => {
 	it.each(["claude-haiku-4-5", "claude-opus-5-5"])(
 		"refuses a stale Edit on %s whose old_string no longer matches",
 		async (id) => {
-			const { session, tool } = await sessionWithTool(cwd, id, "edit");
+			const { session, tool, readTool } = await sessionWithTool(cwd, id, "edit");
 			try {
-				await tool.execute("read", { path: "a.txt" });
+				await readTool.execute("read", { path: "a.txt" });
 				writeFileSync(join(cwd, "a.txt"), "moved away\n");
 				await expect(
 					tool.execute("stale", { path: "a.txt", edits: [{ oldText: "before", newText: "after" }] }),
@@ -103,9 +103,9 @@ describe("CC model-specific prior-read checks", () => {
 	);
 
 	it.each(["claude-haiku-4-5", "claude-opus-5-5"])("refuses a stale Write on %s for every model", async (id) => {
-		const { session, tool, args } = await sessionWithTool(cwd, id, "write");
+		const { session, tool, readTool, args } = await sessionWithTool(cwd, id, "write");
 		try {
-			await tool.execute("read", { path: "a.txt" });
+			await readTool.execute("read", { path: "a.txt" });
 			writeFileSync(join(cwd, "a.txt"), "changed before\n");
 			await expect(tool.execute("stale", args)).rejects.toThrow(toolUseError(CC_TOOL_TEXT.editStale));
 			expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("changed before\n");
@@ -193,7 +193,7 @@ function tooBigError(field: "limit" | "offset"): string {
 				origin: "int",
 				inclusive: true,
 				path: [field],
-				message: `Too big: expected int to be <=9007199254740991`,
+				message: "Too big: expected int to be <=9007199254740991",
 			},
 		],
 		null,
