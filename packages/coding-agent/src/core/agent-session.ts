@@ -1533,12 +1533,12 @@ export class AgentSession {
 		return this.agent.state.model;
 	}
 
-	/** Current thinking level */
 	/** Whether the operator picked the thinking level, as opposed to the default of the session. */
 	get thinkingLevelChosen(): boolean {
 		return this._thinkingLevelChosen;
 	}
 
+	/** Current thinking level */
 	get thinkingLevel(): ThinkingLevel {
 		return this.agent.state.thinkingLevel;
 	}
