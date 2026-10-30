@@ -1,0 +1,51 @@
+{
+	"id": "memory/nested-agents-md-placement-opus-5-5",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Read the fixtures",
+		"--model",
+		"claude-opus-5-5"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"g/AGENTS.md": "AG_G\n",
+		"g/g.txt": "g\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "g/g.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages?",
+				"count": 2,
+				"bodyMatch": [
+					"\"role\":\"system\",\"content\":\\[\\{\"type\":\"text\",\"text\":\"[^\"]*Contents of [^\"]*/workspace/g/AGENTS\\.md:\\\\n\\\\nAG_G"
+				],
+				"bodyNotMatch": [
+					"\"content\":\"[^\"]*Contents of",
+					"\"role\":\"user\",\"content\":\\[\\{\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of"
+				]
+			}
+		]
+	},
+	"skip": []
+}

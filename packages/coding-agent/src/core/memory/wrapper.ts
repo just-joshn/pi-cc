@@ -1,5 +1,6 @@
 /** How memory files are shown to the model: the startup reminder, the per-file reminder, and the prompt section. */
 
+import type { TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { MemoryFile, MemoryType } from "./discover.ts";
 
 /** The label each memory type carries in the startup reminder. */
@@ -32,6 +33,30 @@ export function nestedReminderPath(text: string): string | undefined {
 	}
 	const end = text.indexOf(":\n\n", NESTED_PREFIX.length);
 	return end === -1 ? undefined : text.slice(NESTED_PREFIX.length, end);
+}
+
+/**
+ * A text block `renderNestedReminder` made. The session marks it when it injects the reminder,
+ * so a block is a reminder because of where it came from, never because its text looks like one.
+ * The mark lives on the block, not in tool result details, whose shape belongs to the tool and
+ * its extensions. Providers read only `text`, and JSON persistence keeps the whole block.
+ */
+export type InjectedReminderBlock = TextContent & { ccMemoryReminder: true };
+
+/** The text block that carries the nested reminder for `file`. */
+export function injectedReminderBlock(file: MemoryFile): InjectedReminderBlock {
+	return { type: "text", text: renderNestedReminder(file), ccMemoryReminder: true };
+}
+
+/** Whether a tool result content block is a reminder the session injected. */
+export function isInjectedReminder(block: ToolResultMessage["content"][number]): block is InjectedReminderBlock {
+	return block.type === "text" && (block as Partial<InjectedReminderBlock>).ccMemoryReminder === true;
+}
+
+/** Whether a reminder made by `renderNestedReminder` is for an AGENTS.md file. */
+export function isAgentsReminder(text: string): boolean {
+	const path = nestedReminderPath(text);
+	return path !== undefined && path.replace(/^.*[\\/]/, "") === "AGENTS.md";
 }
 
 /** The system prompt section that tells the model where auto memory lives. `dir` ends with a separator. */

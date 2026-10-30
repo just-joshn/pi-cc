@@ -1,0 +1,67 @@
+{
+	"id": "memory/nested-memory-on-write-opus-5-5",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Read the fixtures",
+		"--model",
+		"claude-opus-5-5",
+		"--permission-mode",
+		"acceptEdits"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"c/CLAUDE.md": "CL_C\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "c/new.txt",
+						"content": "n\n"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "c/new2.txt",
+						"content": "n\n"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"c/new.txt",
+			"c/new2.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages?",
+				"count": 3,
+				"bodyMatch": [
+					"\\},\\{\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of [^\"]*/workspace/c/CLAUDE\\.md:\\\\n\\\\nCL_C\\\\n\\\\n</system-reminder>(?:\\\\n)?\"(?:,\"cache_control\":\\{[^}]*\\})?\\}"
+				],
+				"bodyNotMatch": [
+					"\"content\":\"[^\"]*Contents of",
+					"\"role\":\"system\",\"content\":(?:\"|\\[\\{\"type\":\"text\",\"text\":\")[^\"]*Contents of",
+					"\"type\":\"text\",\"text\":\"Contents of",
+					"(CL_C[\\s\\S]*){2}"
+				]
+			}
+		]
+	},
+	"skip": []
+}

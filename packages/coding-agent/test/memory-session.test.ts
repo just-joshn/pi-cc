@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { discoverMemory } from "../src/core/memory/discover.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createHarness, type Harness } from "./suite/harness.ts";
-import { createTestResourceLoader } from "./utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
 const cleanups: Array<() => void> = [];
 
@@ -24,7 +24,9 @@ function blocks(message: TranscriptContext["messages"][number] | undefined): Arr
 	return typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content;
 }
 
-async function memoryHarness(): Promise<{ harness: Harness; workspace: string; memoryDir: string }> {
+async function memoryHarness(
+	extensionFactories?: Parameters<typeof createTestExtensionsResult>[0],
+): Promise<{ harness: Harness; workspace: string; memoryDir: string }> {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-memory-session-")));
 	cleanups.push(() => rmSync(root, { recursive: true, force: true }));
 	const workspace = join(root, "workspace");
@@ -33,6 +35,11 @@ async function memoryHarness(): Promise<{ harness: Harness; workspace: string; m
 	writeFileSync(join(workspace, "CLAUDE.md"), "PROJECT_MEMORY");
 	writeFileSync(join(workspace, "sub", "CLAUDE.md"), "SUB_MEMORY");
 	writeFileSync(join(workspace, "sub", "file.txt"), "file body");
+	mkdirSync(join(workspace, "w"), { recursive: true });
+	writeFileSync(join(workspace, "w", "CLAUDE.md"), "WRITE_MEMORY");
+	mkdirSync(join(workspace, "e"), { recursive: true });
+	writeFileSync(join(workspace, "e", "CLAUDE.md"), "EDIT_MEMORY");
+	writeFileSync(join(workspace, "e", "file.txt"), "old");
 	const snapshot = discoverMemory({
 		cwd: workspace,
 		home: join(root, "home"),
@@ -44,7 +51,11 @@ async function memoryHarness(): Promise<{ harness: Harness; workspace: string; m
 		disabled: false,
 		instructionFiles: "claude-md",
 	});
-	const resourceLoader: ResourceLoader = { ...createTestResourceLoader(), getMemory: () => snapshot };
+	const extensionsResult = extensionFactories ? await createTestExtensionsResult(extensionFactories, root) : undefined;
+	const resourceLoader: ResourceLoader = {
+		...createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined),
+		getMemory: () => snapshot,
+	};
 	const harness = await createHarness({ resourceLoader });
 	cleanups.push(() => harness.cleanup());
 	return { harness, workspace, memoryDir };
@@ -100,8 +111,79 @@ describe("memory in an agent session", () => {
 			[expect.stringContaining("file body")],
 		]);
 
+		const stored = harness.session.messages.filter((message) => message.role === "toolResult");
+		expect(stored.map((message) => message.details)).toEqual([{ firstLineNumber: 1 }, { firstLineNumber: 1 }]);
+		expect(stored.map((message) => message.content.map((block) => "ccMemoryReminder" in block))).toEqual([
+			[false, true],
+			[false],
+		]);
+
 		const storedUser = harness.session.messages.find((message) => message.role === "user");
 		expect(JSON.stringify(storedUser)).not.toContain("PROJECT_MEMORY");
+	});
+
+	test.each([42, ["a"], "text", { custom: 1 }])(
+		"keeps hook details %j exactly and still marks the injected reminder",
+		async (details) => {
+			const { harness, workspace } = await memoryHarness([
+				(pi) => {
+					pi.on("tool_result", (event) => (event.toolName === "read" ? { details } : undefined));
+				},
+			]);
+			const requests: TranscriptContext[] = [];
+			harness.setResponses([
+				() =>
+					fauxAssistantMessage([fauxToolCall("read", { path: join(workspace, "sub", "file.txt") })], {
+						stopReason: "toolUse",
+					}),
+				(context) => {
+					requests.push(context);
+					return fauxAssistantMessage("done");
+				},
+			]);
+
+			await harness.session.prompt("go");
+
+			const [stored] = harness.session.messages.filter((message) => message.role === "toolResult");
+			expect(stored?.details).toEqual(details);
+			expect(stored?.content.map((block) => "ccMemoryReminder" in block)).toEqual([false, true]);
+			const sent = requests[0]?.messages.filter((message) => message.role === "toolResult");
+			expect(sent?.map((result) => blocks(result).map((block) => block.text))).toEqual([
+				[expect.stringContaining("file body"), expect.stringContaining("SUB_MEMORY")],
+			]);
+		},
+	);
+
+	test("a successful write or edit brings in the memory of its directory once", async () => {
+		const { harness, workspace } = await memoryHarness();
+		const requests: TranscriptContext[] = [];
+		const respond = (call?: ReturnType<typeof fauxToolCall>) => (context: TranscriptContext) => {
+			requests.push(context);
+			return call ? fauxAssistantMessage([call], { stopReason: "toolUse" }) : fauxAssistantMessage("done");
+		};
+		harness.setResponses([
+			respond(fauxToolCall("write", { path: join(workspace, "w", "a.txt"), content: "a" })),
+			respond(fauxToolCall("write", { path: join(workspace, "w", "b.txt"), content: "b" })),
+			respond(
+				fauxToolCall("edit", {
+					path: join(workspace, "e", "file.txt"),
+					edits: [{ oldText: "old", newText: "new" }],
+				}),
+			),
+			respond(),
+		]);
+
+		await harness.session.prompt("go");
+
+		const results = requests[3].messages.filter((message) => message.role === "toolResult");
+		const text = results.map((result) =>
+			blocks(result)
+				.map((block) => block.text ?? "")
+				.join("\n"),
+		);
+		expect(text[0]).toContain(`Contents of ${join(workspace, "w", "CLAUDE.md")}:\n\nWRITE_MEMORY`);
+		expect(text[1]).not.toContain("WRITE_MEMORY");
+		expect(text[2]).toContain(`Contents of ${join(workspace, "e", "CLAUDE.md")}:\n\nEDIT_MEMORY`);
 	});
 });
 

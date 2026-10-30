@@ -1,0 +1,54 @@
+{
+	"id": "memory/nested-rules-placement-haiku-4-5",
+	"area": "memory",
+	"argv": [
+		"-p",
+		"Read the fixtures",
+		"--model",
+		"claude-haiku-4-5"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}\n",
+		"r/.claude/rules/always.md": "RULE_ALWAYS\n",
+		"r/.claude/rules/cond.md": "---\npaths:\n  - \"**/*.ts\"\n---\nRULE_COND\n",
+		"r/z.ts": "z\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "r/z.ts"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages?",
+				"count": 2,
+				"bodyMatch": [
+					"\"content\":\"[^\"]*\\\\n\\\\n<system-reminder>\\\\nContents of [^\"]*/workspace/r/\\.claude/rules/always\\.md:\\\\n\\\\nRULE_ALWAYS\\\\n\\\\n</system-reminder>",
+					"\"content\":\"[^\"]*\\\\n\\\\n<system-reminder>\\\\nContents of [^\"]*/workspace/r/\\.claude/rules/cond\\.md:\\\\n\\\\nRULE_COND\\\\n\\\\n</system-reminder>"
+				],
+				"bodyNotMatch": [
+					"\"role\":\"user\",\"content\":\\[\\{\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of",
+					"\"role\":\"system\",\"content\":(?:\"|\\[\\{\"type\":\"text\",\"text\":\")[^\"]*Contents of",
+					"\"type\":\"text\",\"text\":\"<system-reminder>\\\\nContents of"
+				]
+			}
+		]
+	},
+	"skip": []
+}
