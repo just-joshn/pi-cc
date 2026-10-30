@@ -33,7 +33,7 @@ export interface WriteOperations {
 	mkdir: (dir: string) => Promise<void>;
 	/**
 	 * Read existing content, for the prior-read check and Claude Code's created or updated wording.
-	 * Without it the prior content is unknown: a write whose Read needs approval is refused, and any
+	 * Without it the prior content is unknown: a write requiring a prior read is refused, and any
 	 * other write reports neither created nor updated.
 	 */
 	readFile?: (absolutePath: string) => Promise<Buffer>;
@@ -52,7 +52,7 @@ export interface WriteToolOptions {
 	operations?: WriteOperations;
 	/** What the model has read, for the read-before-write checks. */
 	readState?: ReadState;
-	/** Whether a Read of this absolute path would need approval. Default: never gated. */
+	/** Whether the model or path requires a prior read. Default: never gated. */
 	isReadGated?: (absolutePath: string) => boolean;
 	/** True when this session runs as a subagent, which may not write report files. */
 	agentContext?: boolean;
@@ -102,14 +102,13 @@ export function createWriteToolDefinition(
 				const record = options?.readState?.get(absolutePath);
 				const gated = options?.isReadGated?.(absolutePath) === true;
 				if (ops.readFile === undefined && gated) {
-					throw new Error("Write operations must provide readFile to check a file whose Read needs approval.");
+					throw new Error("Write operations must provide readFile to check a file requiring a prior read.");
 				}
 				const previous =
 					ops.readFile === undefined ? undefined : await readIfPresent(ops.readFile, ops.stat, absolutePath);
 				throwIfAborted();
 
-				// Both refusals exist to avoid a prompt, so Claude Code raises them only for a path whose
-				// Read would need approval. In an auto-allowed workspace it overwrites the file.
+				// Older models require a prior read even for an auto-allowed workspace path.
 				const readGated = previous !== undefined && gated;
 				if (readGated && record === undefined) throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				if (readGated && record !== undefined && normalizeForComparison(previous) !== record.content) {

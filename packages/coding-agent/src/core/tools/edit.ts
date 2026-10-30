@@ -107,7 +107,7 @@ export interface EditToolOptions {
 	operations?: EditOperations;
 	/** What the model has read, for the read-before-write checks. */
 	readState?: ReadState;
-	/** Whether a Read of this absolute path would need approval. Default: never gated. */
+	/** Whether the model or path requires a prior read. Default: never gated. */
 	isReadGated?: (absolutePath: string) => boolean;
 }
 
@@ -191,8 +191,7 @@ export function createEditToolDefinition(
 				const inContext = raw === undefined || (record !== undefined && record.unseen !== true);
 				const suffix = inContext ? ` ${CC_FILE_STATE_SUFFIX}` : "";
 
-				// Both refusals exist to avoid a prompt, so Claude Code raises them only for a path whose
-				// Read would need approval. In an auto-allowed workspace it applies the edit.
+				// Older models require a prior read even for an auto-allowed workspace path.
 				const readGated = raw !== undefined && options?.isReadGated?.(absolutePath) === true;
 				if (readGated && record === undefined) throw new Error(toolUseError(CC_TOOL_TEXT.editNotRead));
 				if (readGated && record !== undefined && normalizeForComparison(raw) !== record.content) {

@@ -217,8 +217,8 @@ export function createReadToolDefinition(
 										{ type: "text", text: CC_TOOL_TEXT.readShortOffset(firstLineNumber, totalLines) },
 									];
 								} else {
-									// Claude Code reads to the end of the file when no limit, or a limit of 0, is asked for.
-									const lineLimit = limit === undefined || limit === 0 ? undefined : limit;
+									// A nonpositive limit reads to the end, including a trailing empty line.
+									const lineLimit = limit === undefined || limit <= 0 ? undefined : limit;
 									const endIndex =
 										lineLimit === undefined ? totalLines : Math.min(startIndex + lineLimit, totalLines);
 									const selected = allLines.slice(startIndex, endIndex);
@@ -279,7 +279,7 @@ export function createReadToolDefinition(
 							if (readState !== undefined && details?.firstLineNumber !== undefined) {
 								const wholeFile =
 									details.truncation === undefined &&
-									(limit === undefined || limit === 0) &&
+									(limit === undefined || limit <= 0) &&
 									details.firstLineNumber <= 1;
 								readState.record(absolutePath, { content: fileContent, partial: !wholeFile });
 							}

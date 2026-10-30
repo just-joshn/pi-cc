@@ -365,6 +365,19 @@ interface ToolDefinitionEntry {
 	sourceInfo: SourceInfo;
 }
 
+const READ_BEFORE_MUTATION_MODELS = new Set([
+	"claude-opus-4-6",
+	"claude-haiku-4-5",
+	"claude-opus-4-5",
+	"claude-opus-4-1",
+	"claude-opus-4-0",
+	"claude-sonnet-4-5",
+	"claude-sonnet-4-0",
+	"claude-3-7-sonnet",
+	"claude-3-5-sonnet",
+	"claude-3-5-haiku",
+]);
+
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
 	for (const message of messages) {
@@ -3679,6 +3692,7 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
+		const isReadGated = () => READ_BEFORE_MUTATION_MODELS.has(this.model?.id.replace(/\[1m\]$/i, "") ?? "");
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -3693,8 +3707,8 @@ export class AgentSession {
 						readState: this._readState,
 						contextRoomTokens: () => this._readContextRoomTokens(),
 					},
-					edit: { readState: this._readState },
-					write: { readState: this._readState },
+					edit: { readState: this._readState, isReadGated },
+					write: { readState: this._readState, isReadGated },
 				});
 
 		this._baseToolDefinitions = new Map(

@@ -234,6 +234,7 @@ describe("pi tool identity stays inside the process", () => {
 			argv: ["-p", "go"],
 			files: { "fuzzy.txt": "foo  \nx\nfoo \nx\n" },
 			turns: [
+				{ tool_use: { name: "Read", input: { file_path: "fuzzy.txt" } } },
 				{
 					tool_use: {
 						name: "Edit",
@@ -243,7 +244,7 @@ describe("pi tool identity stays inside the process", () => {
 			],
 		});
 		roots.push(join(result.workspace, ".."));
-		expect(result.results[0]?.text).toContain("String to replace not found");
+		expect(result.results[1]?.text).toContain("String to replace not found");
 		expect(readFileSync(join(result.workspace, "fuzzy.txt"), "utf-8")).toBe("foo  \nx\nfoo \nx\n");
 	});
 

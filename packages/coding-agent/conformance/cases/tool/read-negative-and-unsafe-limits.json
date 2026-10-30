@@ -1,0 +1,92 @@
+{
+	"id": "tool/read-negative-and-unsafe-limits",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--model",
+		"claude-opus-5-5",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"read.txt": "before\n",
+		"string.txt": "string\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "read.txt",
+						"limit": -1
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "string.txt",
+						"limit": "-1"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "read.txt",
+						"limit": "99999999999999999999999"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "read.txt",
+						"limit": 9007199254740991
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"1\\\\tbefore\\\\n2\\\\t",
+				"1\\\\tstring\\\\n2\\\\t",
+				"too_big",
+				"Too big: expected int to be <=9007199254740991"
+			]
+		},
+		"files": [
+			"read.txt",
+			"string.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 5,
+				"bodyMatch": [
+					"too_big",
+					"Too big: expected int to be <=9007199254740991"
+				]
+			}
+		]
+	},
+	"skip": []
+}
