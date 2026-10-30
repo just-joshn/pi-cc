@@ -435,7 +435,8 @@ export function renderProfile(options: ProfileOptions): string {
 			"/Library/Keychains",
 			"/private/var/db/dslocal",
 			"/Library/Application Support/ClaudeCode",
-			"/etc/claude-code",
+			// `/etc` links to `/private/etc` and Seatbelt matches the resolved path, so only the canonical spelling denies.
+			"/private/etc/claude-code",
 		].map((path) => `(deny file-read* (subpath ${quote(path)}))`),
 		...executableRoots.map((path) => `(allow file-read* (subpath ${quote(path)}))`),
 		`(allow file-read* (subpath ${quote(roots.root)}))`,
