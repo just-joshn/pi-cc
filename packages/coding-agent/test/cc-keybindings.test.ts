@@ -120,6 +120,11 @@ describe("CC keybinding file import", () => {
 		expect(importCcKeybindings(cc({ "ctrl+y": action }), new Set()).bindings[0]?.action).toBe(expected);
 	});
 
+	it("treats all CC root metadata as opaque and accepts CC's literal space spelling", () => {
+		expect(importCcKeybindings({ ...cc({ "ctrl+y": "chat:submit" }), $schema: 42 }, new Set()).bindings).toHaveLength(1);
+		expect(parseKeySequence(" ")).toEqual(["space"]);
+	});
+
 	it("normalizes aliases and validates each stroke", () => {
 		expect(parseKeySequence(" Opt+K   CTRL+S ")).toEqual(["alt+k", "ctrl+s"]);
 		expect(parseKeySequence("meta+PageUp")).toEqual(["alt+pageUp"]);
@@ -192,10 +197,9 @@ describe("prompt chord dispatch", () => {
 		expect(editor.render(80).join("\n")).not.toContain("Chord cancelled");
 	});
 
-	it("prints import diagnostics before interactive startup", () => {
-		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-		load(cc({ "ctrl+y": "unknown:action" }));
-		expect(warning).toHaveBeenCalledWith(expect.stringContaining("Unsupported keybinding action: unknown:action"));
+	it("provides source-qualified import diagnostics for startup warnings", () => {
+		const { path, manager } = load(cc({ "ctrl+y": "unknown:action" }));
+		expect(manager.getImportDiagnostics()).toEqual([`${path}: Unsupported keybinding action: unknown:action`]);
 	});
 	it("does not treat object prototype properties as action aliases", () => {
 		const imported = importCcKeybindings(cc({ "ctrl+k": "constructor", "ctrl+s": "__proto__" }), new Set());
