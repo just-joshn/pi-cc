@@ -42,10 +42,11 @@ const execFileAsync = promisify(execFile);
  * Moving into another group (`set -m`) does not escape this: the process keeps its working directory,
  * so the next scan sees it and kills its new group. What does escape is a chain that moves into a new
  * group in every generation, which no signal outruns, and a process that is not working inside the
- * paths at all (`cd /` first, no file held), which no scan sees. The reap cannot claim those are gone,
- * so `scanWorkspace` follows it with a check that nothing under the paths still changes. A scan that
- * cannot run is not a clean scan, so the reap then reports that it did not converge. It returns before
- * the caller hashes the workspace, so a delayed writer cannot change what the case compared.
+ * paths at all (`cd /` first, no file held), which no scan of what a process holds sees. The reap cannot
+ * claim those are gone, so `scanWorkspace` follows it with a comparison of the process table against a
+ * baseline taken before the side started (`processes.ts`). A scan that cannot run is not a clean scan, so
+ * the reap then reports that it did not converge. It returns before the caller hashes the workspace, so
+ * a delayed writer cannot change what the case compared.
  */
 export async function reap(root: string, options: ReapOptions = {}): Promise<ReapResult> {
 	const lsof = options.lsof ?? LSOF;

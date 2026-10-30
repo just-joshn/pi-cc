@@ -29,7 +29,8 @@ import {
 import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Baseline } from "./processes.ts";
+import type { Baseline, ProcessRow, Unaccounted } from "./processes.ts";
+import { findUnaccounted } from "./processes.ts";
 import { reap } from "./reap.ts";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
@@ -219,6 +220,8 @@ export interface TreeScan {
 	/** The text of the wanted paths, read in the same pass that hashed them. */
 	text: Map<string, string>;
 	violations: Violation[];
+	/** New processes the process table showed after the run, reported and never signalled. */
+	leftBehind: ProcessRow[];
 }
 
 /**
@@ -234,7 +237,7 @@ export interface TreeScan {
  * rather than overflowing the stack.
  */
 export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan {
-	const scan: TreeScan = { entries: new Map(), text: new Map(), violations: [] };
+	const scan: TreeScan = { entries: new Map(), text: new Map(), violations: [], leftBehind: [] };
 	const wantedPaths = new Set(wanted);
 	const root = realpathOrNull(dir);
 	if (root === null) {
@@ -271,12 +274,12 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
  * the moved tree. A process found there is killed and reported as `unreaped`: the reap that ran before
  * the move should have found it, so the digest is only taken once a scan finds the tree free of processes.
  *
- * No scan can see a process that holds nothing under those paths, or a chain that is always one
- * generation ahead of it. Whatever such a process does to anything the harness reads is a write under
- * the root or the moved tree, because nothing else the harness reads can change: the mock's log is under
- * `out/`, which the profile denies the side. So the tree must also stay unchanged for a short window
- * after the reap, and a change is reported as `unreaped` too. A writer slower than the window is not
- * caught, and one that never writes there cannot change what a case compares.
+ * No scan of what a process holds can see one that holds nothing under those paths, or a chain that is
+ * always one generation ahead of it. So the reap is followed by a comparison of the process table with
+ * `baseline`, taken before the side started: a new live process that is not provably someone else's is
+ * reported as `unreaped` and left running, because the harness cannot prove it is the side's. A missing
+ * baseline or an unreadable listing is reported the same way, so nothing passes on a check that did not run.
+ * Quiet time after the reap would prove nothing about such a process and is not used.
  *
  * A workspace the side removed is scanned in place and reports as unreadable. Any other failed move
  * reports `workspace-unmovable` and reads nothing, because the tree is still inside the side's reach.
@@ -284,8 +287,8 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
 export async function scanWorkspace(
 	roots: Roots,
 	wanted: readonly string[],
-	_baseline: Baseline | null,
-	_options: { ps?: string } = {},
+	baseline: Baseline | null,
+	options: { ps?: string } = {},
 ): Promise<TreeScan> {
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
 	try {
@@ -293,50 +296,27 @@ export async function scanWorkspace(
 	} catch {
 		// A failed rename does not say which end was missing or denied, so only a source the lookup
 		// itself reports absent counts as removed.
-		if (lstatErrorCode(roots.workspace) === "ENOENT") return hashTree(roots.workspace, wanted);
-		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
+		if (lstatErrorCode(roots.workspace) !== "ENOENT") {
+			return {
+				entries: new Map(),
+				text: new Map(),
+				violations: [{ kind: "workspace-unmovable", path: null }],
+				leftBehind: [],
+			};
+		}
+		const left = await findUnaccounted(baseline, options.ps);
+		return withProcessFindings(hashTree(roots.workspace, wanted), left, false);
 	}
 	const reaped = await reap(roots.root, { moved: snapshot, cleanSweeps: 1 });
-	const quiet = await staysUnchanged([roots.root, snapshot], roots.out);
-	const scan = hashTree(snapshot, wanted);
-	if (reaped.survived || !reaped.converged || !quiet) scan.violations.push({ kind: "unreaped", path: null });
+	const left = await findUnaccounted(baseline, options.ps);
+	return withProcessFindings(hashTree(snapshot, wanted), left, reaped.survived || !reaped.converged);
+}
+
+function withProcessFindings(scan: TreeScan, left: Unaccounted, reapFailed: boolean): TreeScan {
+	scan.leftBehind = left.processes;
+	if (reapFailed || !left.complete || left.processes.length > 0)
+		scan.violations.push({ kind: "unreaped", path: null });
 	return scan;
-}
-
-const QUIET_WINDOW_MS = 150;
-
-/** Whether no file under `paths` (except under `skip`) changes size, mtime or name over a short window. */
-async function staysUnchanged(paths: readonly string[], skip: string): Promise<boolean> {
-	const before = treeSignature(paths, skip);
-	await new Promise((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
-	return treeSignature(paths, skip) === before;
-}
-
-/** Every entry's name, size and mtime, read without following a link or opening a file. */
-function treeSignature(paths: readonly string[], skip: string): string {
-	const lines: string[] = [];
-	const pending = [...paths];
-	while (pending.length > 0) {
-		const directory = pending.pop();
-		if (directory === undefined || directory === skip) continue;
-		const stat = lstatOrNull(directory);
-		if (stat === null) continue;
-		lines.push(`${directory}:${stat.mtimeMs}`);
-		let names: string[];
-		try {
-			names = readdirSync(directory).sort();
-		} catch {
-			continue;
-		}
-		for (const name of names) {
-			const path = join(directory, name);
-			const entry = lstatOrNull(path);
-			if (entry === null) continue;
-			if (entry.isDirectory()) pending.push(path);
-			else lines.push(`${path}:${entry.size}:${entry.mtimeMs}`);
-		}
-	}
-	return lines.sort().join("\n");
 }
 
 /** The paths that exist, where a dangling link counts as present: the side tried to create something. */

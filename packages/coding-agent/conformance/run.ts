@@ -226,12 +226,18 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		const cwd = testCase.cwd === undefined ? roots.workspace : join(roots.workspace, testCase.cwd);
 		mkdirSync(cwd, { recursive: true });
 		const workspaceBefore = hashTree(roots.workspace);
+		const baseline = await takeBaseline();
 		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
-		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase), await takeBaseline());
+		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase), baseline);
 		const violations: Violation[] = [...workspaceAfter.violations];
 		if (result.reaped.survived) violations.push({ kind: "survivor", path: null });
 		if (!result.reaped.converged && !violations.some((violation) => violation.kind === "unreaped")) {
 			violations.push({ kind: "unreaped", path: null });
+		}
+		for (const left of workspaceAfter.leftBehind) {
+			console.warn(
+				`${testCase.id} (${side.name}): left running, not signalled: pid ${left.pid} started ${left.start} ${left.command}`,
+			);
 		}
 		const observation: Observation = {
 			timedOut: result.timedOut,
