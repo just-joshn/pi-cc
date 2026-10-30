@@ -32,7 +32,17 @@ const gatedModels = [
 	"Claude-Haiku-4-5",
 ];
 
-const ungatedModels = ["claude-opus-4-7", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-5", "my-gpt-5-20251001"];
+const ungatedModels = [
+	"claude-opus-4-7",
+	"claude-opus-5-5",
+	"claude-sonnet-5-5",
+	"gpt-5",
+	"my-gpt-5-20251001",
+	"claude-opus-4-10",
+	"claude-opus-40",
+	"claude-sonnet-40",
+	"claude-sonnet-4-10-20251001",
+];
 
 describe("CC model-specific prior-read checks", () => {
 	let cwd: string;
