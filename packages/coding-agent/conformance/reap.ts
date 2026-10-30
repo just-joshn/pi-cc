@@ -7,42 +7,61 @@ export interface ReapResult {
 	converged: boolean;
 }
 
-type Sweep = { kind: "clean" } | { kind: "killed"; groups: number[] } | { kind: "unavailable" };
+export interface ReapOptions {
+	/** Where the workspace moved to after the side exited, which a process can still reach through a working directory or an open file. */
+	moved?: string;
+	lsof?: string;
+	ps?: string;
+	deadlineMs?: number;
+}
 
 const CLEAN_SWEEPS = 3;
 const REAP_DEADLINE_MS = 10_000;
 const LSOF = "/usr/sbin/lsof";
+const PS = "/bin/ps";
+const MAX_LISTING_BYTES = 256 * 1024 * 1024;
 
 /**
- * Kills the side's process group and every process group still working inside the side's root, and
- * returns once repeated scans find nothing. The side's group covers a child that stayed in it. The scan
- * covers a SessionStart hook, which Claude Code spawns detached: the hook shell lands in its own process
- * group, so whatever it starts survives the side's group. A hook can re-fork faster than a scan runs
- * (`/bin/sh ./hop.sh & exit 0`: each generation starts the next and exits), so killing the pids a scan
- * saw would only kill ones that had already gone. Descendants keep their group, and `lsof` reports a
- * process's group together with its working directory, so the scan kills whole groups instead. A group
- * that was killed must also be gone from the kernel before the reap returns. A scan that cannot run is
- * not a clean scan: the reap reports that it did not converge. It returns before the caller hashes the
- * workspace, so a delayed writer cannot change what the case compared.
+ * Kills every process group with a member working inside the side's root, or inside `moved` once the
+ * workspace has moved, and returns once repeated scans find nothing. A member is a process whose working
+ * directory or any open file is under one of those paths. A SessionStart hook is spawned detached, so
+ * its shell lands in its own process group and whatever it starts survives the side's group.
+ *
+ * A hook can re-fork faster than a scan runs (`/bin/sh ./hop.sh & exit 0`: each generation starts the
+ * next and exits), so the reap signals whole groups, which the kernel kills atomically, instead of the
+ * pids a scan saw. A group is signalled only in a sweep that saw one of its members, never from an
+ * earlier sweep's memory, because a group id can be recycled by an unrelated process once its members
+ * are gone.
+ *
+ * Moving into another group (`set -m`) does not escape this: the process keeps its working directory,
+ * so the next scan sees it and kills its new group. What does escape is a chain that moves into a new
+ * group in every generation, which no signal outruns, and a process that is not working inside the
+ * paths at all (`cd /` first, no file held), which no scan sees. The reap cannot claim those are gone,
+ * so `scanWorkspace` follows it with a check that nothing under the paths still changes. A scan that
+ * cannot run is not a clean scan, so the reap then reports that it did not converge. It returns before
+ * the caller hashes the workspace, so a delayed writer cannot change what the case compared.
  */
-export async function reap(pgid: number, root: string, lsof: string = LSOF): Promise<ReapResult> {
-	killGroup(pgid);
+export async function reap(root: string, options: ReapOptions = {}): Promise<ReapResult> {
+	const tools = { lsof: options.lsof ?? LSOF, ps: options.ps ?? PS };
+	const held = options.moved === undefined ? [root] : [root, options.moved];
 	let survived = false;
 	let clean = 0;
 	const killed = new Set<number>();
-	const deadline = Date.now() + REAP_DEADLINE_MS;
+	const deadline = Date.now() + (options.deadlineMs ?? REAP_DEADLINE_MS);
 	while (clean < CLEAN_SWEEPS || [...killed].some(groupExists)) {
 		if (Date.now() >= deadline) return { survived, converged: false };
-		const sweep = sweepGroups(root, lsof);
-		if (sweep.kind === "unavailable") return { survived, converged: false };
-		if (sweep.kind === "killed") {
+		const found = observedGroups(held, tools);
+		if (found === null) return { survived, converged: false };
+		if (found.size === 0) {
+			clean += 1;
+		} else {
 			survived = true;
 			clean = 0;
-			for (const group of sweep.groups) killed.add(group);
-		} else {
-			clean += 1;
+			for (const group of found) {
+				killGroup(group);
+				killed.add(group);
+			}
 		}
-		for (const group of killed) killGroup(group);
 		await delay(25);
 	}
 	return { survived, converged: true };
@@ -54,6 +73,7 @@ export function killGroup(pgid: number): void {
 	} catch {}
 }
 
+/** Signal 0 only asks whether the group exists; it delivers nothing. */
 function groupExists(pgid: number): boolean {
 	try {
 		process.kill(-pgid, 0);
@@ -64,43 +84,44 @@ function groupExists(pgid: number): boolean {
 	}
 }
 
-function sweepGroups(root: string, lsof: string): Sweep {
-	const cwd = spawnSync(lsof, ["-a", "-d", "cwd", "-w", "-n", "-P", "-Fpgn"], {
+/** The groups with a member working inside `held` right now, or null when a scan could not run. */
+function observedGroups(held: string[], tools: { lsof: string; ps: string }): Set<number> | null {
+	const files = spawnSync(tools.lsof, ["-w", "-n", "-P", "-Fpgfn"], {
 		encoding: "utf8",
 		timeout: 15_000,
+		maxBuffer: MAX_LISTING_BYTES,
 	});
-	if (cwd.error !== undefined || cwd.status !== 0 || cwd.stdout === null || cwd.stdout.length === 0) {
-		warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories");
-		return { kind: "unavailable" };
+	if (files.error !== undefined || files.status !== 0 || !files.stdout) {
+		warnOnce("survivor sweep unavailable: /usr/sbin/lsof could not report working directories and open files");
+		return null;
 	}
-	const own = ownGroup();
+	const own = ownGroup(tools.ps);
 	if (own === null) {
 		warnOnce("survivor sweep unavailable: /bin/ps could not report the harness's own process group");
-		return { kind: "unavailable" };
+		return null;
 	}
 	const groups = new Set<number>();
 	let group: number | null = null;
-	for (const line of cwd.stdout.split("\n")) {
+	for (const line of files.stdout.split("\n")) {
 		if (line.startsWith("g")) {
 			group = Number.parseInt(line.slice(1), 10);
-			continue;
-		}
-		if (line.startsWith("n") && group !== null && group > 1 && group !== own) {
-			const path = line.slice(1);
-			if (path === root || path.startsWith(`${root}/`)) groups.add(group);
+		} else if (line.startsWith("n") && group !== null && held.some((path) => isInside(path, line.slice(1)))) {
+			groups.add(group);
 		}
 	}
-	for (const found of groups) killGroup(found);
-	return groups.size === 0 ? { kind: "clean" } : { kind: "killed", groups: [...groups] };
+	// Group 0 and 1 are the kernel and launchd, and the harness's own group is never the side's.
+	for (const found of groups) if (found <= 1 || found === own) groups.delete(found);
+	return groups;
 }
 
-function ownGroup(): number | null {
-	const listed = spawnSync("/bin/ps", ["-o", "pgid=", "-p", String(process.pid)], {
-		encoding: "utf8",
-		timeout: 5_000,
-	});
+function ownGroup(ps: string): number | null {
+	const listed = spawnSync(ps, ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8", timeout: 5_000 });
 	const parsed = Number.parseInt(listed.stdout ?? "", 10);
 	return listed.error !== undefined || Number.isNaN(parsed) ? null : parsed;
+}
+
+function isInside(directory: string, path: string): boolean {
+	return path === directory || path.startsWith(`${directory}/`);
 }
 
 export const WARNINGS: string[] = [];

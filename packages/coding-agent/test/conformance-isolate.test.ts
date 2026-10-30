@@ -348,7 +348,7 @@ describe("seeding a case's files", () => {
 	});
 });
 
-describe("scanning the workspace after the side exits", () => {
+describe.skipIf(!darwin)("scanning the workspace after the side exits", () => {
 	function sideRoots() {
 		const roots = createRoots(mkdtempSync(join(tmpdir(), "pi-cc-take-")), "take", "claude");
 		tempDirs.push(roots.root);
@@ -356,34 +356,34 @@ describe("scanning the workspace after the side exits", () => {
 		return roots;
 	}
 
-	test("a workspace that moves is scanned where it landed", () => {
+	test("a workspace that moves is scanned where it landed", async () => {
 		const roots = sideRoots();
 
-		const scan = scanWorkspace(roots, ["result.txt"]);
+		const scan = await scanWorkspace(roots, ["result.txt"]);
 
 		expect(scan.violations).toEqual([]);
 		expect(scan.text.get("result.txt")).toBe("result\n");
 		expect(existsSync(roots.workspace)).toBe(false);
 	});
 
-	test("a workspace that cannot move reports the move, not an unreadable tree", () => {
+	test("a workspace that cannot move reports the move, not an unreadable tree", async () => {
 		const roots = sideRoots();
 		const taken = join(dirname(roots.root), "snapshot-claude");
 		mkdirSync(join(taken, "occupied"), { recursive: true });
 		tempDirs.push(taken);
 
-		const scan = scanWorkspace(roots, ["result.txt"]);
+		const scan = await scanWorkspace(roots, ["result.txt"]);
 
 		expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
 		expect(scan.entries.size).toBe(0);
 		expect(existsSync(join(roots.workspace, "result.txt"))).toBe(true);
 	});
 
-	test("a workspace behind an inaccessible parent is a failed move, not an unreadable tree", () => {
+	test("a workspace behind an inaccessible parent is a failed move, not an unreadable tree", async () => {
 		const roots = sideRoots();
 		chmodSync(roots.root, 0o000);
 		try {
-			const scan = scanWorkspace(roots, []);
+			const scan = await scanWorkspace(roots, []);
 
 			expect(scan.violations).toEqual([{ kind: "workspace-unmovable", path: null }]);
 		} finally {
@@ -391,11 +391,11 @@ describe("scanning the workspace after the side exits", () => {
 		}
 	});
 
-	test("a workspace the side removed is still unreadable", () => {
+	test("a workspace the side removed is still unreadable", async () => {
 		const roots = sideRoots();
 		rmSync(roots.workspace, { recursive: true });
 
-		const scan = scanWorkspace(roots, []);
+		const scan = await scanWorkspace(roots, []);
 
 		expect(scan.violations).toEqual([{ kind: "unreadable", path: null }]);
 	});
@@ -414,7 +414,7 @@ describe("scanning the workspace after the side exits", () => {
 
 	const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-	test.skipIf(!darwin)("a process still holding a workspace file after the move is killed and reported", async () => {
+	test("a process still holding a workspace file after the move is killed and reported", async () => {
 		const roots = sideRoots();
 		const pid = startFileHolder(roots, "exec /bin/sleep 60");
 		await delay(300);

@@ -33,7 +33,7 @@ const { spawn } = require("node:child_process");
 spawn("/bin/sh", ["-c", process.argv[1]], { detached: true, stdio: "ignore", cwd: process.cwd() }).unref();
 `;
 
-function startChain(hookCommand: string): { root: string; pgid: number } {
+function startChain(hookCommand: string): { root: string } {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
 	roots.push(root);
 	writeFileSync(join(root, "hop.sh"), HOP);
@@ -43,7 +43,7 @@ function startChain(hookCommand: string): { root: string; pgid: number } {
 		stdio: "ignore",
 	});
 	side.unref();
-	return { root, pgid: side.pid ?? 0 };
+	return { root };
 }
 
 function cwdHolders(root: string): string[] {
@@ -62,6 +62,10 @@ describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 	test.each([
 		["a bare re-forking script", "/bin/sh ./hop.sh & exit 0"],
 		["the same script started through nohup", "nohup /bin/sh ./hop.sh >/dev/null 2>&1 & exit 0"],
+		[
+			"the same script moved into its own process group by set -m",
+			"set -m; /bin/sh ./hop.sh & echo x >>gen.log; exit 0",
+		],
 	])(
 		"%s is gone after the reap and stays gone",
 		async (_name, hookCommand) => {
@@ -69,7 +73,7 @@ describe.skipIf(!darwin)("reaping a process chain that re-forks itself", () => {
 			await delay(150);
 			expect(generations(chain.root)).toBeGreaterThan(1);
 
-			const reaped = await reap(chain.pgid, chain.root);
+			const reaped = await reap(chain.root);
 			const afterReap = generations(chain.root);
 			await delay(400);
 
@@ -95,7 +99,7 @@ describe.skipIf(!darwin)("a reap whose scan cannot run", () => {
 		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
 		roots.push(root);
 
-		const reaped = await reap(2 ** 22, root, lsof);
+		const reaped = await reap(root, { lsof });
 
 		expect(reaped).toEqual({ survived: false, converged: false });
 	});
@@ -108,7 +112,7 @@ describe.skipIf(!darwin)("a reap whose scan cannot run", () => {
 		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
 		roots.push(root);
 
-		const reaped = await reap(2 ** 22, root, lsof);
+		const reaped = await reap(root, { lsof });
 
 		expect(reaped).toEqual({ survived: false, converged: false });
 	});
@@ -120,7 +124,7 @@ describe.skipIf(!darwin)("a reap and the harness's own process group", () => {
 		roots.push(root);
 		const bystander = spawn("/bin/sleep", ["30"], { cwd: root, stdio: "ignore" });
 
-		const reaped = await reap(2 ** 22, root);
+		const reaped = await reap(root);
 
 		const alive = bystander.exitCode === null && bystander.signalCode === null;
 		bystander.kill("SIGKILL");
@@ -131,7 +135,6 @@ describe.skipIf(!darwin)("a reap and the harness's own process group", () => {
 
 interface SideChain {
 	roots: Roots;
-	pgid: number;
 }
 
 /** Starts a side the way the runner does (harness env, cwd in the workspace) whose only child is `command`. */
@@ -149,38 +152,10 @@ function startSideChain(command: (roots: Roots) => string, files: (roots: Roots)
 		stdio: "ignore",
 	});
 	side.unref();
-	return { roots: sideRoots, pgid: side.pid ?? 0 };
+	return { roots: sideRoots };
 }
 
-function hopScript(roots: Roots, preamble: string): string {
-	const hop = join(roots.workspace, "hop.sh");
-	return [
-		preamble,
-		`[ -e ${join(roots.root, "stop")} ] && exit 0`,
-		`echo x >> ${join(roots.workspace, "gen.log")}`,
-		`/bin/sh ${hop} &`,
-		"exit 0",
-		"",
-	].join("\n");
-}
-
-describe.skipIf(!darwin)("reaping a chain that leaves the root before it forks", () => {
-	test("a chain that changes directory to / in every generation is gone after the reap", async () => {
-		const chain = startSideChain(
-			(side) => `/bin/sh ${join(side.workspace, "hop.sh")} & exit 0`,
-			(side) => ({ "hop.sh": hopScript(side, "cd /") }),
-		);
-		await delay(150);
-		expect(generations(chain.roots.workspace)).toBeGreaterThan(1);
-
-		const reaped = await reap(chain.pgid, chain.roots.root);
-		const afterReap = generations(chain.roots.workspace);
-		await delay(400);
-
-		expect(generations(chain.roots.workspace)).toBe(afterReap);
-		expect(reaped).toEqual({ survived: true, converged: true });
-	}, 30_000);
-
+describe.skipIf(!darwin)("reaping beyond the working-directory scan", () => {
 	test("a process that only holds a file open inside the root, with its environment cleared, is gone after the reap", async () => {
 		const chain = startSideChain(
 			(side) =>
@@ -191,26 +166,36 @@ describe.skipIf(!darwin)("reaping a chain that leaves the root before it forks",
 		const pid = Number.parseInt(readFileSync(join(chain.roots.workspace, "pid"), "utf8"), 10);
 		expect(isAlive(pid)).toBe(true);
 
-		const reaped = await reap(chain.pgid, chain.roots.root);
+		const reaped = await reap(chain.roots.root);
 
 		expect(isAlive(pid)).toBe(false);
 		expect(reaped).toEqual({ survived: true, converged: true });
 	}, 30_000);
 
-	test("a chain that changes process group in every generation is either gone or reported unconverged", async () => {
-		const chain = startSideChain(
-			(side) => `/bin/sh ${join(side.workspace, "hop.sh")} & exit 0`,
-			(side) => ({ "hop.sh": hopScript(side, "set -m\ncd /") }),
+	test("a chain that moves into a new group every generation is reported unconverged", async () => {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-fake-lsof-")));
+		roots.push(dir);
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-cc-reap-")));
+		roots.push(root);
+		const lsof = join(dir, "lsof");
+		const counter = join(dir, "count");
+		writeFileSync(
+			lsof,
+			`#!/bin/sh\nn=$(( $(cat ${counter} 2>/dev/null || echo 0) + 1 ))\necho $n > ${counter}\nprintf 'p1\\ng%s\\nfcwd\\nn${root}\\n' $((4242000 + n))\n`,
+			{ mode: 0o755 },
 		);
-		await delay(150);
+		const kill = vi.spyOn(process, "kill").mockImplementation((_pid, signal) => {
+			if (signal === 0) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+			return true;
+		});
 
-		const reaped = await reap(chain.pgid, chain.roots.root);
-		const afterReap = generations(chain.roots.workspace);
-		await delay(400);
-
-		if (reaped.converged) expect(generations(chain.roots.workspace)).toBe(afterReap);
-		expect(reaped.survived).toBe(true);
-	}, 40_000);
+		try {
+			const reaped = await reap(root, { lsof, deadlineMs: 1500 });
+			expect(reaped).toEqual({ survived: true, converged: false });
+		} finally {
+			kill.mockRestore();
+		}
+	}, 30_000);
 });
 
 function isAlive(pid: number): boolean {
@@ -243,7 +228,7 @@ describe.skipIf(!darwin)("the signals a reap sends", () => {
 		});
 
 		try {
-			const reaped = await reap(2 ** 22, root, lsof);
+			const reaped = await reap(root, { lsof });
 			expect(reaped).toEqual({ survived: true, converged: true });
 		} finally {
 			kill.mockRestore();

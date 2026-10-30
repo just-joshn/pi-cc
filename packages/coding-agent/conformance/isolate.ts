@@ -29,6 +29,7 @@ import {
 import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { reap } from "./reap.ts";
 
 /** The only programs a case may run besides the two sides. Case data names one of these keys, never a path. */
 export const PROBES = { ls: "/bin/ls", nc: "/usr/bin/nc", open: "/usr/bin/open" } as const;
@@ -262,13 +263,16 @@ export function hashTree(dir: string, wanted: readonly string[] = []): TreeScan 
 }
 
 /**
- * Moves the workspace out of the side's write grant, then hashes it where it landed. A process that
- * outlived the side can then neither add nor change a file in the tree the harness hashes, because the
- * profile grants writes only under `roots.root`. A workspace the side removed is scanned in place and
- * reports as unreadable. Any other failed move reports `workspace-unmovable` and reads nothing, because
- * the tree is still inside the side's reach.
+ * Moves the workspace out of the side's write grant, waits until nothing holds it, then hashes it where
+ * it landed. The profile grants writes only under `roots.root`, so a process that outlived the side can
+ * no longer open a file in the moved tree. One that already had a file open or its working directory
+ * there can still write through that handle, so the move is followed by a reap over the side root and
+ * the moved tree. A process found there is killed and reported as `unreaped`: the reap that ran before
+ * the move should have found it, so the digest is only taken once a scan finds the tree free of processes.
+ * A workspace the side removed is scanned in place and reports as unreadable. Any other failed move
+ * reports `workspace-unmovable` and reads nothing, because the tree is still inside the side's reach.
  */
-export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan {
+export async function scanWorkspace(roots: Roots, wanted: readonly string[]): Promise<TreeScan> {
 	const snapshot = join(dirname(roots.root), `snapshot-${roots.side}`);
 	try {
 		renameSync(roots.workspace, snapshot);
@@ -278,7 +282,10 @@ export function scanWorkspace(roots: Roots, wanted: readonly string[]): TreeScan
 		if (lstatErrorCode(roots.workspace) === "ENOENT") return hashTree(roots.workspace, wanted);
 		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
 	}
-	return hashTree(snapshot, wanted);
+	const reaped = await reap(roots.root, { moved: snapshot });
+	const scan = hashTree(snapshot, wanted);
+	if (reaped.survived || !reaped.converged) scan.violations.push({ kind: "unreaped", path: null });
+	return scan;
 }
 
 /** The paths that exist, where a dangling link counts as present: the side tried to create something. */

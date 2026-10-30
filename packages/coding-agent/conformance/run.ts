@@ -226,10 +226,12 @@ async function runSide(testCase: ConformanceCase, side: Side, runRoot: string): 
 		mkdirSync(cwd, { recursive: true });
 		const workspaceBefore = hashTree(roots.workspace);
 		const result = await runSandboxed(profilePath, argv, cwd, roots, env, testCase.stdin, testCase.timeout_ms);
-		const workspaceAfter = scanWorkspace(roots, expectedFilePaths(testCase));
+		const workspaceAfter = await scanWorkspace(roots, expectedFilePaths(testCase));
 		const violations: Violation[] = [...workspaceAfter.violations];
 		if (result.reaped.survived) violations.push({ kind: "survivor", path: null });
-		if (!result.reaped.converged) violations.push({ kind: "unreaped", path: null });
+		if (!result.reaped.converged && !violations.some((violation) => violation.kind === "unreaped")) {
+			violations.push({ kind: "unreaped", path: null });
+		}
 		const observation: Observation = {
 			timedOut: result.timedOut,
 			exitCode: result.exitCode,
@@ -325,8 +327,7 @@ function runSandboxed(
 			stdinAbort.abort();
 			await stdinDone;
 			clearTimeout(timer);
-			const reaped =
-				child.pid === undefined ? { survived: false, converged: true } : await reap(child.pid, roots.root);
+			const reaped = child.pid === undefined ? { survived: false, converged: true } : await reap(roots.root);
 			if (stdinFailure !== undefined) {
 				reject(stdinFailure);
 				return;
