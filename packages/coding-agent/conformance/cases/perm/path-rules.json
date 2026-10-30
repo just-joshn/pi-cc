@@ -1,0 +1,113 @@
+{
+	"id": "perm/path-rules",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Edit(/src/**),Read(//etc/hosts)",
+		"--settings",
+		"{\"permissions\":{\"deny\":[\"Read(./secret.txt)\",\"Edit(./locked.txt)\"]}}",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"secret.txt": "s",
+		"locked.txt": "a"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "src/a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "other/a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "secret.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "locked.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "/etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "/etc/passwd"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File created successfully at: src/a.txt",
+				"Claude requested permissions to write to [^ ]*other/a\\.txt, but you haven't granted it yet\\.",
+				"File is in a directory that is denied by your permission settings",
+				"Claude requested permissions to read from [^ ]*/etc/passwd, but you haven't granted it yet\\."
+			]
+		},
+		"files": [
+			"src/a.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 7,
+				"bodyMatch": [
+					"File created successfully at: src/a.txt",
+					"Claude requested permissions to write to [^ ]*other/a\\.txt, but you haven't granted it yet\\.",
+					"File is in a directory that is denied by your permission settings",
+					"Claude requested permissions to read from [^ ]*/etc/passwd, but you haven't granted it yet\\."
+				]
+			}
+		]
+	},
+	"skip": []
+}

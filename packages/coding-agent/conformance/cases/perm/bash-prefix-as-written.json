@@ -1,0 +1,106 @@
+{
+	"id": "perm/bash-prefix-as-written",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Bash(touch:*)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"i": "x"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch a"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "/usr/bin/touch b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "FOO=1 touch c"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch e && touch f"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch g && npm test"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch h; rm i"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"This command requires approval",
+				"This Bash command contains multiple operations. The following part requires approval: npm test",
+				"rm in [^ ]*/i. needs approval"
+			]
+		},
+		"files": [
+			"a",
+			"e",
+			"f"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 7,
+				"bodyMatch": [
+					"This command requires approval",
+					"This Bash command contains multiple operations. The following part requires approval: npm test",
+					"rm in [^ ]*/i. needs approval"
+				]
+			}
+		]
+	},
+	"skip": []
+}

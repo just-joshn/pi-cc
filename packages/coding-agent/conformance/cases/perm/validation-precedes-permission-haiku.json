@@ -1,0 +1,82 @@
+{
+	"id": "perm/validation-precedes-permission-haiku",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-haiku-4-5",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "a"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "b.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "missing.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "b.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File has not been read yet\\. Read it first before writing to it",
+				"File does not exist"
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4,
+				"bodyMatch": [
+					"File has not been read yet\\. Read it first before writing to it",
+					"File does not exist"
+				],
+				"bodyNotMatch": [
+					"haven't granted it yet"
+				]
+			}
+		]
+	},
+	"skip": []
+}

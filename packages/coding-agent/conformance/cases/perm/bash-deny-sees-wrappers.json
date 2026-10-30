@@ -1,0 +1,88 @@
+{
+	"id": "perm/bash-deny-sees-wrappers",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--disallowedTools",
+		"Bash(rm:*)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"a": "x",
+		"b": "x",
+		"c": "x"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "rm a"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "FOO=1 rm b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "time rm c"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "ls"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Permission to use Bash with command rm a has been denied\\.",
+				"Permission to use Bash with command FOO=1 rm b has been denied\\.",
+				"Permission to use Bash with command time rm c has been denied\\."
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 5,
+				"bodyMatch": [
+					"Permission to use Bash with command rm a has been denied\\.",
+					"Permission to use Bash with command FOO=1 rm b has been denied\\.",
+					"Permission to use Bash with command time rm c has been denied\\."
+				]
+			}
+		]
+	},
+	"skip": []
+}
