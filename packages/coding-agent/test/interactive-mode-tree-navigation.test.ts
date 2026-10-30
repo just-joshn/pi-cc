@@ -1,6 +1,7 @@
 import { Container } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../src/core/session-manager.ts";
+import { NO_CC_TUI } from "../src/core/settings/cc/tui.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import type { StatusIndicator } from "../src/modes/interactive/components/status-indicator.ts";
 import type { TreeSelectorComponent } from "../src/modes/interactive/components/tree-selector.ts";
@@ -31,6 +32,7 @@ function createTreeUI() {
 				return { cancelled: false };
 			}),
 		},
+		ccTui: NO_CC_TUI,
 		defaultEditor: { onEscape },
 		editor: { getText: () => "", setText: vi.fn() },
 		chatContainer: new Container(),
