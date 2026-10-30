@@ -1,0 +1,16 @@
+{
+	"differences": [
+		{
+			"command": "case one in one) declare X=.\nrmdir $X/usr;; esac",
+			"direction": "unsafe"
+		},
+		{
+			"command": "{ export X=\\$HOME; rmdir $X/usr; }",
+			"direction": "unsafe"
+		},
+		{
+			"command": "case one in one) typeset X=~\nrmdir $X/usr;; esac",
+			"direction": "unsafe"
+		}
+	]
+}
