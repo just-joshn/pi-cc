@@ -14,6 +14,8 @@ import { canonicalPath, isInside } from "./paths.ts";
 export interface Word {
 	readonly text: string;
 	readonly literalDollars?: readonly number[];
+	/** Offsets of `$` signs written inside double quotes. */
+	readonly quotedDollars?: readonly number[];
 }
 
 /** What the line has set a variable to by the time a command runs: its text, or `null` when unknowable. */
@@ -28,14 +30,26 @@ export interface SimpleCommand {
 	/** Variables an earlier command in the line gave a non-empty literal value, wherever they were set. */
 	readonly assigned: ReadonlySet<string>;
 	readonly substitution?: true;
+	/** Inside a function body or a case item, which Claude Code reads only for variable-root targets, never for literal ones. */
+	readonly opaque?: true;
+	/** What the stage before this command's `|` was, for a pipeline Claude Code splits into parts instead of reading whole. */
+	readonly pipedFrom?: "assignment" | "declaration";
 }
 
 /** Substitutions counted across a line, nested and quoted ones included. */
 export interface Tally {
 	substitutions: number;
+	/** A `${ cmd; }` body declared a variable, which Claude Code cannot check and asks about when nothing else is wrong. */
+	uncheckable?: true;
+	/** Offsets of the top-level `|` operators, outside any group or subshell. */
+	pipeBars?: number[];
 }
 
+/** `$( )` unbinds on `||` as well, a process substitution is the plain rule, and backticks and here-document bodies never bind. */
+type SubstitutionKind = "dollar" | "backtick" | "process" | "heredoc";
+
 export interface ScanOptions {
+	readonly kind?: SubstitutionKind;
 	readonly depth?: number;
 	readonly tally?: Tally;
 	/** What an enclosing line had set, for a script it hands to a shell or `eval`. */
@@ -49,6 +63,9 @@ const WRAPPERS = new Set(["sudo", "doas", "env", "nice", "nohup", "command", "bu
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const MAX_INLINE_DEPTH = 4;
+/** Operators after which the name a command assigned is not one Claude Code treats as set. Substitutions differ, see {@link SubstitutionKind}. */
+const BINDING_ENDS: ReadonlySet<string> = new Set(["|", "|&", "&"]);
+const SUBSTITUTION_BINDING_ENDS: ReadonlySet<string> = new Set(["|", "|&", "&", "||"]);
 
 const DECLARATIONS = new Set(["export", "local", "readonly", "declare", "typeset"]);
 const LOOPS = new Set(["for", "select"]);
@@ -94,6 +111,9 @@ class Tracker {
 	untrackable = false;
 	variables: Variables = new Map();
 	assigned: ReadonlySet<string> = new Set();
+	/** The names the line had assigned when the current command began, which a pipeline stage or `||` list gives back. */
+	private readonly groups: { variables: Variables; commands: number }[] = [];
+	private assignedStart: ReadonlySet<string> = new Set();
 	/** Set once a subshell stands at the top of the line, where Claude Code reads each part on its own. */
 	private subshelled = false;
 	private commands = 0;
@@ -112,12 +132,19 @@ class Tracker {
 	}[] = [];
 
 	private readonly home: string;
+	private readonly unbinding: ReadonlySet<string>;
 
-	constructor(home: string, inherited?: Pick<SimpleCommand, "variables" | "assigned">) {
+	constructor(
+		home: string,
+		inherited?: Pick<SimpleCommand, "variables" | "assigned">,
+		unbinding: ReadonlySet<string> = BINDING_ENDS,
+	) {
 		this.home = home;
+		this.unbinding = unbinding;
 		if (inherited) {
 			this.variables = inherited.variables;
 			this.assigned = inherited.assigned;
+			this.assignedStart = inherited.assigned;
 			this.pipelineStart = this.variables;
 			this.commands = 1;
 		}
@@ -126,6 +153,16 @@ class Tracker {
 	/** How many subshells deep the scan is. */
 	get depth(): number {
 		return this.frames.length;
+	}
+
+	/** Whether the scan is inside a `{ }` group. */
+	get inGroup(): boolean {
+		return this.groups.length > 0;
+	}
+
+	/** Whether the scan is inside an `if`, loop or `select` body. */
+	get inCompound(): boolean {
+		return this.compound > 0;
 	}
 
 	/** Whether a subshell stood at the top of the line. */
@@ -143,6 +180,23 @@ class Tracker {
 		this.untrackable = true;
 	}
 
+	/** A `{` group reads its own assignments only, and gives the line's back at its `}`. */
+	groupBoundary(words: readonly Word[]): void {
+		for (const { text } of words) {
+			if (text === "{") {
+				this.groups.push({ variables: this.variables, commands: this.commands });
+				this.variables = new Map();
+				this.commands = 0;
+			} else if (text === "}") {
+				const group = this.groups.pop();
+				if (group) {
+					this.variables = group.variables;
+					this.commands = group.commands;
+				}
+			} else if (!KEYWORDS.has(text)) break;
+		}
+	}
+
 	command(words: readonly Word[]): void {
 		const texts = words.map((word) => word.text);
 		let first = 0;
@@ -150,7 +204,8 @@ class Tracker {
 			const head = texts[first] as string;
 			if (OPENERS.has(head)) this.compound++;
 			else if (CLOSERS.has(head)) this.compound = Math.max(0, this.compound - 1);
-			else if (head === "case" || head === "{" || head === "}" || head === "function") this.untrackable = true;
+			else if (head === "case" || head === "function") this.untrackable = true;
+
 			if (LOOPS.has(head)) {
 				this.forget(texts[first + 1]);
 				return;
@@ -173,6 +228,8 @@ class Tracker {
 	}
 
 	separator(operator: string): void {
+		if (this.unbinding.has(operator)) this.assigned = this.assignedStart;
+		this.assignedStart = this.assigned;
 		if (operator === "&") this.untrackable = true;
 		if (operator === "(") {
 			this.frames.push({
@@ -215,6 +272,9 @@ class Tracker {
 			}
 		} else if (operator === "||") {
 			this.orList = true;
+			this.variables = new Map(
+				[...this.variables].map(([name, value]) => [name, this.stageAssigned.has(name) ? null : value]),
+			);
 		} else if (this.orList && (operator === ";" || operator === "\n")) {
 			this.variables = new Map([...this.variables.keys()].map((name) => [name, null]));
 			this.orList = false;
@@ -244,9 +304,10 @@ class Tracker {
 		const equals = word.text.indexOf("=");
 		const name = word.text.slice(0, equals);
 		const source = word.text.slice(equals + 1);
-		if (source.startsWith("~")) this.untrackable = true;
+		const tilde = /^~(?=\/|$)/.test(source);
+		if (source.startsWith("~") && !(tilde && this.frames.length > 0)) this.untrackable = true;
 		const value = this.expanded(
-			source,
+			tilde && this.frames.length > 0 ? this.home + source.slice(1) : source,
 			(word.literalDollars ?? []).map((index) => index - equals - 1),
 		);
 		this.stageAssigned.add(name);
@@ -258,17 +319,18 @@ class Tracker {
 		else if (known === undefined) next.set(name, value);
 		else next.set(name, known === value ? value : null);
 		this.variables = next;
-		if (tracked && value !== null) this.assigned = new Set(this.assigned).add(name);
+		if (value !== null && value !== "" && (word.literalDollars ?? []).length === 0)
+			this.assigned = new Set(this.assigned).add(name);
 	}
 
 	/** A value with the variables it names put in, or `null` when one of them is not a known text. */
 	private expanded(value: string, literals: readonly number[]): string | null {
-		if (value === "") return null;
 		let known = true;
 		const text = value.replace(
-			/\$([A-Za-z_][A-Za-z0-9_]*)|\$/g,
-			(match, name: string | undefined, offset: number) => {
+			/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$/g,
+			(match, braced: string | undefined, bare: string | undefined, offset: number) => {
 				if (literals.includes(offset)) return match;
+				const name = braced ?? bare;
 				const found = name === "HOME" ? this.home : name === undefined ? undefined : this.variables.get(name);
 				if (typeof found !== "string") known = false;
 				return found ?? "";
@@ -284,17 +346,30 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 	const tally = options.tally ?? { substitutions: 0 };
 	/** Commands in the order they appear, a substitution's commands ahead of the command that holds it. */
 	const found: { command: SimpleCommand; own: boolean; top: boolean }[] = [];
-	const tracker = new Tracker(options.home ?? homedir(), options.inherited);
+	const tracker = new Tracker(
+		options.home ?? homedir(),
+		options.inherited,
+		options.kind === "dollar" ? SUBSTITUTION_BINDING_ENDS : BINDING_ENDS,
+	);
 	let words: Word[] = [];
 	let text = "";
 	let literalDollars: number[] = [];
+	let quotedDollars: number[] = [];
 	let started = false;
 	let brace = -1;
 	let commandStart = 0;
+	let functionBraces = -1;
+	let inCase = false;
+	let backgroundedCompound = false;
+	let bracedHome = false;
+	let lastOperator = "";
+	let previous: readonly string[] = [];
+	let everAssigned: ReadonlySet<string> = new Set();
 	const endWord = (): void => {
-		if (started) words.push({ text, literalDollars });
+		if (started) words.push({ text, literalDollars, quotedDollars });
 		text = "";
 		literalDollars = [];
+		quotedDollars = [];
 		started = false;
 		brace = -1;
 	};
@@ -302,17 +377,76 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		endWord();
 		const source = line.slice(commandStart, index).trim();
 		if (words.length > 0) {
-			const command = { words, text: source, variables: tracker.variables, assigned: tracker.assigned };
+			tracker.groupBoundary(words);
+			const heads = words.map((word) => word.text);
+			if (operator === "(" && words.length === 1 && /^\s*\)/.test(line.slice(index + 1))) functionBraces = 0;
+			const wasOpaque = functionBraces >= 0 || inCase || backgroundedCompound || bracedHome;
+			if (
+				!bracedHome &&
+				heads.some((head) => /^[A-Za-z_]\w*=.*\$\{/.test(head)) &&
+				(tracker.inCompound || tracker.depth > 0 || tracker.inGroup)
+			)
+				bracedHome = true;
+			if (heads[0] === "case") inCase = true;
+			if (functionBraces >= 0) {
+				for (const head of heads) functionBraces += head === "{" ? 1 : head === "}" ? -1 : 0;
+				if (functionBraces <= 0 && heads.includes("}")) functionBraces = -1;
+			}
+			if (heads[0] === "esac") inCase = false;
+			const isOpaque = wasOpaque || heads[0] === "case" || bracedHome;
+			const stage = previous.filter((head) => !KEYWORDS.has(head));
+			const pipedFrom =
+				(lastOperator === "|" || lastOperator === "|&") && tracker.depth === 0 && !tracker.inGroup
+					? DECLARATIONS.has(basename(stage[0] ?? ""))
+						? stage[0] === "local"
+							? undefined
+							: ("declaration" as const)
+						: stage.length > 0 && stage.every((head) => ASSIGNMENT.test(head))
+							? ("assignment" as const)
+							: undefined
+					: undefined;
+			const command: SimpleCommand = {
+				words,
+				...(pipedFrom === undefined ? {} : { pipedFrom }),
+				text: source,
+				variables: tracker.variables,
+				assigned: functionBraces >= 0 || inCase ? everAssigned : tracker.assigned,
+				...(isOpaque ? { opaque: true as const } : {}),
+			};
 			found.push({ command, own: true, top: tracker.depth === 0 });
+			if (operator !== "&" && operator !== "|" && operator !== "|&") {
+				for (const word of words) {
+					const head = word.text;
+					if (ASSIGNMENT.test(head) && !head.endsWith("=") && (word.literalDollars ?? []).length === 0)
+						everAssigned = new Set(everAssigned).add(head.slice(0, head.indexOf("=")));
+				}
+			}
 			tracker.command(words);
 		}
+		if ((operator === "|" || operator === "|&") && depth === 0 && tracker.depth === 0 && !tracker.inGroup) {
+			tally.pipeBars = [...(tally.pipeBars ?? []), index];
+		}
+		previous = words.map((word) => word.text);
+		lastOperator = operator;
+		if (operator === "&" && tracker.inCompound) backgroundedCompound = true;
 		tracker.separator(operator);
+		if (!tracker.inCompound) backgroundedCompound = false;
 		words = [];
 		commandStart = index + operator.length;
 	};
-	const nested = (inner: string, counted = true): void => {
-		for (const command of simpleCommands(inner, { depth: depth + 1, tally, home: options.home }))
-			found.push({ command: { ...command, substitution: true }, own: false, top: false });
+	const nested = (inner: string, counted = true, kind: SubstitutionKind = "dollar"): void => {
+		const inside = simpleCommands(inner, { depth: depth + 1, tally, home: options.home, kind });
+		for (const command of inside)
+			found.push({
+				command: {
+					...command,
+					substitution: true,
+					variables: new Map(),
+					assigned: kind === "backtick" || kind === "heredoc" ? new Set() : command.assigned,
+				},
+				own: false,
+				top: false,
+			});
 		if (counted) {
 			tally.substitutions++;
 			tracker.untrackable = true;
@@ -324,7 +458,18 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 		const after = line[at + 1];
 		if (after === "{") {
 			tracker.untrackable = true;
-			if (/[ \t\n|]/.test(line[at + 2] ?? "")) tally.substitutions++;
+			if (/[ \t\n|]/.test(line[at + 2] ?? "")) {
+				tally.substitutions++;
+				let close = at + 2;
+				for (let level = 1; close < line.length && level > 0; close++) {
+					if (line[close] === "{") level++;
+					else if (line[close] === "}") level--;
+				}
+				if (
+					/(?:^|[\s;&|])(?:export|local|readonly|declare|typeset)\s+[A-Za-z_]\w*=/.test(line.slice(at + 2, close))
+				)
+					tally.uncheckable = true;
+			}
 		} else if (after === "'") {
 			tracker.untrackable = true;
 		} else {
@@ -364,10 +509,13 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 					index = end + 1;
 				} else if (inner === "`") {
 					const end = closingBacktick(line, index);
-					nested(line.slice(index + 1, end));
+					nested(line.slice(index + 1, end), true, "backtick");
 					index = end + 1;
 				} else {
-					if (inner === "$") dollar(index, true);
+					if (inner === "$") {
+						dollar(index, true);
+						quotedDollars.push(text.length);
+					}
 					text += inner;
 					index++;
 				}
@@ -379,11 +527,11 @@ export function simpleCommands(line: string, options: ScanOptions = {}): SimpleC
 			index = end + 1;
 		} else if (char === "`") {
 			const end = closingBacktick(line, index);
-			nested(line.slice(index + 1, end));
+			nested(line.slice(index + 1, end), true, "backtick");
 			index = end + 1;
 		} else if ((char === "<" || char === ">") && next === "(") {
 			const end = matching(line, index + 1);
-			nested(line.slice(index + 2, end));
+			nested(line.slice(index + 2, end), true, "process");
 			index = end + 1;
 		} else if (char === "<" || char === ">") {
 			index = skipRedirection(line, index, nested);
@@ -437,7 +585,11 @@ function closingBacktick(line: string, open: number): number {
 }
 
 /** Past a redirection operator and its target word, and past a here-document's body. */
-function skipRedirection(line: string, start: number, nested: (inner: string) => void): number {
+function skipRedirection(
+	line: string,
+	start: number,
+	nested: (inner: string, counted?: boolean, kind?: SubstitutionKind) => void,
+): number {
 	let index = start;
 	while (line[index] === "<" || line[index] === ">" || line[index] === "&" || line[index] === "|") index++;
 	const heredoc = line.slice(start, index).startsWith("<<") && !line.slice(start, index).startsWith("<<<");
@@ -456,11 +608,11 @@ function skipRedirection(line: string, start: number, nested: (inner: string) =>
 			if (text[at] === "\\") at++;
 			else if (text[at] === "$" && text[at + 1] === "(" && text[at + 2] !== "(") {
 				const end = matching(text, at + 1);
-				nested(text.slice(at + 2, end));
+				nested(text.slice(at + 2, end), true, "heredoc");
 				at = end;
 			} else if (text[at] === "`") {
 				const end = closingBacktick(text, at);
-				nested(text.slice(at + 1, end));
+				nested(text.slice(at + 1, end), true, "heredoc");
 				at = end;
 			}
 		}
@@ -500,16 +652,40 @@ export interface Removal {
 	readonly message: string;
 	/** A target that expands from a variable the shell may leave empty. Claude Code reports it before it counts substitutions. */
 	readonly emptyVariable?: true;
+	readonly pipedFrom?: SimpleCommand["pipedFrom"];
 }
 
 export function dangerousRemoval(line: string, scope: RemovalScope): Removal | undefined {
 	const tally: Tally = { substitutions: 0 };
 	const found = dangerousIn(simpleCommands(line, { tally, home: scope.home }), scope, 0);
-	if (tally.substitutions <= MAX_SUBSTITUTIONS || found?.emptyVariable) return found;
+	if (tally.substitutions <= MAX_SUBSTITUTIONS || found?.emptyVariable) {
+		if (found?.pipedFrom !== undefined && tally.pipeBars !== undefined && !found.emptyVariable) {
+			return { command: found.command, message: pipelineParts(line, tally.pipeBars) };
+		}
+		if (found === undefined && tally.uncheckable) {
+			return {
+				command: "rm",
+				message: `This command could not be checked for dangerous rm operations: the shell may read it differently than it was parsed. This requires explicit approval.`,
+			};
+		}
+		return found;
+	}
 	return {
 		command: "rm",
 		message: `This command contains ${tally.substitutions} command substitutions \u2014 too many to analyze for catastrophic removals. This requires explicit approval.`,
 	};
+}
+
+const NEEDS_APPROVAL = /(?:^|;\s*|\b(?:do|then|else|elif)\s+)(?:export|local|readonly|declare|typeset)\s/;
+
+/** Claude Code's text for a pipeline it cannot read whole: the stages that declare a variable or remove something. */
+function pipelineParts(line: string, bars: readonly number[]): string {
+	const edges = [0, ...bars.flatMap((bar) => [bar, bar + 1]), line.length];
+	const stages: string[] = [];
+	for (let at = 0; at < edges.length; at += 2) stages.push(line.slice(edges[at], edges[at + 1]).trim());
+	const listed = stages.filter((stage) => NEEDS_APPROVAL.test(stage) || /\brm(?:dir)?\b/.test(stage));
+	const [verb, noun] = listed.length === 1 ? ["requires", "part"] : ["require", "parts"];
+	return `This Bash command contains multiple operations. The following ${noun} ${verb} approval: ${listed.join(", ")}`;
 }
 
 function dangerousIn(commands: readonly SimpleCommand[], scope: RemovalScope, depth: number): Removal | undefined {
@@ -520,7 +696,7 @@ function dangerousIn(commands: readonly SimpleCommand[], scope: RemovalScope, de
 		if (head === "cd" || head === "pushd") changedDirectory = true;
 		if (head === "rm" || head === "rmdir") {
 			const found = inspectRemoval(head, words.slice(1), command, changedDirectory, scope);
-			if (found) return found;
+			if (found) return command.pipedFrom === undefined ? found : { ...found, pipedFrom: command.pipedFrom };
 		} else if (depth < MAX_INLINE_DEPTH) {
 			const script = inlineScript(head, words);
 			const found =
@@ -614,7 +790,11 @@ function inspectRemoval(
 				message: `Dangerous rm operation detected: the target is the output of a command substitution (\`$(...)\` or backticks) and cannot be checked before the command runs. ${NO_AUTO_ALLOW}\n\nRun the substitution on its own first, then remove the literal paths it prints.`,
 			};
 		}
-		const target = { ...operand, text: followed(operand, line.variables) };
+		const replaced = followed(operand, line.variables);
+		const target =
+			replaced !== operand.text && replaced.startsWith("$")
+				? { ...operand, text: replaced, literalDollars: [0] }
+				: { ...operand, text: replaced };
 		const emptied = target.text.replace(/(.)(?:__CMDSUB__(?:(?!\.\.)[/*.])*)+((?:\/\.\.)*)\/*$/, "$1$2");
 		for (const candidate of emptied === target.text ? [target] : [{ ...target, text: emptied }, target]) {
 			const found = inspectOperand(command, candidate, line, recursive, flags, changedDirectory, scope);
@@ -637,6 +817,7 @@ function inspectOperand(
 		? undefined
 		: variableTarget(command, operand.text, line, scope);
 	if (variable) return variable;
+	if (line.opaque) return undefined;
 	const written = operand.literalDollars?.includes(0) ? operand.text : expand(operand.text, scope);
 	const absolute = isAbsolute(written) ? written : resolve(scope.cwd, written);
 	let stem = absolute;
@@ -803,6 +984,7 @@ function followed(word: Word, variables: Variables): string {
 	return word.text.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name: string, offset: number) => {
 		if (word.literalDollars?.includes(offset)) return match;
 		const value = variables.get(name);
+		if (value === "" && (word.text !== `$${name}` || !word.quotedDollars?.includes(offset))) return match;
 		return typeof value === "string" ? value : match;
 	});
 }
