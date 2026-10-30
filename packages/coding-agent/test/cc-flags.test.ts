@@ -134,7 +134,7 @@ describe("validation diagnostics", () => {
 	test("accepts every documented --effort value", () => {
 		for (const level of ["low", "medium", "high", "xhigh", "max"]) {
 			const result = parseArgs(["--effort", level]);
-			expect(result.diagnostics.map(render)).toEqual(["Warning: --effort is accepted but not implemented yet"]);
+			expect(result.diagnostics.map(render)).toEqual([]);
 			expect(result.effort).toBe(level);
 		}
 	});
@@ -149,9 +149,7 @@ describe("validation diagnostics", () => {
 	});
 
 	test("validates --system-prompt-snapshot against on and off", () => {
-		expect(parseArgs(["--system-prompt-snapshot", "off"]).diagnostics.map(render)).toEqual([
-			"Warning: --system-prompt-snapshot is accepted but not implemented yet",
-		]);
+		expect(parseArgs(["--system-prompt-snapshot", "off"]).diagnostics.map(render)).toEqual([]);
 		expect(parseArgs(["--system-prompt-snapshot", "bogus"]).diagnostics.map(render)).toEqual([
 			"error: option '--system-prompt-snapshot <on|off>' argument 'bogus' is invalid. Allowed choices are on, off.",
 		]);

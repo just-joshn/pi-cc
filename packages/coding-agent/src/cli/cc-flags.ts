@@ -262,7 +262,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "auto|tokens",
 		summary: "Context compaction window size",
-		status: "accepted",
+		status: "wired",
 		apply: setString("autocompact"),
 	},
 	{
@@ -292,7 +292,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "variadic",
 		placeholder: "betas",
 		summary: "Extra API beta header values",
-		status: "accepted",
+		status: "wired",
 		apply: appendList("betas"),
 	},
 	{
@@ -376,7 +376,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "level",
 		summary: "Reasoning effort for this session",
-		status: "accepted",
+		status: "wired",
 		validate: validateEffort,
 		apply: setString("effort"),
 	},
@@ -392,7 +392,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "exclude-dynamic-system-prompt-sections",
 		arity: "boolean",
 		summary: "Move machine-specific prompt parts to the first message",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("excludeDynamicSystemPromptSections"),
 	},
 	{
@@ -400,7 +400,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "value",
 		placeholder: "model",
 		summary: "Models to try when the primary is unavailable",
-		status: "accepted",
+		status: "wired",
 		apply: setString("fallbackModel"),
 	},
 	{
@@ -686,7 +686,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "on|off",
 		choices: { values: ["on", "off"], hard: true },
 		summary: "Record the system prompt once per conversation",
-		status: "accepted",
+		status: "wired",
 		apply: setString("systemPromptSnapshot"),
 	},
 	{

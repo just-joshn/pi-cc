@@ -54,6 +54,7 @@ import {
 import { ccSettingsSessionModel } from "./core/anthropic-model-env.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
+import { buildCcPolicy } from "./core/cc-policy.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
@@ -1106,6 +1107,11 @@ export async function main(args: string[], options?: MainOptions) {
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
 			fixedTools: sessionOptions.fixedTools,
+			ccPolicy: buildCcPolicy({
+				flags: parsed,
+				entrypoint: appMode === "interactive" ? "cli" : "sdk-cli",
+				customPrompt: parsed.systemPrompt !== undefined,
+			}),
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,

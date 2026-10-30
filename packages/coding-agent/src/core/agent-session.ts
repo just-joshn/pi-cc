@@ -64,6 +64,7 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { generateBugReportSummary } from "./bug-report.ts";
 import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
+import { type CcPolicy, compactionWindow } from "./cc-policy.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -126,6 +127,7 @@ import {
 } from "./memory/wrapper.ts";
 import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
+import { resolveAnthropicCcModel } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { NestedToolCallRunner } from "./nested-tool-calls.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
@@ -148,6 +150,9 @@ import {
 } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
+import { assembleCcPrompt } from "./system-prompt/assemble.ts";
+import { readCcEnvironment } from "./system-prompt/environment.ts";
+import { snapshotDecision } from "./system-prompt/snapshot.ts";
 import {
 	buildSystemPrompt,
 	buildSystemPromptSections,
@@ -277,6 +282,8 @@ export interface AgentSessionConfig {
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
+	/** Claude Code run policy. Absent, the session keeps pi's own prompt, effort and compaction behavior. */
+	ccPolicy?: CcPolicy;
 	/** Keeps the prompt cache entry of the last session request warm. */
 	cacheWarmer?: Pick<CacheWarmer, "cancel" | "status" | "onAgentSettled" | "onModeChanged" | "onWarmed">;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
@@ -397,6 +404,8 @@ export class AgentSession {
 	readonly settingsManager: SettingsManager;
 
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	private readonly _ccPolicy: CcPolicy | undefined;
+	private _ccFallbackStep = 0;
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
@@ -504,6 +513,7 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
+		this._ccPolicy = config.ccPolicy;
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
@@ -787,7 +797,7 @@ export class AgentSession {
 		if (model.contextWindow <= 0) return false;
 		return shouldCompact(
 			estimateProjectedContextTokens(projection, this.sessionManager.getBranch()).tokens,
-			model.contextWindow,
+			compactionWindow(this._ccPolicy, model.contextWindow),
 			this.settingsManager.getCompactionSettings(this.model),
 		);
 	}
@@ -801,6 +811,28 @@ export class AgentSession {
 		}
 		await this._runAutoCompaction("threshold", false);
 		return { ...context, messages: this.sessionManager.buildSessionProjection().messages };
+	}
+
+	/**
+	 * The model of a request under `--fallback-model`. Every retry after a failed response moves one
+	 * step down the chain, a response that completes keeps the step for the rest of the turn, and a
+	 * new user turn starts at the primary again.
+	 */
+	private _applyCcFallback(
+		primary: Model<any>,
+		messages: AgentMessage[],
+		failed: AssistantMessage | undefined,
+	): Model<any> {
+		const chain = this._ccPolicy?.fallbackModels ?? [];
+		if (chain.length === 0) return primary;
+		if (failed) {
+			this._ccFallbackStep = Math.min(this._ccFallbackStep + 1, chain.length);
+		} else {
+			const lastResponse = messages.findLastIndex((message) => message.role === "assistant");
+			if (messages.slice(lastResponse + 1).some((message) => message.role === "user")) this._ccFallbackStep = 0;
+		}
+		if (this._ccFallbackStep === 0) return primary;
+		return resolveAnthropicCcModel(this._modelRuntime, chain[this._ccFallbackStep - 1]) ?? primary;
 	}
 
 	private _installAgentRequestProjection(): void {
@@ -830,7 +862,14 @@ export class AgentSession {
 			let { previous, context, projection } = await prepare();
 			const model = previous?.model ?? this.agent.state.model;
 			const thinkingLevel = previous?.thinkingLevel ?? this.agent.state.thinkingLevel;
-			if (!isVirtualModel(model)) return { ...previous, context, model, thinkingLevel };
+			if (!isVirtualModel(model)) {
+				return {
+					...previous,
+					context,
+					model: this._applyCcFallback(model, context.messages, failed),
+					thinkingLevel,
+				};
+			}
 
 			// The selection stays in agent state; only this request uses the routed model. A routing
 			// failure rejects, which ends the run with an error response. Only messages the user wrote
@@ -993,6 +1032,7 @@ export class AgentSession {
 						draft.details,
 						true,
 						draft.usage,
+						this._compactionPromptRecord(),
 					);
 					break;
 				}
@@ -1830,11 +1870,61 @@ export class AgentSession {
 		options.selectedTools = this._applyToolLoadout(options.selectedTools).map((tool) => tool.name);
 		// The tool list and rules must match the declarations the request carries.
 		options.hiddenTools = [...this._hiddenDeclarations];
+		if (this._ccPolicy) return this._prepareCcPrompt(options, messages, this._ccPolicy);
 		const sections = diffSystemPromptSections(
 			getCurrentSystemMessage(messages)?.sections ?? {},
 			buildSystemPromptSections(options),
 		);
 		return sections ? { role: "system", content: "", sections, timestamp: Date.now() } : undefined;
+	}
+
+	/**
+	 * The Claude Code prompt record. It is written when the transcript has none and never patched
+	 * afterwards: the snapshot rule replays it, and a request projects a fresh render when snapshots
+	 * are off. Sections of an older prompt shape are removed with it.
+	 */
+	private _prepareCcPrompt(
+		options: NormalizedBuildSystemPromptOptions,
+		messages: AgentMessage[],
+		policy: CcPolicy,
+	): SystemMessage | undefined {
+		const head = getCurrentSystemMessage(messages);
+		const decision = snapshotDecision({
+			snapshot: policy.snapshot,
+			hasRecord: head?.sections?.identity !== undefined,
+		});
+		if (decision !== "record") return undefined;
+		const stale = Object.fromEntries(Object.keys(head?.sections ?? {}).map((name) => [name, null]));
+		const { sections, context } = this._ccPromptFields(options, policy);
+		return { role: "system", content: "", sections: { ...stale, ...sections }, context, timestamp: Date.now() };
+	}
+
+	private _ccPromptFields(
+		options: NormalizedBuildSystemPromptOptions,
+		policy: CcPolicy,
+	): { sections: { identity: string; working: string }; context: string } {
+		const { identity, working, context } = assembleCcPrompt(
+			options,
+			{ bare: policy.bare },
+			readCcEnvironment(this._cwd),
+		);
+		return { sections: { identity, working }, context };
+	}
+
+	/** The prompt record a compaction entry carries: freshly assembled under the snapshot rule, so compaction is the one point that rebuilds it. */
+	private _compactionPromptRecord(): SystemMessage | undefined {
+		const policy = this._ccPolicy;
+		if (!policy?.snapshot) return undefined;
+		const current = getCurrentSystemMessage(this.sessionManager.buildSessionProjection().messages);
+		if (current?.sections?.identity === undefined) return undefined;
+		const options = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
+		return {
+			role: "system",
+			content: "",
+			...this._ccPromptFields(options, policy),
+			...(current.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+			timestamp: Date.now(),
+		};
 	}
 
 	/**
@@ -1877,7 +1967,7 @@ export class AgentSession {
 		this.agent.transformContext = async (messages, signal) => {
 			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
 			const forced = this._runSystemPromptOptions?.forceSystemPrompt;
-			if (forced === undefined) return transformed;
+			if (forced === undefined) return this._projectCcPrompt(transformed);
 			const current = getCurrentSystemMessage(transformed);
 			const head: SystemMessage = {
 				role: "system",
@@ -1887,6 +1977,35 @@ export class AgentSession {
 			};
 			return [head, ...transformed.filter((message) => message.role !== "system")];
 		};
+	}
+
+	/**
+	 * Request-time view of the Claude Code prompt record: a fresh render when snapshots are off, and
+	 * the per-machine context moved into the first user message under `--exclude-dynamic-system-prompt-sections`.
+	 * The transcript keeps the record untouched.
+	 */
+	private _projectCcPrompt(messages: AgentMessage[]): AgentMessage[] {
+		const policy = this._ccPolicy;
+		const first = messages[0];
+		if (!policy || first?.role !== "system" || first.sections?.identity === undefined) return messages;
+		let head: SystemMessage = first;
+		if (!policy.snapshot) {
+			const options = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
+			head = { ...head, ...this._ccPromptFields(options, policy) };
+		}
+		if (!policy.excludeDynamic || head.context === undefined) return [head, ...messages.slice(1)];
+		const { context, ...rest } = head;
+		const projected: AgentMessage[] = [rest, ...messages.slice(1)];
+		const index = projected.findIndex((message) => message.role === "user");
+		if (index === -1) return projected;
+		const user = projected[index] as Extract<AgentMessage, { role: "user" }>;
+		const content: Array<TextContent | ImageContent> =
+			typeof user.content === "string" ? [{ type: "text", text: user.content }] : user.content;
+		projected[index] = {
+			...user,
+			content: [{ type: "text", text: `<system-reminder>\n${context}\n</system-reminder>` }, ...content],
+		};
+		return projected;
 	}
 
 	/**
@@ -2976,7 +3095,15 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				usage,
+				this._compactionPromptRecord(),
+			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
@@ -3206,7 +3333,7 @@ export class AgentSession {
 		} else {
 			contextTokens = directContextTokens;
 		}
-		if (shouldCompact(contextTokens, contextWindow, settings)) {
+		if (shouldCompact(contextTokens, compactionWindow(this._ccPolicy, contextWindow), settings)) {
 			return await this._runAutoCompaction("threshold", false);
 		}
 		return false;
@@ -3302,7 +3429,15 @@ export class AgentSession {
 			}
 			abortController.signal.throwIfAborted();
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				usage,
+				this._compactionPromptRecord(),
+			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);

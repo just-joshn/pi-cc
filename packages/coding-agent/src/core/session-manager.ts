@@ -1275,9 +1275,11 @@ export class SessionManager {
 		details?: T,
 		fromHook?: boolean,
 		usage?: Usage,
+		/** The prompt record the entry carries instead of the replayed one. */
+		promptRecord?: SystemMessage,
 	): string {
 		const timestamp = new Date().toISOString();
-		const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const systemMessage = promptRecord ?? getCurrentSystemMessage(this.buildSessionProjection().messages);
 		const id = generateId(this.byId);
 		const entry: CompactionEntry<T> = {
 			type: "compaction",

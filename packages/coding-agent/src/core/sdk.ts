@@ -7,6 +7,7 @@ import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { CacheWarmer } from "./cache-warmer.ts";
+import { type CcPolicy, ccWireProfile } from "./cc-policy.ts";
 import { getClientIdentity } from "./client-identity.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
@@ -89,6 +90,8 @@ export interface CreateAgentSessionOptions {
 	tools?: string[];
 	/** Keep a fixed tool list on the wire without a deferred tool placeholder, pi's or Claude Code's. */
 	fixedTools?: boolean;
+	/** Claude Code run policy. Absent, the Anthropic transport keeps pi's prompt and effort handling. */
+	ccPolicy?: CcPolicy;
 	/**
 	 * Optional denylist of tool names or patterns to disable. Applies after `tools` when both are
 	 * provided, MCP tools included.
@@ -436,6 +439,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	};
 
+	const ccPolicy = model?.provider === "anthropic" ? options.ccPolicy : undefined;
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: "",
@@ -450,7 +454,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				const model = fixedTools
 					? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
 					: sessionModel;
-				const requestOptions = buildRequestOptions(options);
+				const sessionRequest = options?.sessionId === sessionManager.getSessionId();
+				const ccWire =
+					ccPolicy && sessionRequest
+						? ccWireProfile(ccPolicy, model, modelRuntime.getModel(model.provider, model.id) !== undefined)
+						: undefined;
+				const requestOptions = { ...buildRequestOptions(options), ...(ccWire ? { ccWire } : {}) };
 				// Compaction and summaries use their own routing ids; only session requests
 				// replace the cache entry, so warming restarts from them. Keep warming while
 				// the current transcript still extends the request's prefix. Agent state may
@@ -502,6 +511,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customTools: options.customTools,
 		modelRuntime,
 		cacheWarmer,
+		ccPolicy,
 		initialActiveToolNames,
 		usesDefaultTools: (options.tools === undefined || toolModifiers !== undefined) && !options.noTools,
 		defaultToolModifiers: toolModifiers,
