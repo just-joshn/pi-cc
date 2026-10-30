@@ -190,6 +190,8 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
  */
 const CASE_ENV_KEYS: readonly string[] = [
 	"CLAUDE_CODE_TMPDIR",
+	// P04 round 3: waives the dangerous-removal check under bypass. Removals in a case run against the seeded workspace inside the Seatbelt.
+	"CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS",
 	"ANTHROPIC_AUTH_TOKEN",
 	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_CUSTOM_HEADERS",
