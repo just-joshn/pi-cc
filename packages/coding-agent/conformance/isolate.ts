@@ -290,7 +290,7 @@ export async function scanWorkspace(roots: Roots, wanted: readonly string[]): Pr
 		if (lstatErrorCode(roots.workspace) === "ENOENT") return hashTree(roots.workspace, wanted);
 		return { entries: new Map(), text: new Map(), violations: [{ kind: "workspace-unmovable", path: null }] };
 	}
-	const reaped = await reap(roots.root, { moved: snapshot });
+	const reaped = await reap(roots.root, { moved: snapshot, cleanSweeps: 1 });
 	const quiet = await staysUnchanged([roots.root, snapshot], roots.out);
 	const scan = hashTree(snapshot, wanted);
 	if (reaped.survived || !reaped.converged || !quiet) scan.violations.push({ kind: "unreaped", path: null });

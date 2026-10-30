@@ -14,6 +14,8 @@ export interface ReapOptions {
 	lsof?: string;
 	ps?: string;
 	deadlineMs?: number;
+	/** Consecutive scans that must find nothing. The default is for the first reap; a check that already follows one can use fewer. */
+	cleanSweeps?: number;
 }
 
 const CLEAN_SWEEPS = 3;
@@ -21,7 +23,7 @@ const REAP_DEADLINE_MS = 10_000;
 const LSOF = "/usr/sbin/lsof";
 const PS = "/bin/ps";
 const MAX_LISTING_BYTES = 256 * 1024 * 1024;
-const SAMPLES_PER_SWEEP = 6;
+const SAMPLES_PER_SWEEP = 4;
 const SAMPLE_STAGGER_MS = 30;
 
 const execFileAsync = promisify(execFile);
@@ -53,7 +55,8 @@ export async function reap(root: string, options: ReapOptions = {}): Promise<Rea
 	let clean = 0;
 	const killed = new Set<number>();
 	const deadline = Date.now() + (options.deadlineMs ?? REAP_DEADLINE_MS);
-	while (clean < CLEAN_SWEEPS || [...killed].some(groupExists)) {
+	const cleanSweeps = options.cleanSweeps ?? CLEAN_SWEEPS;
+	while (clean < cleanSweeps || [...killed].some(groupExists)) {
 		if (Date.now() >= deadline) return { survived, converged: false };
 		const found = await observedGroups(held, tools);
 		if (found === null) return { survived, converged: false };
