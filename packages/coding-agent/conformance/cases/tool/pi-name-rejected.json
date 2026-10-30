@@ -1,0 +1,21 @@
+{
+  "id": "tool/pi-name-rejected",
+  "area": "tool",
+  "argv": ["-p", "Invoke the fixture", "--output-format", "stream-json", "--verbose"],
+  "env": {},
+  "stdin": null,
+  "files": { "five.txt": "five\n" },
+  "model": {
+    "turns": [
+      { "tool_use": { "name": "read", "input": { "path": "five.txt" } } },
+      { "text": "PROBE_OK" }
+    ]
+  },
+  "timeout_ms": 60000,
+  "compare": {
+    "exit": 0,
+    "stdout": { "kind": "text", "match": ["No such tool available: read. Tool names are case-sensitive: call Read instead."] },
+    "requests": [{ "pathStartsWith": "/v1/messages", "count": 2 }]
+  },
+  "skip": []
+}

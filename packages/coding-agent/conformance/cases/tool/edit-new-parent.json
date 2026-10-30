@@ -1,0 +1,22 @@
+{
+  "id": "tool/edit-new-parent",
+  "area": "tool",
+  "argv": ["-p", "Create the fixture", "--permission-mode", "acceptEdits", "--output-format", "stream-json", "--verbose"],
+  "env": {},
+  "stdin": null,
+  "files": {},
+  "model": {
+    "turns": [
+      { "tool_use": { "name": "Edit", "input": { "file_path": "new/deep.txt", "old_string": "", "new_string": "made\n" } } },
+      { "text": "PROBE_OK" }
+    ]
+  },
+  "timeout_ms": 60000,
+  "compare": {
+    "exit": 0,
+    "stdout": { "kind": "text", "match": ["The file new/deep.txt has been updated successfully."] },
+    "files": ["new/deep.txt"],
+    "requests": [{ "pathStartsWith": "/v1/messages", "count": 2 }]
+  },
+  "skip": []
+}

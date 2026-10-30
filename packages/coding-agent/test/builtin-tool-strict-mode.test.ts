@@ -85,7 +85,7 @@ describe("strict built-in tools", () => {
 				try {
 					const originalPrompt = session.systemPrompt;
 					await session.bindExtensions({});
-					expect(session.getActiveToolNames()).toEqual(activeTools);
+					expect(session.getActiveToolNames().sort()).toEqual([...activeTools].sort());
 					expect(session.systemPrompt).toBe(originalPrompt);
 					for (const name of strictToolNames) {
 						expect(session.getToolDefinition(name)?.constrainedSampling).toBe(false);
@@ -97,7 +97,7 @@ describe("strict built-in tools", () => {
 						writeFileSync(join(cwd, "sample.txt"), "still works");
 						const read = session.agent.state.tools.find((tool) => tool.name === "read")!;
 						const result = await read.execute("read-test", { path: "sample.txt" });
-						expect(result.content).toEqual([{ type: "text", text: "still works" }]);
+						expect(result.content).toEqual([{ type: "text", text: "1\tstill works" }]);
 					}
 				} finally {
 					session.dispose();

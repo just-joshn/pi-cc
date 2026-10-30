@@ -1,0 +1,52 @@
+{
+	"id": "tool/write-result-text",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Write the fixture file",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "written.txt",
+						"content": "PROBE_WRITTEN_CONTENT_9c2e\n"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File created successfully at: written.txt"
+			]
+		},
+		"files": [
+			"written.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			}
+		]
+	},
+	"skip": []
+}

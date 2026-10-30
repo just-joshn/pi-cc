@@ -1,0 +1,22 @@
+{
+  "id": "tool/edit-coerce-boolean",
+  "area": "tool",
+  "argv": ["-p", "Edit the fixture", "--permission-mode", "acceptEdits", "--output-format", "stream-json", "--verbose"],
+  "env": {},
+  "stdin": null,
+  "files": { "twice.txt": "a a\n" },
+  "model": {
+    "turns": [
+      { "tool_use": { "name": "Edit", "input": { "file_path": "twice.txt", "old_string": "a", "new_string": "b", "replace_all": "true" } } },
+      { "text": "PROBE_OK" }
+    ]
+  },
+  "timeout_ms": 60000,
+  "compare": {
+    "exit": 0,
+    "stdout": { "kind": "text", "match": ["All occurrences were successfully replaced."] },
+    "files": ["twice.txt"],
+    "requests": [{ "pathStartsWith": "/v1/messages", "count": 2 }]
+  },
+  "skip": []
+}

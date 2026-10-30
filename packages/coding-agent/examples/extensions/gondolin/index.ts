@@ -106,6 +106,7 @@ function createGondolinWriteOps(vm: VM, localCwd: string): WriteOperations {
 		mkdir: async (dirPath) => {
 			await vm.fs.mkdir(toGuestPath(localCwd, dirPath), { recursive: true });
 		},
+		readFile: async (filePath) => vm.fs.readFile(toGuestPath(localCwd, filePath)),
 	};
 }
 
@@ -116,6 +117,7 @@ function createGondolinEditOps(vm: VM, localCwd: string): EditOperations {
 		readFile: readOps.readFile,
 		writeFile: writeOps.writeFile,
 		access: readOps.access,
+		mkdir: writeOps.mkdir,
 	};
 }
 

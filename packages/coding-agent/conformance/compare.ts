@@ -302,6 +302,32 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				diffs.push({ check: "requests.bodyExcludes", expected: `no body contains ${text}`, actual: "found" });
 			}
 		}
+		const last = matched.at(-1);
+		if (last === undefined) {
+			for (const pattern of request.bodyMatch ?? []) {
+				diffs.push({ check: "requests.bodyMatch", expected: `match /${pattern}/`, actual: "no matching request" });
+			}
+			for (const pattern of request.bodyNotMatch ?? []) {
+				diffs.push({
+					check: "requests.bodyNotMatch",
+					expected: `no match /${pattern}/`,
+					actual: "no matching request",
+				});
+			}
+			continue;
+		}
+		const serialized = JSON.stringify(last.body);
+		for (const pattern of request.bodyMatch ?? []) {
+			if (!toRegExp(pattern).test(serialized)) {
+				diffs.push({ check: "requests.bodyMatch", expected: `match /${pattern}/`, actual: excerpt(serialized) });
+			}
+		}
+		for (const pattern of request.bodyNotMatch ?? []) {
+			const hit = toRegExp(pattern).exec(serialized);
+			if (hit !== null) {
+				diffs.push({ check: "requests.bodyNotMatch", expected: `no match /${pattern}/`, actual: excerpt(hit[0]) });
+			}
+		}
 	}
 }
 
@@ -385,6 +411,10 @@ function toRegExp(pattern: string): RegExp {
 	const inline = /^\(\?([ims]+)\)/.exec(pattern);
 	if (inline === null) return new RegExp(pattern, "m");
 	return new RegExp(pattern.slice(inline[0].length), `${inline[1]}m`);
+}
+
+function excerpt(text: string): string {
+	return text.length > 200 ? `${text.slice(0, 200)}...` : text;
 }
 
 function firstLine(text: string): string {

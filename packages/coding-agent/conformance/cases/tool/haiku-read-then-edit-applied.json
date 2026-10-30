@@ -1,0 +1,65 @@
+{
+	"id": "tool/haiku-read-then-edit-applied",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--model",
+		"claude-haiku-4-5",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"edit.txt": "before\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "edit.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "edit.txt",
+						"old_string": "before",
+						"new_string": "after"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"The file edit.txt has been updated successfully."
+			]
+		},
+		"files": [
+			"edit.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3
+			}
+		]
+	},
+	"skip": []
+}

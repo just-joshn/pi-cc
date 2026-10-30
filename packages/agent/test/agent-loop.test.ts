@@ -2198,7 +2198,14 @@ describe("runToolCall", () => {
 			isError: true,
 		});
 		expect(await runToolCall(call("d", "missing", {}), options)).toMatchObject({
-			result: { content: [{ type: "text", text: "Tool missing not found" }] },
+			result: {
+				content: [
+					{
+						type: "text",
+						text: "<tool_use_error>Error: No such tool available: missing</tool_use_error>",
+					},
+				],
+			},
 			isError: true,
 		});
 		// Error results keep their details.

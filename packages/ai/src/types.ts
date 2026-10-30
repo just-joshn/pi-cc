@@ -446,6 +446,12 @@ export interface ToolCall {
 	id: string;
 	name: string;
 	arguments: JsonObject;
+	/**
+	 * The call the model issued, after Claude Code's coercion and defaults. History replayed to
+	 * the provider uses this. Absent on sessions written before it was recorded; those fall
+	 * back to a reverse mapping. Not sent on the wire.
+	 */
+	modelCall?: { name: string; arguments: JsonObject };
 	thoughtSignature?: string; // Google-specific: opaque signature for reusing thought context
 	/** OpenAI Responses namespace for calls to dynamically loaded or namespaced tools. */
 	namespace?: string;
@@ -771,6 +777,8 @@ export interface Tool<TParameters extends TSchema = TSchema> {
 	description: string;
 	parameters: TParameters;
 	constrainedSampling?: false | ConstrainedSamplingConfig;
+	/** Declare this tool to the provider as loaded on demand rather than up front. */
+	deferLoading?: boolean;
 }
 
 export interface ToolReference {

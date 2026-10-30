@@ -1,0 +1,57 @@
+{
+	"id": "tool/read-both-unsafe",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"r.txt": "a\nb\nc\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "r.txt",
+						"offset": 9007199254740992,
+						"limit": 9007199254740992
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"offset\\\\\"\\\\n    \\],\\\\n    \\\\\"message\\\\\".{0,400}limit\\\\\""
+			]
+		},
+		"files": [
+			"r.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyMatch": [
+					"offset\\\\\"\\\\n    \\],\\\\n    \\\\\"message\\\\\".{0,400}limit\\\\\""
+				]
+			}
+		]
+	}
+}

@@ -30,6 +30,10 @@ export interface RequestSpec {
 	bodyIncludes?: string[];
 	/** Text that must appear in no matched request's serialized body. */
 	bodyExcludes?: string[];
+	/** Patterns the serialized body of the last matched request must match, for text a subset cannot pin. */
+	bodyMatch?: string[];
+	/** Patterns the serialized body of the last matched request must not match. */
+	bodyNotMatch?: string[];
 }
 
 /**
@@ -123,7 +127,17 @@ const HELP_STDOUT_KEYS = ["kind", "requireFlags", "requireCommands", "allowExtra
 const JSON_STDOUT_KEYS = ["kind", "records"];
 const JSONL_STDOUT_KEYS = ["kind", "minRecords", "records"];
 const STDERR_KEYS = ["contains", "equals"];
-const REQUEST_KEYS = ["pathStartsWith", "count", "method", "headers", "bodyEquals", "bodyIncludes", "bodyExcludes"];
+const REQUEST_KEYS = [
+	"pathStartsWith",
+	"count",
+	"method",
+	"headers",
+	"bodyEquals",
+	"bodyIncludes",
+	"bodyExcludes",
+	"bodyMatch",
+	"bodyNotMatch",
+];
 const MODEL_KEYS = ["turns"];
 /** Node's setTimeout takes a signed 32-bit millisecond count and clamps anything larger to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -356,6 +370,8 @@ function asOptionalRequestSpecs(value: unknown, source: string): RequestSpec[] |
 			bodyEquals: body as Record<string, unknown> | undefined,
 			bodyIncludes: asOptionalStringArray(object.bodyIncludes, source, `${field}.bodyIncludes`),
 			bodyExcludes: asOptionalStringArray(object.bodyExcludes, source, `${field}.bodyExcludes`),
+			bodyMatch: asOptionalStringArray(object.bodyMatch, source, `${field}.bodyMatch`),
+			bodyNotMatch: asOptionalStringArray(object.bodyNotMatch, source, `${field}.bodyNotMatch`),
 		};
 	});
 }

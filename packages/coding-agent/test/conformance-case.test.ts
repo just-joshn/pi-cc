@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(108);
+		expect(cases.length).toBe(160);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -376,6 +376,9 @@ const READ_ONLY_ARGV: [string[], string?][] = [
 	[["--settings", "{}"]],
 	[["--setting-sources", "project"]],
 	[["--model", "claude-haiku-4-5"]],
+	[["--tools", "Read,Bash"]],
+	[["--disallowedTools", "Agent,Bash"]],
+	[["--permission-mode", "acceptEdits"]],
 	[["-A", "$HOME"], "ls"],
 ];
 

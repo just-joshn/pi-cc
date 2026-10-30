@@ -437,7 +437,9 @@ describe("AgentSession MCP integration", () => {
 
 		const result = toolResult(harness, "mcp__docs__search");
 		expect(result.isError).toBe(true);
-		expect(getMessageText(result)).toBe("Tool mcp__docs__search not found");
+		expect(getMessageText(result)).toBe(
+			"<tool_use_error>Error: No such tool available: mcp__docs__search</tool_use_error>",
+		);
 		expect(calls).toEqual([]);
 	});
 

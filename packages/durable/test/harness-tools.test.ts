@@ -529,10 +529,14 @@ describe("tool results", () => {
 		expect(byId.get("block")).toEqual([true, "<harness>\n[error] Tool call blocked: not today\n</harness>"]);
 		expect(byId.get("throw")).toEqual([true, "<harness>\n[error] Tool call blocked: hook failed\n</harness>"]);
 		expect(byId.get("bad")![0]).toBe(true);
-		expect(byId.get("bad")![1]).toContain("Validation failed");
+		expect(byId.get("bad")![1]).toContain(
+			"<tool_use_error>InputValidationError: echo failed due to the following issue:\nThe parameter `text` type is expected as `string` but provided as `object`</tool_use_error>",
+		);
 		expect(byId.get("ok")).toEqual([false, ""]);
 		expect(byId.get("invalid")![0]).toBe(true);
-		expect(byId.get("invalid")![1]).toContain("Validation failed");
+		expect(byId.get("invalid")![1]).toContain(
+			"<tool_use_error>InputValidationError: echo failed due to the following issue:\nThe parameter `text` type is expected as `string` but provided as `object`</tool_use_error>",
+		);
 		// pi-ai coerces a number to a string before the first validation.
 		expect(byId.get("coerced")).toEqual([false, ""]);
 		expect(seen).toEqual(expect.arrayContaining([{ text: "1!" }, { text: "x!" }]));

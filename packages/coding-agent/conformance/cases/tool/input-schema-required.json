@@ -1,0 +1,50 @@
+{
+	"id": "tool/input-schema-required",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Read the fixture file",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"tool_fixture.txt": "PROBE_TOOL_FIXTURE_CONTENT_7f3a\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"offset": 2
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"InputValidationError: Read failed due to the following issue:",
+				"The required parameter `file_path` is missing"
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			}
+		]
+	},
+	"skip": []
+}

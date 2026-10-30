@@ -204,7 +204,9 @@ describe("validateToolArguments", () => {
 
 		for (const testCase of failingCases) {
 			const { tool, toolCall } = createToolCallWithPlainSchema(testCase.schema, testCase.input);
-			expect(() => validateToolArguments(tool, toolCall)).toThrow("Validation failed");
+			expect(() => validateToolArguments(tool, toolCall)).toThrow(
+				"InputValidationError: echo failed due to the following issue:",
+			);
 		}
 	});
 	// #10897

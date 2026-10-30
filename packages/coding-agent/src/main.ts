@@ -681,18 +681,19 @@ function buildSessionOptions(
 	// (handled by caller before createAgentSession)
 
 	// Tools
+	// Claude Code's --bare keeps Bash, Edit and Read and nothing else, and offers no placeholder.
 	if (parsed.bare === true) {
-		options.tools = [...CC_BARE_TOOLS];
 		options.fixedTools = true;
-	} else {
-		if (parsed.noTools) {
-			options.noTools = "all";
-		} else if (parsed.noBuiltinTools) {
-			options.noTools = "builtin";
+		if (!parsed.tools) {
+			options.tools = [...CC_BARE_TOOLS];
 		}
-		if (parsed.tools) {
-			options.tools = [...parsed.tools];
-		}
+	} else if (parsed.noTools) {
+		options.noTools = "all";
+	} else if (parsed.noBuiltinTools) {
+		options.noTools = "builtin";
+	}
+	if (parsed.tools) {
+		options.tools = [...parsed.tools];
 	}
 	if (parsed.excludeTools) {
 		options.excludeTools = [...parsed.excludeTools];

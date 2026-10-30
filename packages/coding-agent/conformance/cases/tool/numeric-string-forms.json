@@ -1,0 +1,35 @@
+{
+	"id": "tool/numeric-string-forms",
+	"area": "tool",
+	"argv": ["-p", "Edit the fixture", "--permission-mode", "acceptEdits", "--output-format", "stream-json", "--verbose"],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"n.txt": "N1\nN2\nN3\n",
+		"m.txt": "M1\nM2\nM3\n",
+		"t.txt": "a a\n"
+	},
+	"model": {
+		"turns": [
+			{ "tool_use": { "name": "Read", "input": { "file_path": "n.txt", "offset": " +02 " } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "m.txt", "offset": "0x2" } } },
+			{ "tool_use": { "name": "Edit", "input": { "file_path": "t.txt", "old_string": "a", "new_string": "b", "replace_all": "1" } } },
+			{ "text": "PROBE_OK" }
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"2\\\\tN2\\\\n3\\\\tN3",
+				"The parameter `offset` type is expected as `number` but provided as `string`",
+				"The parameter `replace_all` type is expected as `boolean` but provided as `string`"
+			]
+		},
+		"files": [],
+		"requests": [{ "pathStartsWith": "/v1/messages", "count": 4 }]
+	},
+	"skip": []
+}

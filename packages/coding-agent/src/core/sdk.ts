@@ -26,6 +26,7 @@ import {
 	SettingsManager,
 } from "./settings-manager.ts";
 import { time } from "./timings.ts";
+import { type CcSurfaceOptions, piToolNames, projectMessagesForModel, wrapStreamFn } from "./tools/cc-surface.ts";
 import {
 	createBashTool,
 	createCodingTools,
@@ -86,7 +87,7 @@ export interface CreateAgentSessionOptions {
 	 * These entries take exact names. Mixing them with plain entries throws.
 	 */
 	tools?: string[];
-	/** Keep a fixed tool list on the wire without a deferred tool placeholder. */
+	/** Keep a fixed tool list on the wire without a deferred tool placeholder, pi's or Claude Code's. */
 	fixedTools?: boolean;
 	/**
 	 * Optional denylist of tool names or patterns to disable. Applies after `tools` when both are
@@ -151,6 +152,14 @@ export {
 };
 
 // Helper Functions
+
+/** Whether the transport sends later system messages as their own messages, per the model's compat. */
+function midConversationSystemMessages(model: Model<any>): boolean {
+	const compat = model.compat;
+	return compat !== undefined && "supportsMidConvoSystemMessages" in compat
+		? compat.supportsMidConvoSystemMessages === true
+		: false;
+}
 
 function getDefaultAgentDir(): string {
 	return getAgentDir();
@@ -290,21 +299,35 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		model = { ...model, maxTokens: maxOutputTokens };
 	}
 
-	const toolListError = options.tools ? getToolListError(options.tools) : undefined;
+	const requestedTools = options.tools === undefined ? undefined : piToolNames(options.tools);
+	const toolListError = requestedTools ? getToolListError(requestedTools) : undefined;
 	if (toolListError) throw new Error(`Invalid tools option: ${toolListError}`);
-	const defaultToolNames = options.noTools ? [] : (settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
+	const defaultToolNames = options.noTools ? [] : piToolNames(settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
 	// A `tools` list of only `+name`/`-name` entries changes the default selection instead of
 	// replacing it, like the `defaultTools` setting.
-	const toolModifiers = options.tools?.some(isToolModifier) ? options.tools : undefined;
-	const selectedToolNames = toolModifiers ? applyToolModifiers(defaultToolNames, toolModifiers) : options.tools;
+	const toolModifiers = requestedTools?.some(isToolModifier) ? requestedTools : undefined;
+	const selectedToolNames = toolModifiers ? applyToolModifiers(defaultToolNames, toolModifiers) : requestedTools;
 	const allowedToolNames = toolModifiers
 		? options.noTools === "all"
 			? selectedToolNames
 			: undefined
-		: (options.tools ?? (options.noTools === "all" ? [] : undefined));
-	const excludedToolNames = options.excludeTools;
+		: (requestedTools ?? (options.noTools === "all" ? [] : undefined));
+	const excludedToolNames = options.excludeTools ? piToolNames(options.excludeTools) : undefined;
 	const isExcludedTool = excludedToolNames ? createToolNameMatcher(excludedToolNames) : undefined;
 	const initialActiveToolNames = (selectedToolNames ?? defaultToolNames).filter((name) => !isExcludedTool?.(name));
+
+	// Claude Code's tool names, schemas and result text live only at the provider boundary: the
+	// transcript keeps pi's own tool identity, and this projection is the one place that changes.
+	// Read per request, because the model can change mid-session and the notice placement follows
+	// the model's own capability: a model the transport folds system messages for gets the notice
+	// inside its tool result, the way Claude Code answers it there.
+	const fixedTools = options.fixedTools === true;
+	const ccSurface = (): CcSurfaceOptions => ({
+		placeholder: !fixedTools,
+		midConversationSystemMessages: midConversationSystemMessages(agent.state.model),
+	});
+	const convertToLlmForModel = (messages: AgentMessage[]): Message[] =>
+		projectMessagesForModel(convertToLlmWithBlockImages(messages), ccSurface());
 
 	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
 	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
@@ -413,7 +436,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	};
 
-	const fixedTools = options.fixedTools === true;
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: "",
@@ -422,22 +444,25 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: [],
 			messages: existingSession.messages,
 		},
-		convertToLlm: convertToLlmWithBlockImages,
-		streamFn: async (sessionModel, context, options) => {
-			const model = fixedTools
-				? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
-				: sessionModel;
-			const requestOptions = buildRequestOptions(options);
-			// Compaction and summaries use their own routing ids; only session requests
-			// replace the cache entry, so warming restarts from them. Keep warming while
-			// the current transcript still extends the request's prefix. Agent state may
-			// shallow-copy the messages array or refresh the model object without changing
-			// the provider request, so top-level object identity is not a valid cache key.
-			if (options?.sessionId === sessionManager.getSessionId()) {
-				cacheWarmer.start({ model, context, options: requestOptions }, cacheContextIsCurrent(model));
-			}
-			return modelRuntime.streamSimple(model, context, requestOptions);
-		},
+		convertToLlm: convertToLlmForModel,
+		streamFn: wrapStreamFn(
+			async (sessionModel, context, options) => {
+				const model = fixedTools
+					? { ...sessionModel, compat: { ...sessionModel.compat, supportsMidConvoToolChanges: false } }
+					: sessionModel;
+				const requestOptions = buildRequestOptions(options);
+				// Compaction and summaries use their own routing ids; only session requests
+				// replace the cache entry, so warming restarts from them. Keep warming while
+				// the current transcript still extends the request's prefix. Agent state may
+				// shallow-copy the messages array or refresh the model object without changing
+				// the provider request, so top-level object identity is not a valid cache key.
+				if (options?.sessionId === sessionManager.getSessionId()) {
+					cacheWarmer.start({ model, context, options: requestOptions }, cacheContextIsCurrent(model));
+				}
+				return modelRuntime.streamSimple(model, context, requestOptions);
+			},
+			() => agent.state.tools.map((tool) => tool.name),
+		),
 		onPayload: transformProviderPayload,
 		onResponse: handleProviderResponse,
 		onProviderStreamEvent: handleProviderStreamEvent,

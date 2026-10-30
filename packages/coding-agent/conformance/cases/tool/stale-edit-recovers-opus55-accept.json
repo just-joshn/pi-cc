@@ -1,0 +1,111 @@
+{
+	"id": "tool/stale-edit-recovers-opus55-accept",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--model",
+		"claude-opus-5-5",
+		"--permission-mode",
+		"acceptEdits",
+		"--allowedTools",
+		"Bash",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"s.txt": "before\n",
+		"w.txt": "before\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "s.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "w.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sleep 1; printf 'changed before\\n' > s.txt; printf 'changed before\\n' > w.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "s.txt",
+						"old_string": "before",
+						"new_string": "after"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "w.txt",
+						"content": "after\n"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"the file had been modified on disk since you last read it",
+				"File has been modified since read"
+			]
+		},
+		"files": [
+			{
+				"path": "s.txt",
+				"contains": [
+					"changed after"
+				]
+			},
+			{
+				"path": "w.txt",
+				"contains": [
+					"changed before"
+				]
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 6,
+				"bodyMatch": [
+					"the file had been modified on disk since you last read it",
+					"File has been modified since read"
+				]
+			}
+		]
+	},
+	"skip": []
+}

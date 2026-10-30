@@ -1,0 +1,64 @@
+{
+	"id": "tool/edit-replace-all-text",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Edit the fixture",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"two.txt": "PROBE_DUP_LINE\nPROBE_DUP_LINE\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "two.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "two.txt",
+						"old_string": "PROBE_DUP_LINE",
+						"new_string": "PROBE_DUP_NEW",
+						"replace_all": true
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"The file two.txt has been updated. All occurrences were successfully replaced."
+			]
+		},
+		"files": [
+			"two.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3
+			}
+		]
+	},
+	"skip": []
+}

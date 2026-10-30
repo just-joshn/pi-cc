@@ -723,11 +723,20 @@ async function prepareToolCall(
 	signal: AbortSignal | undefined,
 	tools: readonly AgentTool<any>[] = currentContext.tools ?? [],
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
+	// The model boundary already answered this call. Honor that before a name lookup, or a
+	// disabled Claude Code name is reported under pi's spelling.
+	if (toolCall.argumentsError?.startsWith("<tool_use_error>")) {
+		return {
+			kind: "immediate",
+			result: createErrorToolResult(toolCall.argumentsError),
+			isError: true,
+		};
+	}
 	const tool = tools.find((t) => t.name === toolCall.name);
 	if (!tool) {
 		return {
 			kind: "immediate",
-			result: createErrorToolResult(`Tool ${toolCall.name} not found`),
+			result: createErrorToolResult(unknownToolResult(toolCall.name)),
 			isError: true,
 		};
 	}
@@ -924,6 +933,11 @@ function createErrorToolResult(message: string): AgentToolResult<any> {
 		content: [{ type: "text", text: message }],
 		details: {},
 	};
+}
+
+/** Claude Code's result for a call that names no registered tool. */
+function unknownToolResult(name: string): string {
+	return `<tool_use_error>Error: No such tool available: ${name}</tool_use_error>`;
 }
 
 async function emitToolExecutionEnd(finalized: FinalizedToolCallOutcome, emit: AgentEventSink): Promise<void> {

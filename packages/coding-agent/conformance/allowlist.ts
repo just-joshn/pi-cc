@@ -17,9 +17,9 @@
  * run root. `isolation/seeded-hook-contained` and `isolation/inline-settings-hook-contained` prove it
  * with a hook that tries all three escapes from inside settings the case supplied.
  *
- * Every entry below is a token a shipped case, PR #5 (`cc/p02-settings`) or PR #6 (`cc/provider-env`)
- * writes in its argv. Nothing is listed for a case that might exist later: a unit that needs a flag, a
- * subcommand word, or an env key adds it here in its own reviewable diff.
+ * Every entry below is a token a shipped case, PR #5 (`cc/p02-settings`), PR #6 (`cc/provider-env`),
+ * or PR #7 (`cc/p03-tools`) writes in its argv. Nothing is listed for a case that might exist later: a
+ * unit that needs a flag, a subcommand word, or an env key adds it here in its own reviewable diff.
  */
 
 import { HARNESS_ENV_KEYS, type ProbeName } from "./isolate.ts";
@@ -58,6 +58,7 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--verbose",
 		"--session-id",
 		"--permission-mode",
+		"--allowedTools",
 		// model selection, which both sides share and which PR #6's cases pin
 		"--model",
 		// settings sources, which PR #5's cases read from the case's own roots
@@ -65,6 +66,9 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--setting-sources",
 		"--bare",
 		"--safe-mode",
+		// tool selection, which PR #7's cases pin
+		"--tools",
+		"--disallowedTools",
 		// a token that exists to be rejected, so a case can pin the unknown-flag error
 		"--no-such-flag-probe",
 	],
@@ -84,7 +88,29 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"project",
 		// the model id PR #5's `--model` case writes
 		"claude-haiku-4-5",
+		// the model PR #7's notice case runs, one that takes mid-conversation system messages
+		"claude-opus-5-5",
+		// values `--permission-mode` writes in PR #7's cases
 		"acceptEdits",
+		"bypassPermissions",
+		// values `--allowedTools` and `--tools` write in PR #7's cases
+		"Bash",
+		"Read",
+		// model ids PR #7's gate cases run, whose family resolution they pin
+		"claude-sonnet-4-5",
+		"claude-opus-4-5",
+		"claude-opus-4-1",
+		"claude-opus-4-6",
+		"claude-opus-4-0",
+		"claude-haiku-4-5-20251001",
+		"claude-sonnet-4-5-20250929",
+		"claude-opus-4-5-20251101",
+		"claude-sonnet-4-20250514",
+		"Claude-Haiku-4-5",
+		"claude-sonnet-5-5",
+		"claude-opus-4-7",
+		"gpt-5",
+		"openai/gpt-5",
 	],
 };
 
@@ -114,6 +140,7 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
  * what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and `BUN_OPTIONS` would do and why they stay refused.
  */
 const CASE_ENV_KEYS: readonly string[] = [
+	"CLAUDE_CODE_TMPDIR",
 	"ANTHROPIC_AUTH_TOKEN",
 	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_CUSTOM_HEADERS",

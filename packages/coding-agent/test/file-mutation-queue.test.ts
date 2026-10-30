@@ -150,6 +150,7 @@ describe("built-in edit and write tools", () => {
 		const writeTool = createWriteTool(dir, {
 			operations: {
 				mkdir: async () => {},
+				readFile: (path) => readFile(path),
 				writeFile: async (path, content) => {
 					await delay(10);
 					await writeFile(path, content, "utf8");
@@ -184,6 +185,7 @@ describe("built-in edit and write tools", () => {
 		const writeTool = createWriteTool(dir, {
 			operations: {
 				mkdir: async () => {},
+				readFile: (path) => readFile(path),
 				writeFile: async (path, content) => {
 					if (content === "first\n") {
 						firstWriteStarted.resolve();

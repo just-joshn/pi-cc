@@ -146,7 +146,9 @@ import {
 	normalizeBuildSystemPromptOptions,
 } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { isCcLegacyMutationModel } from "./tools/cc-model-family.ts";
+import { piToolNames } from "./tools/cc-surface.ts";
+import { createAllToolDefinitions, createReadState, type ReadState } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, combineUsage, createUsageTotals } from "./usage-totals.ts";
 import {
@@ -456,6 +458,8 @@ export class AgentSession {
 	private _allowlistFiltersMcp = false;
 	private _excludedTools?: (name: string) => boolean;
 	private _baseToolsOverride?: Record<string, AgentTool>;
+	/** Prior-read records for the Claude Code Edit and Write tools, one per session. */
+	private readonly _readState: ReadState = createReadState();
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -3676,6 +3680,7 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
+		const isReadGated = () => isCcLegacyMutationModel(this.model?.id ?? "");
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -3684,8 +3689,14 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
-					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					read: {
+						autoResizeImages,
+						readState: this._readState,
+						contextRoomTokens: () => this._readContextRoomTokens(),
+					},
+					edit: { readState: this._readState, isReadGated },
+					write: { readState: this._readState, isReadGated },
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -3730,7 +3741,7 @@ export class AgentSession {
 		const getDefaultTools = () =>
 			this._usesDefaultTools
 				? applyToolModifiers(
-						this.settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES,
+						piToolNames(this.settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES),
 						this._defaultToolModifiers,
 					)
 				: [];
@@ -4297,6 +4308,17 @@ export class AgentSession {
 			cost: usageTotals.cost,
 			contextUsage: this.getContextUsage(),
 		};
+	}
+
+	/**
+	 * Claude Code's room for one turn's reads: 70% of what is left below the compaction threshold.
+	 * Unknown when the model has no context window; an unknown context size counts as empty.
+	 */
+	private _readContextRoomTokens(): number | undefined {
+		const usage = this.getContextUsage();
+		if (usage === undefined) return undefined;
+		const threshold = usage.contextWindow - this.settingsManager.getCompactionSettings(this.model).reserveTokens;
+		return Math.max(0, Math.floor((threshold - (usage.tokens ?? 0)) * 0.7));
 	}
 
 	getContextUsage(): ContextUsage | undefined {

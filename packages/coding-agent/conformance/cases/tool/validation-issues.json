@@ -1,0 +1,28 @@
+{
+	"id": "tool/validation-issues",
+	"area": "tool",
+	"argv": ["-p", "Edit the fixture", "--output-format", "stream-json", "--verbose"],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": { "file_path": 5, "old_string": 1, "new_string": null }
+				}
+			},
+			{ "text": "PROBE_OK" }
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": ["failed due to the following issues:"]
+		}
+	},
+	"skip": []
+}

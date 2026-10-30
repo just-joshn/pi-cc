@@ -1,0 +1,48 @@
+{
+	"id": "tool/read-edges",
+	"area": "tool",
+	"argv": ["-p", "Read the fixtures", "--output-format", "stream-json", "--verbose"],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"empty.txt": "",
+		"crlf.txt": "a\r\nb\r\n",
+		"bom.txt": "\ufefffirst\nsecond\n",
+		"five.txt": "1\n2\n3\n4\n5\n",
+		"sub/keep.txt": "k\n",
+		"bin.dat": "ab\u0000\u0001\u0002cd"
+	},
+	"model": {
+		"turns": [
+			{ "tool_use": { "name": "Read", "input": { "file_path": "empty.txt" } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "crlf.txt" } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "bom.txt" } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "five.txt", "offset": 0 } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "five.txt", "offset": 50 } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "missing.txt" } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "sub" } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "bin.dat" } } },
+			{ "tool_use": { "name": "Edit", "input": { "file_path": "missing-edit.txt", "old_string": "a", "new_string": "b" } } },
+			{ "text": "PROBE_OK" }
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"the file exists but the contents are empty",
+				"1\\\\ta\\\\n2\\\\tb\\\\n3\\\\t",
+				"1\\\\tfirst",
+				"0\\\\t1",
+				"shorter than the provided offset \\(50\\)",
+				"File does not exist. Note:",
+				"EISDIR: illegal operation on a directory, read",
+				"This tool cannot read binary files",
+				"<tool_use_error>File does not exist. Note:"
+			]
+		}
+	},
+	"skip": []
+}

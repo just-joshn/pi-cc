@@ -1,0 +1,146 @@
+{
+	"id": "tool/declared-tools",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--disallowedTools",
+		"Agent,ListAgents,ReportFindings,ScheduleWakeup,Skill,Workflow,ToolSearch,DeferredToolPlaceholder,CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,Glob,Grep,NotebookEdit,SendMessage,TaskStop,WebFetch,WebSearch,Monitor"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"equals": "PROBE_OK"
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"tools": [
+						{
+							"name": "Bash",
+							"input_schema": {
+								"type": "object",
+								"properties": {
+									"command": {
+										"type": "string"
+									},
+									"timeout": {
+										"type": "number"
+									},
+									"description": {
+										"type": "string"
+									},
+									"run_in_background": {
+										"type": "boolean"
+									},
+									"dangerouslyDisableSandbox": {
+										"type": "boolean"
+									}
+								},
+								"required": [
+									"command"
+								]
+							}
+						},
+						{
+							"name": "Edit",
+							"input_schema": {
+								"type": "object",
+								"properties": {
+									"file_path": {
+										"type": "string"
+									},
+									"old_string": {
+										"type": "string"
+									},
+									"new_string": {
+										"type": "string"
+									},
+									"replace_all": {
+										"type": "boolean",
+										"default": false
+									}
+								},
+								"required": [
+									"file_path",
+									"old_string",
+									"new_string"
+								]
+							}
+						},
+						{
+							"name": "Read",
+							"input_schema": {
+								"type": "object",
+								"properties": {
+									"file_path": {
+										"type": "string"
+									},
+									"offset": {
+										"type": "integer",
+										"minimum": 0,
+										"maximum": 9007199254740991
+									},
+									"limit": {
+										"type": "integer",
+										"exclusiveMinimum": 0,
+										"maximum": 9007199254740991
+									},
+									"pages": {
+										"type": "string"
+									},
+									"allow_large": {
+										"type": "boolean"
+									}
+								},
+								"required": [
+									"file_path"
+								]
+							}
+						},
+						{
+							"name": "DeferredToolPlaceholder",
+							"input_schema": {
+								"type": "object",
+								"properties": {}
+							}
+						},
+						{
+							"name": "Write",
+							"input_schema": {
+								"type": "object",
+								"properties": {
+									"file_path": {
+										"type": "string"
+									},
+									"content": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"file_path",
+									"content"
+								]
+							}
+						}
+					]
+				}
+			}
+		]
+	},
+	"skip": []
+}

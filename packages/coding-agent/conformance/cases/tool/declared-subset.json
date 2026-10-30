@@ -1,0 +1,27 @@
+{
+	"id": "tool/declared-subset",
+	"area": "tool",
+	"argv": ["-p", "Reply with exactly PROBE_OK", "--tools", "Read,Bash"],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": { "turns": [{ "text": "PROBE_OK" }] },
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyEquals": {
+					"tools": [
+						{ "name": "Bash" },
+						{ "name": "DeferredToolPlaceholder", "defer_loading": true },
+						{ "name": "Read" }
+					]
+				}
+			}
+		]
+	},
+	"skip": []
+}

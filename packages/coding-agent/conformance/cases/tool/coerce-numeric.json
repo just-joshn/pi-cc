@@ -1,0 +1,28 @@
+{
+	"id": "tool/coerce-numeric",
+	"area": "tool",
+	"argv": ["-p", "Read the fixture", "--output-format", "stream-json", "--verbose"],
+	"env": {},
+	"stdin": null,
+	"files": {
+		"five.txt": "1\n2\n3\n4\n5\n"
+	},
+	"model": {
+		"turns": [
+			{ "tool_use": { "name": "Read", "input": { "file_path": "five.txt", "limit": "2" } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "five.txt", "limit": 0 } } },
+			{ "tool_use": { "name": "Read", "input": { "file_path": "five.txt", "offset": -1 } } },
+			{ "tool_use": { "name": "Bash", "input": { "command": "echo coerced", "timeout": "1000" } } },
+			{ "text": "PROBE_OK" }
+		]
+	},
+	"timeout_ms": 60000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": ["1\\\\t1\\\\n2\\\\t2", "5\\\\t5\\\\n6\\\\t"]
+		}
+	},
+	"skip": []
+}

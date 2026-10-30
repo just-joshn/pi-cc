@@ -1,0 +1,109 @@
+{
+	"id": "tool/stale-touch-full-haiku",
+	"area": "tool",
+	"argv": [
+		"-p",
+		"Run the fixture probes",
+		"--model",
+		"claude-haiku-4-5",
+		"--permission-mode",
+		"acceptEdits",
+		"--allowedTools",
+		"Bash",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"s.txt": "one\ntwo\nthree\n",
+		"w.txt": "one\ntwo\nthree\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "s.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "w.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sleep 1; touch s.txt w.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "s.txt",
+						"old_string": "two",
+						"new_string": "TWO"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "w.txt",
+						"content": "after\n"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"The file s.txt has been updated successfully\\. \\(file state is current",
+				"The file w.txt has been updated successfully."
+			]
+		},
+		"files": [
+			{
+				"path": "s.txt",
+				"contains": [
+					"one\nTWO\nthree"
+				]
+			},
+			{
+				"path": "w.txt",
+				"contains": [
+					"after"
+				]
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 6,
+				"bodyMatch": [
+					"The file w.txt has been updated successfully."
+				]
+			}
+		]
+	}
+}
