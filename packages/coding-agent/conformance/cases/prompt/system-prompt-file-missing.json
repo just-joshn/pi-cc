@@ -1,0 +1,31 @@
+{
+	"id": "prompt/system-prompt-file-missing",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--system-prompt-file",
+		"$WORKSPACE/missing.md"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"Error: System prompt file not found: "
+			]
+		},
+		"requests": []
+	},
+	"skip": []
+}

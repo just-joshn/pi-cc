@@ -95,20 +95,17 @@ describe("Anthropic Messages request", () => {
 		expect(requests[0].headers.get("anthropic-beta") ?? "").not.toContain("oauth-2025-04-20");
 	});
 
-	it("switches to Claude Code identity and OAuth betas for OAuth tokens", async () => {
+	it("keeps pi identity and OAuth auth without client impersonation", async () => {
 		const { requests, fetch } = recordFetch(() => sseResponse(thinkingTextToolUse));
 		await streamAnthropic(model, context, { apiKey: "sk-ant-oat-test", fetch }).result();
 
 		expect(requests[0].headers.get("authorization")).toBe("Bearer sk-ant-oat-test");
 		expect(requests[0].headers.get("x-api-key")).toBeNull();
-		expect(requests[0].headers.get("user-agent")).toBe("claude-cli/2.1.280");
+		expect(requests[0].headers.get("user-agent")).toMatch(/^pi\//);
+		expect(requests[0].headers.get("x-app")).toBeNull();
+		expect(requests[0].headers.get("anthropic-beta")?.split(",")).not.toContain("claude-code-20250219");
 		expect(requests[0].headers.get("anthropic-beta")?.split(",")).toContain("oauth-2025-04-20");
 		expect(requests[0].body.system).toEqual([
-			{
-				type: "text",
-				text: "You are Claude Code, Anthropic's official CLI for Claude.",
-				cache_control: { type: "ephemeral" },
-			},
 			{ type: "text", text: "System prompt.", cache_control: { type: "ephemeral" } },
 		]);
 	});

@@ -4,6 +4,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { formatUnknownOptionMessage } from "../cli/cc-flags.ts";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
+import type { CcPolicy } from "./cc-policy.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import {
@@ -62,6 +63,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	tools?: string[];
 	fixedTools?: boolean;
+	ccPolicy?: CcPolicy;
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
@@ -232,6 +234,7 @@ export async function createAgentSessionFromServices(
 		scopedModels: options.scopedModels,
 		tools: options.tools,
 		fixedTools: options.fixedTools,
+		ccPolicy: options.ccPolicy,
 		excludeTools: options.excludeTools,
 		noTools: options.noTools,
 		customTools: options.customTools,

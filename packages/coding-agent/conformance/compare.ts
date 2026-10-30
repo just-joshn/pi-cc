@@ -11,7 +11,7 @@
 
 import type { IncomingHttpHeaders } from "node:http";
 import type { BodyTextSpec, CompareSpec, ContainmentSpec, FileSpec, HeaderValueSpec, StdoutSpec } from "./case.ts";
-import type { Violation } from "./isolate.ts";
+import type { SideName, Violation } from "./isolate.ts";
 import type { RecordedRequest } from "./mock/messages.ts";
 import type { NormalizeContext } from "./normalize/stdout.ts";
 import { normalizeText, normalizeWhitespace } from "./normalize/stdout.ts";
@@ -41,7 +41,15 @@ export interface Diff {
 
 const APP_NAMES = new Set(["claude", "pi", "pi-cc"]);
 
-export function compare(spec: CompareSpec, observation: Observation, context: NormalizeContext): Diff[] {
+export function compare(
+	spec: CompareSpec,
+	observation: Observation,
+	context: NormalizeContext,
+	side?: SideName,
+): Diff[] {
+	if (side === undefined && spec.requests?.some((request) => request.side !== undefined)) {
+		throw new Error("Side-specific request assertions require a side");
+	}
 	const diffs: Diff[] = [];
 	checkExit(spec, observation, diffs);
 	checkStdout(spec.stdout, observation, context, diffs);
@@ -49,7 +57,11 @@ export function compare(spec: CompareSpec, observation: Observation, context: No
 	checkFiles(spec.files, observation, diffs);
 	checkAbsent(observation, diffs);
 	checkContainment(spec.containment, observation, diffs);
-	checkRequests(spec.requests, observation, diffs);
+	checkRequests(
+		spec.requests?.filter((request) => request.side === undefined || request.side === side),
+		observation,
+		diffs,
+	);
 	return diffs;
 }
 
@@ -304,6 +316,36 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 				);
 			}
 		}
+		if (request.bodyLength !== undefined) {
+			const index = request.index ?? -1;
+			const record = matched.at(index);
+			for (const [path, spec] of Object.entries(request.bodyLength)) {
+				const text = record === undefined ? undefined : bodyText(record.body, path);
+				const tolerance = spec.tolerance ?? DEFAULT_LENGTH_TOLERANCE;
+				const low = Math.floor(spec.around * (1 - tolerance));
+				const high = Math.ceil(spec.around * (1 + tolerance));
+				if (text === undefined || text.length < low || text.length > high) {
+					diffs.push({
+						check: "requests.bodyLength",
+						expected: `request ${index} ${path} is ${low} to ${high} characters`,
+						actual: text === undefined ? "absent" : `${text.length} characters`,
+					});
+				}
+			}
+		}
+		for (const path of request.bodySame ?? []) {
+			const values = matched.map((record) => bodyText(record.body, path));
+			if (matched.length === 0 || values.some((value) => value === undefined || value !== values[0])) {
+				diffs.push({
+					check: "requests.bodySame",
+					expected: `${path} identical on ${matched.length} requests`,
+					actual:
+						matched.length === 0
+							? "no matching request"
+							: values.map((value) => value?.length ?? "absent").join(", "),
+				});
+			}
+		}
 		const bodies = matched.map((record) => serializeBody(record.body));
 		for (const text of request.bodyIncludes ?? []) {
 			if (!bodies.some((body) => body.includes(text))) {
@@ -353,6 +395,8 @@ function checkRequests(spec: CompareSpec["requests"], observation: Observation, 
 		}
 	}
 }
+
+const DEFAULT_LENGTH_TOLERANCE = 0.15;
 
 function serializeBody(body: unknown): string {
 	return typeof body === "string" ? body : JSON.stringify(body);

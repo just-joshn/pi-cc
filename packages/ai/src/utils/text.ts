@@ -17,6 +17,7 @@ export function getSystemMessageText(message: SystemMessage): string {
 	for (const text of Object.values(message.sections ?? {})) {
 		if (text !== null) parts.push(text);
 	}
+	if (message.context) parts.push(message.context);
 	return parts.filter((part) => part.length > 0).join("\n\n");
 }
 

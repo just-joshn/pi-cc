@@ -1,0 +1,46 @@
+{
+	"id": "prompt/effort-on-wire-non-capable",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--model",
+		"claude-sonnet-4-5",
+		"--effort",
+		"high"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"model": "claude-sonnet-4-5",
+					"max_tokens": 32000,
+					"thinking": {
+						"type": "enabled",
+						"budget_tokens": 31999,
+						"display": "omitted"
+					}
+				},
+				"bodyNotMatch": [
+					"\"output_config\""
+				]
+			}
+		]
+	},
+	"skip": []
+}

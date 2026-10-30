@@ -25,6 +25,20 @@ function checks(spec: CompareSpec, overrides: Partial<Observation> = {}): string
 	return compare(spec, observation(overrides), CONTEXT).map((diff) => diff.check);
 }
 
+describe("side-specific request assertions", () => {
+	test("keeps the oracle value and rejects client identity on pi-cc", () => {
+		const spec: CompareSpec = {
+			requests: [
+				{ side: "claude", deviation: "Client identity", count: 1 },
+				{ side: "pi-cc", deviation: "Client identity", count: 0 },
+			],
+		};
+		expect(compare(spec, observation(), CONTEXT, "pi-cc")).toEqual([]);
+		expect(compare(spec, observation(), CONTEXT, "claude").map((diff) => diff.check)).toEqual(["requests.count"]);
+		expect(() => compare(spec, observation(), CONTEXT)).toThrow(/require a side/);
+	});
+});
+
 describe("compare.files", () => {
 	test("passes when the declared file was written", () => {
 		expect(checks({ files: ["hook.log"] }, { workspaceBefore: new Map([["hook.log", "seeded"]]) })).toEqual([]);
@@ -235,6 +249,56 @@ describe("compare.requests body patterns", () => {
 	test("fails a pattern that must not match", () => {
 		const spec: CompareSpec = { requests: [{ bodyMatch: ["first"], bodyNotMatch: ["system-reminder"] }] };
 		expect(checks(spec, { requests })).toEqual(["requests.bodyMatch", "requests.bodyNotMatch"]);
+	});
+});
+
+describe("compare.requests bodyLength", () => {
+	const requests = [
+		{
+			index: 0,
+			path: "/v1/messages",
+			method: "POST",
+			headers: {},
+			body: { system: [{ type: "text", text: "x".repeat(100) }] },
+		},
+	];
+
+	test("passes a length within the default 15 percent window and fails one outside it", () => {
+		const within = { requests: [{ bodyLength: { "system.0.text": { around: 110 } } }] };
+		const outside = { requests: [{ bodyLength: { "system.0.text": { around: 130 } } }] };
+
+		expect(checks(within, { requests })).toEqual([]);
+		expect(checks(outside, { requests })).toEqual(["requests.bodyLength"]);
+	});
+
+	test("takes a tolerance and fails a path that leads nowhere", () => {
+		const tight = { requests: [{ bodyLength: { "system.0.text": { around: 110, tolerance: 0.05 } } }] };
+		const missing = { requests: [{ bodyLength: { "system.2.text": { around: 100 } } }] };
+
+		expect(checks(tight, { requests })).toEqual(["requests.bodyLength"]);
+		expect(checks(missing, { requests })).toEqual(["requests.bodyLength"]);
+	});
+});
+
+describe("compare.requests bodySame", () => {
+	const request = (index: number, system: string) => ({
+		index,
+		path: "/v1/messages",
+		method: "POST",
+		headers: {},
+		body: { system: [{ type: "text", text: system }], messages: [index] },
+	});
+
+	test("passes when the path is identical on every matched request and fails when one differs or is absent", () => {
+		const same = [request(0, "prompt"), request(1, "prompt")];
+		const spec = { requests: [{ bodySame: ["system"] }] };
+
+		expect(checks(spec, { requests: same })).toEqual([]);
+		expect(checks(spec, { requests: [request(0, "prompt"), request(1, "other")] })).toEqual(["requests.bodySame"]);
+		expect(checks({ requests: [{ bodySame: ["system.4"] }] }, { requests: same })).toEqual(["requests.bodySame"]);
+		expect(checks({ requests: [{ pathStartsWith: "/none", bodySame: ["system"] }] }, { requests: same })).toEqual([
+			"requests.bodySame",
+		]);
 	});
 });
 

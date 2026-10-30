@@ -23,7 +23,17 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(355);
+		expect(cases.length).toBe(386);
+	});
+
+	test("requires a known side and a deviation for side-specific request assertions", () => {
+		const request = (value: Record<string, unknown>) => ({ ...MINIMAL_CASE, compare: { requests: [value] } });
+		expect(
+			loadOne(request({ side: "pi-cc", deviation: "store/deviations.md, Client identity" })).compare.requests?.[0]
+				.side,
+		).toBe("pi-cc");
+		expect(() => loadOne(request({ side: "unknown", deviation: "reason" }))).toThrow(/side is unknown/);
+		expect(() => loadOne(request({ side: "pi-cc" }))).toThrow(/requires a deviation/);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -172,6 +182,24 @@ describe("memory case fields", () => {
 		expect(() => loadOne(request({ index: 0.5, bodyAt: { system: { match: ["x"] } } }))).toThrow(
 			/must be an integer/,
 		);
+	});
+});
+
+describe("bodyLength loading", () => {
+	const request = (entry: Record<string, unknown>) => ({ ...MINIMAL_CASE, compare: { requests: [entry] } });
+
+	test("loads a length window", () => {
+		const loaded = loadOne(request({ bodyLength: { "system.2.text": { around: 5914, tolerance: 0.1 } } }));
+
+		expect(loaded.compare.requests?.[0].bodyLength).toEqual({ "system.2.text": { around: 5914, tolerance: 0.1 } });
+	});
+
+	test("refuses a missing target, a bad tolerance and an empty path segment", () => {
+		expect(() => loadOne(request({ bodyLength: { system: {} } }))).toThrow(/around must be a positive number/);
+		expect(() => loadOne(request({ bodyLength: { system: { around: 5, tolerance: 2 } } }))).toThrow(
+			/tolerance must be between 0 and 1/,
+		);
+		expect(() => loadOne(request({ bodyLength: { "system..0": { around: 5 } } }))).toThrow(/empty path segment/);
 	});
 });
 
@@ -433,7 +461,6 @@ const SUBTRACTED: string[][] = [
 	["auto-mode", "critique"],
 	["logs"],
 	["doctor"],
-	["high"],
 	["--mcp-config", "probe"],
 	["--agents=probe"],
 	["--dangerously-skip-permissions"],

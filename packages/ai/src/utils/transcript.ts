@@ -74,9 +74,11 @@ export function getCurrentSystemMessage(messages: TranscriptMessages): SystemMes
 	const content: string[] = [];
 	const sections = new Map<string, string>();
 	let timestamp: number | undefined;
+	let context: string | undefined;
 	for (const message of messages) {
 		if (!isSystemMessage(message)) continue;
 		timestamp ??= message.timestamp;
+		if (message.context !== undefined) context = message.context;
 		const text = contentText(message.content);
 		if (text.length > 0) content.push(text);
 		for (const [name, value] of Object.entries(message.sections ?? {})) {
@@ -90,6 +92,7 @@ export function getCurrentSystemMessage(messages: TranscriptMessages): SystemMes
 		role: "system",
 		content: content.join("\n\n"),
 		...(sections.size > 0 ? { sections: Object.fromEntries(sections) } : {}),
+		...(context === undefined ? {} : { context }),
 		...(tools.length > 0 ? { toolsAdded: tools } : {}),
 		timestamp: timestamp ?? 0,
 	};

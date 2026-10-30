@@ -1,0 +1,110 @@
+{
+	"id": "prompt/append-delta",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--append-system-prompt",
+		"PROBE_THIRTY_CHAR_MARKER_XYZABCDEF"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					]
+				},
+				"bodyAt": {
+					"system.1.text": {
+						"notMatch": [
+							"PROBE_THIRTY_CHAR_MARKER_XYZABCDEF"
+						]
+					},
+					"system.2.text": {
+						"match": [
+							"PROBE_THIRTY_CHAR_MARKER_XYZABCDEF"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.1.text": {
+						"around": 94,
+						"tolerance": 0.08
+					},
+					"system.2.text": {
+						"around": 5926
+					}
+				},
+				"side": "claude",
+				"deviation": "store/deviations.md, Client identity (P13, #20). Oracle retains observed client identification."
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					]
+				},
+				"bodyAt": {
+					"system.0.text": {
+						"notMatch": [
+							"PROBE_THIRTY_CHAR_MARKER_XYZABCDEF"
+						]
+					},
+					"system.1.text": {
+						"match": [
+							"PROBE_THIRTY_CHAR_MARKER_XYZABCDEF"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.0.text": {
+						"around": 94,
+						"tolerance": 0.08
+					},
+					"system.1.text": {
+						"around": 5926
+					}
+				},
+				"side": "pi-cc",
+				"deviation": "store/deviations.md, Client identity (P13, #20). pi-cc never identifies as an Anthropic client.",
+				"bodyExcludes": [
+					"x-anthropic-billing-header:",
+					"You are Claude Code, Anthropic's official CLI for Claude."
+				]
+			}
+		]
+	},
+	"skip": []
+}

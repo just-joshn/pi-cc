@@ -267,7 +267,7 @@ async function runSide(
 			join(roots.out, "meta.json"),
 			`${JSON.stringify({ argv, env, ...summarize(result, observation.requests) }, null, "\t")}\n`,
 		);
-		const diffs = compare(testCase.compare, observation, { sideRoot: roots.root, realHome: REAL_HOME });
+		const diffs = compare(testCase.compare, observation, { sideRoot: roots.root, realHome: REAL_HOME }, side.name);
 		return { side: side.name, ran: true, diffs, stderr: result.stderr, notApplicable: null };
 	} finally {
 		if (mock !== null) await mock.close();
