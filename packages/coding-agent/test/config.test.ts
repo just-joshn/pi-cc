@@ -2,12 +2,14 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
 import { afterEach, describe, expect, test } from "vitest";
+import { UPDATE_FEED_ENV } from "../src/cli/update-gates.ts";
 import {
 	detectInstallChange,
 	detectInstallMethod,
 	findNodePackageDir,
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
+	getSelfUpdateUnavailableInstructionForMethod,
 	getUpdateInstruction,
 } from "../src/config.ts";
 import { captureStartupEnv } from "../src/utils/internal-env.ts";
@@ -184,6 +186,12 @@ describe("detectInstallMethod", () => {
 		expect(getSelfUpdateCommand("@earendil-works/pi-coding-agent")).toBeUndefined();
 		expect(getUpdateInstruction("@earendil-works/pi-coding-agent")).toBe(
 			"Update @earendil-works/pi-coding-agent using the package manager, wrapper, or source checkout that provides this installation.",
+		);
+	});
+
+	test("bun-binary installs rebuild from source or use the operator feed", () => {
+		expect(getSelfUpdateUnavailableInstructionForMethod("bun-binary", "@earendil-works/pi-coding-agent")).toBe(
+			`Rebuild this installation from its source checkout, or set ${UPDATE_FEED_ENV} to your own release feed.`,
 		);
 	});
 

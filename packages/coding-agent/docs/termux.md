@@ -22,23 +22,25 @@ Install Termux from [GitHub or F-Droid](https://github.com/termux/termux-app#ins
    pkg install nodejs git
    ```
 
-3. Install Pi:
+3. Install Pi from its source checkout:
 
    ```bash
-   npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+   git clone https://github.com/just-joshn/pi-cc
+   cd pi-cc
+   npm install --ignore-scripts
    ```
 
 4. Verify the installation:
 
    ```bash
-   pi --version
+   ./pi-test.sh --version
    ```
 
 5. Open the folder you want to work in and start Pi:
 
    ```bash
    cd /path/to/working-folder
-   pi
+   /path/to/pi-cc/pi-test.sh
    ```
 
 Continue with the main [Quickstart](quickstart.md#3-choose-a-model) to connect a model and run your first task.
