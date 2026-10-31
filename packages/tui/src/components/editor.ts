@@ -1305,7 +1305,8 @@ export class Editor implements Component, Focusable {
 		this.lastAction = null;
 		const changed = this.getText() !== text;
 		if (changed) {
-			this.exitHistoryBrowsing();
+			// An edit riding on a browsed entry keeps the browse slot (Claude Code's historyEdited); only
+			// navigateHistory and programmatic resets end the browse.
 			this.pushUndoSnapshot();
 			this.state.lines = text.split("\n");
 		}
