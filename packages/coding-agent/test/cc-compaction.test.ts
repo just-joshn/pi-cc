@@ -1,7 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { Agent } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import {
 	type AssistantMessage,
 	createAssistantMessageEventStream,
@@ -9,7 +11,7 @@ import {
 	getModel,
 	type TranscriptMessages,
 } from "@earendil-works/pi-ai/compat";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { buildCcPolicy } from "../src/core/cc-policy.ts";
@@ -18,7 +20,10 @@ import { truncateCcSummaryHistory } from "../src/core/compaction/cc-summary.ts";
 import { convertToLlm } from "../src/core/messages.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { runPrintMode } from "../src/modes/print-mode.ts";
+import { SdkHost } from "../src/modes/sdk/host.ts";
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
+import { createHarness } from "./suite/harness.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
 const disposals: Array<() => void> = [];
@@ -83,7 +88,10 @@ async function createSession(
 		settingsManager: SettingsManager.create(cwd, cwd),
 		cwd,
 		modelRuntime: getModelRuntime(registry),
-		resourceLoader: { ...createTestResourceLoader(), getAppendSystemPrompt: () => append.current },
+		resourceLoader: {
+			...createTestResourceLoader(),
+			getAppendSystemPrompt: () => append.current,
+		},
 		ccPolicy: buildCcPolicy({ flags: {}, customPrompt: false, entrypoint: "sdk-cli", settings, env }),
 	});
 	session.subscribe((event) => events.push(event));
@@ -92,6 +100,54 @@ async function createSession(
 		rmSync(cwd, { recursive: true, force: true });
 	});
 	return { session, requests, manager, events, append };
+}
+
+type Frame = Record<string, any>;
+
+async function runSdk(session: AgentSession, prompts: string[]) {
+	const written: string[] = [];
+	const host = new SdkHost(() => session, {
+		outputFormat: "stream-json",
+		inputFormat: "text",
+		verbose: true,
+		includePartial: false,
+		replayUser: false,
+		permissionMode: "default",
+		hasAuth: () => true,
+		input: new PassThrough(),
+		env: {},
+		write: (line) => written.push(line),
+		fail: () => {},
+	});
+	session.subscribe((event) => host.onEvent(event));
+	const exitCode = await host.run(prompts.map((prompt) => ({ content: prompt, text: prompt, images: [] })));
+	const frames = written.flatMap((line) =>
+		line
+			.split("\n")
+			.filter(Boolean)
+			.map((entry) => JSON.parse(entry) as Frame),
+	);
+	return { exitCode, frames, results: frames.filter((frame) => frame.type === "result") };
+}
+
+async function runText(session: AgentSession, messages: string[]) {
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown, callback?: () => void) => {
+		stdout.push(String(chunk));
+		callback?.();
+		return true;
+	}) as typeof process.stdout.write);
+	vi.spyOn(console, "error").mockImplementation((message: unknown) => {
+		stderr.push(String(message));
+	});
+	const runtime = {
+		session,
+		setRebindSession: () => {},
+		dispose: async () => {},
+	} as unknown as Parameters<typeof runPrintMode>[0];
+	const exitCode = await runPrintMode(runtime, { mode: "text", messages });
+	return { exitCode, stdout: stdout.join(""), stderr: stderr.join("") };
 }
 
 function text(messages: TranscriptMessages): string {
@@ -287,5 +343,72 @@ describe("Claude Code session compaction", () => {
 		expect(JSON.stringify(truncated)).not.toContain('"one"');
 		expect(JSON.stringify(truncated)).toContain("[earlier conversation truncated for compaction retry]");
 		expect(JSON.stringify(truncated)).toContain('"two"');
+	});
+});
+
+describe("Claude Code local compaction commands", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+	it("ends a failed /compact with an error result frame and a non-zero exit in the SDK host", async () => {
+		const { session } = await createSession();
+		const { exitCode, results } = await runSdk(session, ["/compact"]);
+		expect(results).toHaveLength(1);
+		expect(results[0]).toMatchObject({
+			subtype: "error_during_execution",
+			is_error: true,
+			errors: ["Not enough messages to compact."],
+			local_command: "compact",
+		});
+		expect(exitCode).toBe(1);
+	});
+	it("names a provider failure during /compact and keeps the failed status frame", async () => {
+		const { session } = await createSession({}, [{ text: "reply" }, { error: "checkpoint rejected" }]);
+		await session.prompt("history");
+		const { exitCode, frames, results } = await runSdk(session, ["/compact"]);
+		expect(results[0]).toMatchObject({ is_error: true });
+		expect(results[0].errors[0]).toContain("Error during compaction:");
+		expect(frames.some((frame) => frame.subtype === "status" && frame.compact_result === "failed")).toBe(true);
+		expect(exitCode).toBe(1);
+	});
+	it("reports DISABLE_COMPACT as an error result", async () => {
+		const { session } = await createSession({}, [], { DISABLE_COMPACT: "1" });
+		const { exitCode, results } = await runSdk(session, ["/compact"]);
+		expect(results[0]).toMatchObject({ is_error: true, errors: ["Compaction is disabled by DISABLE_COMPACT"] });
+		expect(exitCode).toBe(1);
+	});
+	it("fails a repeat /compact as not enough messages and still runs the next prompt", async () => {
+		const { session } = await createSession({}, [{ text: "reply" }, { text: "CHECKPOINT" }, { text: "after" }]);
+		await session.prompt("history");
+		const { exitCode, results } = await runSdk(session, ["/compact", "/compact", "continue"]);
+		expect(results.map((result) => result.is_error)).toEqual([false, true, false]);
+		expect(results[1].errors).toEqual(["Not enough messages to compact."]);
+		expect(results[2].result).toBe("after");
+		expect(exitCode).toBe(0);
+	});
+	it("writes a failed /compact to stderr and exits non-zero in text print mode", async () => {
+		const { session } = await createSession();
+		const { exitCode, stdout, stderr } = await runText(session, ["/compact"]);
+		expect(stderr).toBe("Not enough messages to compact.");
+		expect(stdout).toBe("");
+		expect(exitCode).toBe(1);
+	});
+	it("prints both local outputs when /compact is followed by /autocompact in text print mode", async () => {
+		const { session } = await createSession({}, [{ text: "reply" }, { text: "CHECKPOINT" }]);
+		await session.prompt("history");
+		const { exitCode, stdout } = await runText(session, ["/compact", "/autocompact 150k"]);
+		expect(stdout).toBe("Compacted\nAuto-compact window set to 150000 tokens.\n");
+		expect(exitCode).toBe(0);
+	});
+	it("treats /compact as an ordinary prompt in the SDK host when the session has no CC policy", async () => {
+		const harness = await createHarness();
+		try {
+			harness.setResponses([fauxAssistantMessage("plain reply")]);
+			const { results } = await runSdk(harness.session, ["/compact"]);
+			expect(results[0]).toMatchObject({ is_error: false, result: "plain reply" });
+			expect(results[0].local_command).toBeUndefined();
+		} finally {
+			harness.cleanup();
+		}
 	});
 });

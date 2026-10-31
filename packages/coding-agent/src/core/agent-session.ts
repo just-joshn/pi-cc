@@ -66,7 +66,13 @@ import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { generateBugReportSummary } from "./bug-report.ts";
 import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
 import { CC_FAILURES_PER_MODEL, type CcPolicy, ccWireProfile } from "./cc-policy.ts";
-import { type CcCompactionHealth, type CcPrecomputeState, ccCompactionLimits } from "./compaction/cc-policy.ts";
+import {
+	CC_COMPACT_DISABLED,
+	CC_NOT_ENOUGH_MESSAGES,
+	type CcCompactionHealth,
+	type CcPrecomputeState,
+	ccCompactionLimits,
+} from "./compaction/cc-policy.ts";
 import { prepareCcCompaction, summarizeCc } from "./compaction/cc-summary.ts";
 import {
 	type CompactionPreparation,
@@ -3145,7 +3151,7 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
-		if (this._ccPolicy?.compaction.disabled) throw new Error("Compaction is disabled by DISABLE_COMPACT");
+		if (this._ccPolicy?.compaction.disabled) throw new Error(CC_COMPACT_DISABLED);
 		await this.abort();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
@@ -3166,6 +3172,7 @@ export class AgentSession {
 				: prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				// Check why we can't compact
+				if (this._ccPolicy) throw new Error(CC_NOT_ENOUGH_MESSAGES);
 				const lastEntry = pathEntries[pathEntries.length - 1];
 				if (lastEntry?.type === "compaction") {
 					throw new Error("Already compacted");

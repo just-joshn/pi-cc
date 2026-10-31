@@ -1,6 +1,9 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "./compaction.ts";
 
+export const CC_NOT_ENOUGH_MESSAGES = "Not enough messages to compact.";
+export const CC_COMPACT_DISABLED = "Compaction is disabled by DISABLE_COMPACT";
+
 export interface CcCompactionPolicy {
 	enabled: boolean;
 	automaticDisabled: boolean;

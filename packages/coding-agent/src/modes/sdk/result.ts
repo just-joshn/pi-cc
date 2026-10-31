@@ -71,7 +71,8 @@ export type TurnOutcome =
 	| { kind: "aborted_streaming" }
 	| { kind: "aborted_tools" }
 	| { kind: "max_turns"; limit: number; terminalReason: "max_turns" | "aborted_tools" }
-	| { kind: "budget"; limit: number };
+	| { kind: "budget"; limit: number }
+	| { kind: "local_command_error"; text: string };
 
 /** What one user message cost: model calls, tokens per model, and the last assistant text. */
 export class TurnTally {
@@ -267,6 +268,8 @@ function terminalReason(outcome: TurnOutcome): string {
 			return outcome.terminalReason;
 		case "budget":
 			return "budget_exhausted";
+		case "local_command_error":
+			return "turn_setup_failed";
 	}
 }
 
@@ -369,6 +372,8 @@ export class SessionLedger {
 					errors: [budgetErrorText(sum(this.models, "costUSD"), outcome.limit)],
 					...tail,
 				};
+			case "local_command_error":
+				return { ...common, subtype: "error_during_execution", errors: [outcome.text], ...tail };
 		}
 	}
 
