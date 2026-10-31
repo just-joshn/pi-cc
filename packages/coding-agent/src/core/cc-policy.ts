@@ -203,10 +203,3 @@ function ccMaxTokens(model: Model<Api>, known: boolean): number | undefined {
 	if (!known) return Math.min(model.maxTokens, CC_UNKNOWN_MODEL_MAX_TOKENS);
 	return MAX_TOKENS[catalogKey(model.id)];
 }
-
-/** The compaction window of a model under the policy. */
-export function compactionWindow(policy: CcPolicy | undefined, modelContextWindow: number): number {
-	return policy?.autocompactWindow === undefined
-		? modelContextWindow
-		: Math.min(modelContextWindow, policy.autocompactWindow);
-}

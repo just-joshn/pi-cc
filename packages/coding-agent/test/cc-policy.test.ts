@@ -1,13 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { describe, expect, test } from "vitest";
-import {
-	buildCcPolicy,
-	CC_AUTO_BETAS,
-	ccWireProfile,
-	compactionWindow,
-	parseFallbackModels,
-} from "../src/core/cc-policy.ts";
+import { buildCcPolicy, CC_AUTO_BETAS, ccWireProfile, parseFallbackModels } from "../src/core/cc-policy.ts";
 
 const model = (id: string) => getModel("anthropic", id as never) as Model<"anthropic-messages">;
 
@@ -140,15 +134,5 @@ describe("wire profile", () => {
 		const other = getModel("openai", "gpt-4.1")!;
 
 		expect(ccWireProfile(buildCcPolicy(noFlags), other, true, false, false)).toBeUndefined();
-	});
-});
-
-describe("compaction window", () => {
-	test("--autocompact lowers the window and never raises it past the model's", () => {
-		const policy = buildCcPolicy({ ...noFlags, flags: { autocompact: "300000" } });
-
-		expect(compactionWindow(policy, 1_000_000)).toBe(300_000);
-		expect(compactionWindow(policy, 200_000)).toBe(200_000);
-		expect(compactionWindow(undefined, 200_000)).toBe(200_000);
 	});
 });

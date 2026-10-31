@@ -189,6 +189,9 @@ describe("Claude Code compaction policy", () => {
 		).toBe(130_000);
 		expect(ccCompactionLimits(ccCompactionPolicy(settings, {}, 300_000), model).window).toBe(200_000);
 		expect(
+			ccCompactionLimits(ccCompactionPolicy(settings, {}, 300_000), { ...model, contextWindow: 1_000_000 }).window,
+		).toBe(300_000);
+		expect(
 			ccCompactionLimits(ccCompactionPolicy(settings, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "130k" }, 180_000), model),
 		).toMatchObject({ window: 130_000, source: "environment" });
 		expect(ccCompactionLimits(ccCompactionPolicy({}, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "200" }), model).window).toBe(
