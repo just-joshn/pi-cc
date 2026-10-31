@@ -41,6 +41,7 @@ const actions: Readonly<Record<string, Keybinding>> = {
 	"chat:newline": "tui.input.newLine",
 	"chat:undo": "tui.editor.undo",
 	"chat:imagePaste": "app.clipboard.pasteImage",
+	"history:search": "tui.editor.historySearch",
 	"history:previous": "tui.editor.cursorUp",
 	"history:next": "tui.editor.cursorDown",
 	"chat:cancel": "app.interrupt",
@@ -53,6 +54,7 @@ const actions: Readonly<Record<string, Keybinding>> = {
 export interface CcDeclaration {
 	keys: readonly [KeyId, ...KeyId[]];
 	action: Keybinding | null;
+	global?: boolean;
 }
 
 export interface ImportedBindings {
@@ -111,7 +113,7 @@ export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<s
 				result.warnings.push(`Unsupported keybinding action: ${action}`);
 				continue;
 			}
-			result.bindings.push({ keys, action: mapped });
+			result.bindings.push({ keys, action: mapped, ...(block.context === "Global" ? { global: true } : {}) });
 		}
 	}
 	return result;
@@ -124,10 +126,10 @@ export function importCcKeybindings(value: unknown, nativeActions: ReadonlySet<s
  */
 export function resolveLayer(declarations: readonly CcDeclaration[]): CcBinding[] {
 	const bySequence = new Map<string, CcBinding>();
-	for (const { keys, action } of declarations) {
+	for (const { keys, action, global } of declarations) {
 		const sequence = sequenceIdentity(keys);
 		bySequence.delete(sequence);
-		if (action !== null) bySequence.set(sequence, { keys, action });
+		if (action !== null) bySequence.set(sequence, { keys, action, ...(global ? { global: true } : {}) });
 	}
 	return [...bySequence.values()];
 }

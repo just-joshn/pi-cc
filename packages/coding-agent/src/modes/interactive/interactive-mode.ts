@@ -104,6 +104,7 @@ import {
 } from "../../core/model-resolver.ts";
 import { CredentialSynchronizationError } from "../../core/model-runtime.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import { PromptHistoryStore } from "../../core/prompt-history.ts";
 import { RADIUS_MCP_URL, RADIUS_PROVIDER_ID } from "../../core/radius.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
@@ -674,6 +675,10 @@ export class InteractiveMode {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
 			embedWorkingStatus: true,
+			promptShortcuts: this.ccTui.promptShortcuts,
+			history: new PromptHistoryStore(path.join(getAgentDir(), "prompt-history.jsonl"), () =>
+				JSON.stringify([this.sessionManager.getCwd(), this.sessionManager.getSessionId()]),
+			),
 		});
 		this.editor = this.defaultEditor;
 		this.defaultEditor.setVimMode(this.ccTui.vim);
@@ -2203,6 +2208,7 @@ export class InteractiveMode {
 	private applyCcTui(): void {
 		this.ccTui = this.options.ccTui?.() ?? NO_CC_TUI;
 		this.defaultEditor.setVimMode(this.ccTui.vim);
+		this.defaultEditor.setPromptShortcuts(this.ccTui.promptShortcuts);
 		this.defaultEditor.setFlat(this.ccTui.screenReader);
 		this.setWorkingIndicator(this.workingIndicatorOptions);
 	}

@@ -6,11 +6,13 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 import type { StatusIndicator } from "./status-indicator.ts";
 
 export type CustomEditorOptions = EditorOptions & {
+	promptShortcuts?: boolean;
 	/** Render working, compaction, summarization, and retry status in the editor's top border. */
 	embedWorkingStatus?: boolean;
 };
@@ -23,7 +25,9 @@ export class CustomEditor extends Editor {
 	private workingStatusIndicator: StatusIndicator | undefined;
 	private chordStatus: string | undefined;
 	public readonly embedWorkingStatus: boolean;
+	private promptShortcuts: boolean;
 	private flat = false;
+	private help: { kind: "closed" } | { kind: "open" } = { kind: "closed" };
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 
 	// Special handlers that can be dynamically replaced
@@ -37,6 +41,74 @@ export class CustomEditor extends Editor {
 		super(tui, theme, options);
 		this.keybindings = keybindings;
 		this.embedWorkingStatus = options?.embedWorkingStatus ?? false;
+		this.promptShortcuts = options?.promptShortcuts ?? false;
+		this.onToggleHelp = () => {
+			if (!this.promptShortcuts) return;
+			this.help = { kind: this.help.kind === "closed" ? "open" : "closed" };
+			this.tui.requestRender();
+		};
+		this.helpOpen = () => this.help.kind === "open";
+	}
+
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		if (this.help.kind === "closed") return lines;
+		if (this.isHistorySearchActive || lines.at(-1)?.trim().startsWith("-- ")) lines.pop();
+		const userBindings = this.keybindings.getUserBindings();
+		const shortcut = (action: Keybinding, fallback: string): string => {
+			const imported = this.keybindings.cc.getBindings().findLast((binding) => binding.action === action)?.keys;
+			const sequence =
+				imported ?? (userBindings[action] === undefined ? undefined : this.keybindings.getKeys(action).slice(0, 1));
+			return sequence === undefined
+				? fallback
+				: sequence.length === 0
+					? "unbound"
+					: sequence
+							.map((stroke) =>
+								stroke
+									.split("+")
+									.map((key) => (key === "alt" && process.platform === "darwin" ? "opt" : key))
+									.join(" + "),
+							)
+							.join(" ");
+		};
+		const columns = [
+			["! for shell mode", "/ for commands", "@ for file paths", "/btw for side question"],
+			[
+				"double tap esc to clear input",
+				"shift + tab to auto-accept edits",
+				`${shortcut("app.tools.expand", "ctrl + o")} for verbose output`,
+				`${shortcut("app.thinking.toggle", "ctrl + t")} to toggle tasks`,
+				"backslash (\\) + return (⏎) for newline",
+			],
+			[
+				`${shortcut("tui.editor.undo", "ctrl + shift + _")} to undo`,
+				"ctrl + z to suspend",
+				`${shortcut("app.clipboard.pasteImage", "ctrl + v")} to paste images`,
+				`${shortcut("app.model.select", "opt + p")} to switch model`,
+				"ctrl + s to stash prompt",
+				`${shortcut("app.editor.external", "ctrl + g")} to edit in $EDITOR`,
+				"/keybindings to customize",
+			],
+		];
+		const available = Math.max(3, width - 4);
+		const thirdWidth = Math.max(...columns[2]!.map(visibleWidth));
+		const scale = Math.min(1, available / (59 + thirdWidth));
+		const widths = [Math.max(1, Math.round(24 * scale)), Math.max(1, Math.round(35 * scale))];
+		widths.push(Math.max(1, Math.min(thirdWidth, available - widths[0]! - widths[1]!)));
+		const wrapped = columns.map((column, index) =>
+			column.flatMap((text) => wrapTextWithAnsi(text, widths[index]!).map((line) => line.trimEnd())),
+		);
+		for (let row = 0; row < Math.max(...wrapped.map((column) => column.length)); row++) {
+			const text = wrapped.map((column, index) => (column[row] ?? "").padEnd(widths[index]!)).join("");
+			lines.push(this.borderColor(truncateToWidth(`  ${text}`, width, "")));
+		}
+		return lines;
+	}
+
+	setPromptShortcuts(enabled: boolean): void {
+		this.promptShortcuts = enabled;
+		if (!enabled) this.help = { kind: "closed" };
 	}
 
 	setWorkingStatusIndicator(indicator: StatusIndicator | undefined): void {
@@ -107,6 +179,69 @@ export class CustomEditor extends Editor {
 	}
 
 	handleInput(data: string): void {
+		if (
+			this.isHistorySearchActive &&
+			!(
+				[
+					"tui.historySearch.cancel",
+					"tui.historySearch.accept",
+					"tui.historySearch.execute",
+					"tui.historySearch.next",
+				] as const
+			).some((action) => this.keybindings.matches(data, action))
+		) {
+			const global = this.keybindings.cc.dispatch(
+				data,
+				(message) => {
+					this.chordStatus = message;
+					this.tui.requestRender();
+				},
+				Date.now(),
+				true,
+			);
+			if (global.kind === "pending" || global.kind === "cancelled") return;
+			const action =
+				global.kind === "action"
+					? global.action
+					: (["app.tools.expand", "app.thinking.toggle"] as const).find(
+							(key) => this.actionHandlers.has(key) && this.keybindings.matches(data, key),
+						);
+			if (action === "app.tools.expand") this.cancelHistorySearch();
+			if (action && this.runCcAction(action, data)) return;
+		}
+		if (this.help.kind === "closed" && this.handleHistorySearchInput(data)) {
+			this.keybindings.cc.cancel();
+			this.help = { kind: "closed" };
+			return;
+		}
+		if (
+			this.promptShortcuts &&
+			!this.isHistorySearchActive &&
+			this.getText() === "" &&
+			this.keybindings.matches(data, "app.help.toggle") &&
+			this.getVimMode() !== "normal" &&
+			this.getVimMode() !== "visual"
+		) {
+			this.onToggleHelp?.();
+			return;
+		}
+		if (
+			this.help.kind === "open" &&
+			(this.keybindings.matches(data, "app.interrupt") ||
+				(this.getCursorOffset() === 0 &&
+					(
+						[
+							"tui.editor.deleteCharBackward",
+							"tui.editor.deleteCharForward",
+							"tui.editor.deleteToLineStart",
+						] as const
+					).some((action) => this.keybindings.matches(data, action))))
+		) {
+			this.help = { kind: "closed" };
+			this.tui.requestRender();
+			return;
+		}
+		if (this.help.kind === "open" && this.isHistorySearchActive) return;
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
 			this.keybindings.cc.cancel();
@@ -151,6 +286,16 @@ export class CustomEditor extends Editor {
 	}
 
 	private handleBoundInput(data: string): void {
+		const text = this.getText();
+		this.dispatchBoundInput(data);
+		if (this.getText() !== text) this.help = { kind: "closed" };
+	}
+
+	private dispatchBoundInput(data: string): void {
+		if (this.keybindings.matches(data, "tui.editor.historySearch")) {
+			super.handleInput(data);
+			return;
+		}
 		// Vim mode sees keys before app actions. It consumes Escape in insert mode and Escape with a command pending;
 		// otherwise Escape falls through to the interrupt handling below.
 		const interrupt = this.keybindings.matches(data, "app.interrupt");

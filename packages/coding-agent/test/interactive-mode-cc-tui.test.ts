@@ -41,7 +41,7 @@ describe("InteractiveMode Claude Code terminal settings", () => {
 	test("rebinding a session re-reads the admitted settings, so a directory change is seen", () => {
 		const applyCcTui = method("applyCcTui");
 		let admitted: CcTuiSettings = { ...NO_CC_TUI, screenReader: true };
-		const defaultEditor = { setVimMode: vi.fn(), setFlat: vi.fn() };
+		const defaultEditor = { setVimMode: vi.fn(), setPromptShortcuts: vi.fn(), setFlat: vi.fn() };
 		const self = {
 			options: { ccTui: () => admitted },
 			ccTui: NO_CC_TUI,
@@ -60,7 +60,7 @@ describe("InteractiveMode Claude Code terminal settings", () => {
 
 	test("with no handoff the editor and indicators stay as pi's", () => {
 		const applyCcTui = method("applyCcTui");
-		const defaultEditor = { setVimMode: vi.fn(), setFlat: vi.fn() };
+		const defaultEditor = { setVimMode: vi.fn(), setPromptShortcuts: vi.fn(), setFlat: vi.fn() };
 		const self = { options: {}, ccTui: NO_CC_TUI, defaultEditor, setWorkingIndicator: vi.fn() };
 		applyCcTui.call(self);
 		expect(self.ccTui).toBe(NO_CC_TUI);
