@@ -41,10 +41,12 @@ FROM node:24-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash ca-certificates git ripgrep \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+RUN git clone https://github.com/just-joshn/pi-cc /opt/pi-cc \
+  && cd /opt/pi-cc \
+  && npm install --ignore-scripts
 
 WORKDIR /workspace
-ENTRYPOINT ["pi"]
+ENTRYPOINT ["/opt/pi-cc/pi-test.sh"]
 ```
 
 Build it from the directory containing the file:
