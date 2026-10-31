@@ -341,10 +341,23 @@ export function getSelfUpdateUnavailableInstruction(
 	npmCommand?: string[],
 	updatePackageTarget: SelfUpdatePackageTarget = packageName,
 ): string {
-	const method = detectInstallMethod();
+	return getSelfUpdateUnavailableInstructionForMethod(
+		detectInstallMethod(),
+		packageName,
+		npmCommand,
+		updatePackageTarget,
+	);
+}
+
+export function getSelfUpdateUnavailableInstructionForMethod(
+	method: InstallMethod,
+	packageName: string,
+	npmCommand?: string[],
+	updatePackageTarget: SelfUpdatePackageTarget = packageName,
+): string {
 	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
 	if (method === "bun-binary") {
-		return `Download from: https://github.com/earendil-works/pi/releases/latest`;
+		return `Rebuild this installation from its source checkout, or set PI_CC_UPDATE_FEED_URL to your own release feed.`;
 	}
 	const command = getSelfUpdateCommandForMethod(method, packageName, target, npmCommand);
 	if (command) {
