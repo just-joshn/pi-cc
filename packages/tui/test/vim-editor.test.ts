@@ -35,6 +35,22 @@ const marked = (editor: Editor) => {
 
 const plain = (editor: Editor) => editor.render(40).map((line) => stripTerminalSequences(line).trimEnd());
 
+describe("normal cursor left at the insertion point by a control chord", () => {
+	for (const visual of [false, true]) {
+		it(`x after Ctrl+E deletes nothing${visual ? " after a visual-ending chord" : ""}`, () => {
+			const editor = createEditor();
+			press(editor, "abc<Esc>");
+			key(editor, "\x05");
+			if (visual) {
+				press(editor, "v");
+				key(editor, "\x01");
+			}
+			press(editor, "x");
+			assert.strictEqual(marked(editor), "abc|");
+		});
+	}
+});
+
 describe("pending operator and count keys", () => {
 	it("Delete with a pending operator cancels it without deleting forward", () => {
 		const editor = createEditor();
@@ -305,7 +321,6 @@ const VISUAL_ROWS: readonly SpecialRow[] = [
 
 describe("special keys by pending state", () => {
 	const run = (editor: Editor, row: SpecialRow) => {
-		press(editor, "<Esc>");
 		editor.setText(row.text);
 		press(editor, `<Esc>${row.pending}`);
 		key(editor, SPECIAL[row.key]);
@@ -563,6 +578,16 @@ describe("Editor vim render", () => {
 });
 
 describe("gj and gk follow the rendered wrap", () => {
+	it("literal paste markers wrap as the same atomic units that Vim moves over", () => {
+		const editor = createEditor();
+		editor.setText("aaaaaaaaaa [paste #9 +12 lines] zzz");
+		press(editor, "<Esc>0");
+		const lines = editor.render(21).map((line) => stripTerminalSequences(line).trimEnd());
+		assert.strictEqual(lines[1], "aaaaaaaaaa");
+		assert.strictEqual(lines[2], "[paste #9 +12 lines]");
+		press(editor, "gj");
+		assert.strictEqual(editor.getCursorOffset(), 11);
+	});
 	it("gj moves to the next display row at the width the editor last rendered", () => {
 		const editor = createEditor();
 		editor.setText("aaaa bbbb cccc dddd");

@@ -1,6 +1,7 @@
 // Text positions for the vim engine: line bounds, editing units, word motions, find, and text objects.
 // Everything works on the prompt as one string. An editing unit is a grapheme, or a whole paste marker.
-import { getGraphemeSegmenter, visibleWidth } from "../utils.ts";
+import { getGraphemeSegmenter } from "../utils.ts";
+import { displayWidth } from "./wrap.ts";
 
 export interface Range {
 	readonly start: number;
@@ -244,14 +245,15 @@ export function findChar(text: string, at: number, kind: string, char: string, c
 
 /** Column in display cells of `at` within its line. */
 export function columnOf(text: string, at: number): number {
-	return visibleWidth(text.slice(lineStart(text, at), at));
+	const column = displayWidth(text.slice(lineStart(text, at), at));
+	return text[at] === "\t" ? column + 8 - (column % 8) - 1 : column;
 }
 
 /** The unit on the line [start, end) that covers display column `column`, or `end` when the line is shorter. */
 export function offsetAtColumn(text: string, start: number, end: number, column: number): number {
 	let width = 0;
 	for (let at = start; at < end; at = nextUnit(text, at)) {
-		width += visibleWidth(text.slice(at, nextUnit(text, at)));
+		width += displayWidth(text.slice(at, nextUnit(text, at)), width);
 		if (width > column) return at;
 	}
 	return end;

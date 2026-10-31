@@ -969,6 +969,30 @@ describe("Editor component", () => {
 			assert.ok(contentLine.includes("1234567890"), "Content should contain the word");
 		});
 
+		it("keeps a single wide tab or grapheme without recursively splitting itself", () => {
+			assert.deepEqual(wordWrapLine("\t", 5), [{ text: "\t", startIndex: 0, endIndex: 1 }]);
+			assert.equal(
+				wordWrapLine("a\tb", 5)
+					.map((chunk) => chunk.text)
+					.join(""),
+				"a\tb",
+			);
+			assert.equal(
+				wordWrapLine("界", 1)
+					.map((chunk) => chunk.text)
+					.join(""),
+				"界",
+			);
+		});
+
+		it("re-splits rows a column-relative tab expansion left wider than the width", () => {
+			const chunks = wordWrapLine("b a\t baa \taa", 8);
+			assert.deepEqual(
+				chunks.map((chunk) => chunk.text),
+				["b ", "a\t", " ", "baa \t", "aa"],
+			);
+		});
+
 		it("wraps word to next line when it ends exactly at terminal width", () => {
 			// "hello " (6) + "world" (5) = 11, but "world" is non-whitespace ending at width.
 			// Thus, wrap it to next line. The trailing space stays with "hello" on line 1
