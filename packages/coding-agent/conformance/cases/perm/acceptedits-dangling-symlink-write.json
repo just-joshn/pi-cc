@@ -1,0 +1,89 @@
+{
+	"id": "perm/acceptedits-dangling-symlink-write",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"acceptEdits",
+		"--allowedTools",
+		"Bash(ln:*)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "ln -s ../home/p04-outside.txt link"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "link",
+						"content": "PWNED"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "../home/p04-outside.txt",
+						"content": "PWNED"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Refusing to write [^:]*link[^:]*: it is a symbolic link\\. Write to the link's target path instead: [^ ]*home/",
+				"Claude requested permissions to write to [^ ]*home/p04-outside\\.txt, but you haven't granted it yet\\."
+			]
+		},
+		"files": [
+			"link"
+		],
+		"absent": [
+			"$WORKSPACE/../home/p04-outside.txt"
+		],
+		"containment": [
+			{
+				"kind": "dangling-symlink",
+				"path": "link"
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4,
+				"bodyMatch": [
+					"Refusing to write [^:]*link[^:]*: it is a symbolic link\\. Write to the link's target path instead: [^ ]*home/",
+					"Claude requested permissions to write to [^ ]*home/p04-outside\\.txt, but you haven't granted it yet\\."
+				]
+			}
+		]
+	},
+	"skip": []
+}

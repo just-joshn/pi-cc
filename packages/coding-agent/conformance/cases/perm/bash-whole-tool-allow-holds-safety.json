@@ -1,0 +1,133 @@
+{
+	"id": "perm/bash-whole-tool-allow-holds-safety",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Bash",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "MARK_B\n",
+		".git/HEAD": "ref"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name b.txt -exec touch out.txt \\;"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep --regexp=localhost /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "bash -c 'echo BASH_C_RAN'"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "env -S 'echo ENV_S_RAN'"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "eval 'echo EVAL_RAN'"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo TILDE > ~/.claude/settings.json"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo T > .git/config"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sleep 0.1 &"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"localhost",
+				"BASH_C_RAN",
+				"ENV_S_RAN",
+				"EVAL_RAN",
+				"requested permissions to write to",
+				"sensitive file",
+				"approval-time safety checks"
+			]
+		},
+		"absent": [
+			"$HOME/.claude/settings.json",
+			"$WORKSPACE/.git/config"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 9,
+				"bodyMatch": [
+					"localhost",
+					"BASH_C_RAN",
+					"ENV_S_RAN",
+					"EVAL_RAN",
+					"requested permissions to write to",
+					"sensitive file",
+					"approval-time safety checks"
+				]
+			}
+		],
+		"files": [
+			"out.txt"
+		]
+	},
+	"skip": []
+}

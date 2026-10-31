@@ -183,6 +183,11 @@ function ccTool(piName: string): CcTool | undefined {
 	return CC_TOOLS.find((tool) => tool.pi === piName);
 }
 
+/** The name the model sees for a pi tool, or the pi name when the surface does not cover it. */
+export function ccToolNameFor(piName: string): string {
+	return ccTool(piName)?.name ?? piName;
+}
+
 /** The coverage entry for a name the model used, or undefined when the name is not covered. */
 function ccToolByDeclaredName(name: string): CcTool | undefined {
 	return CC_TOOLS.find((tool) => tool.name === name);

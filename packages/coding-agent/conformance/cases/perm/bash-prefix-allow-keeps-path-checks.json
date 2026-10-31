@@ -1,0 +1,116 @@
+{
+	"id": "perm/bash-prefix-allow-keeps-path-checks",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Bash(grep:*)",
+		"Bash(cat:*)",
+		"Bash(cp:*)",
+		"Bash(echo:*)",
+		"Bash(touch:*)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "MARK_B\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "grep --regexp=a /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cat /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cp b.txt ../p04-out.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo T > ~/p04-tilde.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ~/.zshrc"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cat b.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"grep in '[^']*etc/hosts' was blocked",
+				"cat in '[^']*etc/hosts' was blocked",
+				"cp in '[^']*p04-out.txt' needs approval",
+				"Shell expansion syntax in paths requires manual approval",
+				"sensitive file",
+				"MARK_B"
+			]
+		},
+		"absent": [
+			"$HOME/p04-tilde.txt",
+			"$HOME/.zshrc",
+			"$WORKSPACE/../p04-out.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 7,
+				"bodyMatch": [
+					"grep in '[^']*etc/hosts' was blocked",
+					"cat in '[^']*etc/hosts' was blocked",
+					"cp in '[^']*p04-out.txt' needs approval",
+					"Shell expansion syntax in paths requires manual approval",
+					"sensitive file",
+					"MARK_B"
+				]
+			}
+		]
+	},
+	"skip": []
+}
