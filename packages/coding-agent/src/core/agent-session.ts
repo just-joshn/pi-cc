@@ -57,6 +57,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { parseAutocompact } from "../cli/cc-flags.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
+import { raceWithAbortSignal } from "../utils/abort.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { processImage } from "../utils/image-process.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -69,6 +70,7 @@ import { CC_FAILURES_PER_MODEL, type CcPolicy, ccWireProfile } from "./cc-policy
 import {
 	CC_COMPACT_DISABLED,
 	CC_NOT_ENOUGH_MESSAGES,
+	CC_PRECOMPUTE_FAILURE_LIMIT,
 	type CcCompactionHealth,
 	type CcPrecomputeState,
 	ccCompactionLimits,
@@ -451,6 +453,10 @@ export class AgentSession {
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
 	private _ccPrecompute: CcPrecomputeState = { kind: "idle" };
+	/** Consecutive failed speculative summaries; precomputing stops at the limit until a compaction succeeds. */
+	private _ccPrecomputeFailures = 0;
+	/** The leaf the last speculative summary failed on, which is not retried while it stays the leaf. */
+	private _ccPrecomputeFailedLeaf: string | undefined;
 	private _ccCompactionHealth: CcCompactionHealth = { failures: 0, rapidRefills: 0 };
 	private _ccAutoEnabled: boolean | undefined;
 
@@ -3073,47 +3079,12 @@ export class AgentSession {
 		signal: AbortSignal,
 		reason: "manual" | "threshold" | "overflow",
 	): Promise<CompactionResult> {
-		const messages = this._ccPolicy ? this.sessionManager.buildSessionProjection().messages : [];
+		if (this._ccPolicy) {
+			const reused = reason === "manual" ? undefined : await this._takeCcPrecompute(preparation, model, signal);
+			return reused ?? this._summarizeCc(preparation, model, customInstructions, signal, reason);
+		}
 		// Resolve the request only when Pi summarizes itself: routing may call models or fail.
 		const request = await this._getSummarizationRequestAuth(model, signal);
-		if (this._ccPolicy) {
-			const precomputed = this._ccPrecompute;
-			if (reason !== "manual" && precomputed.kind !== "idle" && precomputed.model === model.id) {
-				const branch = this.sessionManager.getBranch();
-				const index = branch.findIndex((entry) => entry.id === precomputed.leaf);
-				if (index >= 0) {
-					const result = precomputed.kind === "ready" ? precomputed.result : await precomputed.promise;
-					this._ccPrecompute = { kind: "idle" };
-					if (result)
-						return {
-							...result,
-							tokensBefore: preparation.tokensBefore,
-							firstKeptEntryId: branch[index + 1]?.id ?? "",
-						};
-				}
-			}
-			const transformed = this.agent.transformContext
-				? await this.agent.transformContext(messages, signal)
-				: messages;
-			return summarizeCc(
-				transformed,
-				preparation,
-				request.model,
-				{
-					apiKey: request.apiKey,
-					headers: request.headers,
-					env: request.env,
-					signal,
-					cacheRetention: this._ccPolicy.compaction.cold ? "none" : "short",
-					ccWire: ccWireProfile(this._ccPolicy, request.model, true, false, this._thinkingLevelChosen),
-				},
-				this.agent.streamFunction,
-				customInstructions,
-				this.settingsManager.getRetrySettings(),
-				this._summarizationRetryCallbacks({ source: "compaction", reason }),
-				this._ccPolicy.compaction.cold,
-			);
-		}
 		return compact(
 			preparation,
 			request.model,
@@ -3128,6 +3099,73 @@ export class AgentSession {
 			this._summarizationRetryCallbacks({ source: "compaction", reason }),
 			undefined, // sessionId
 		);
+	}
+
+	/** Summarizes the live session projection the way Claude Code does, for a compaction or a speculative precompute. */
+	private async _summarizeCc(
+		preparation: CompactionPreparation,
+		model: Model<any>,
+		customInstructions: string | undefined,
+		signal: AbortSignal,
+		reason: "manual" | "threshold" | "overflow",
+	): Promise<CompactionResult> {
+		const policy = this._ccPolicy;
+		if (!policy) throw new Error("Claude Code compaction requires a Claude Code policy");
+		const messages = this.sessionManager.buildSessionProjection().messages;
+		const request = await this._getSummarizationRequestAuth(model, signal);
+		const transformed = this.agent.transformContext ? await this.agent.transformContext(messages, signal) : messages;
+		return summarizeCc(
+			transformed,
+			preparation,
+			request.model,
+			{
+				apiKey: request.apiKey,
+				headers: request.headers,
+				env: request.env,
+				signal,
+				cacheRetention: policy.compaction.cold ? "none" : "short",
+				ccWire: ccWireProfile(policy, request.model, true, false, this._thinkingLevelChosen),
+			},
+			this.agent.streamFunction,
+			customInstructions,
+			this.settingsManager.getRetrySettings(),
+			this._summarizationRetryCallbacks({ source: "compaction", reason }),
+			policy.compaction.cold,
+		);
+	}
+
+	/** The precomputed summary, rebased onto the current branch, or undefined when none applies. A stale one is dropped. */
+	private async _takeCcPrecompute(
+		preparation: CompactionPreparation,
+		model: Model<any>,
+		signal: AbortSignal,
+	): Promise<CompactionResult | undefined> {
+		const precomputed = this._ccPrecompute;
+		if (precomputed.kind === "idle") return undefined;
+		const branch = this.sessionManager.getBranch();
+		const index = branch.findIndex((entry) => entry.id === precomputed.leaf);
+		if (precomputed.model !== model.id || index < 0) {
+			this._resetCcPrecompute();
+			return undefined;
+		}
+		const result =
+			precomputed.kind === "ready" ? precomputed.result : await raceWithAbortSignal(precomputed.promise, signal);
+		this._resetCcPrecompute();
+		if (!result) return undefined;
+		return { ...result, tokensBefore: preparation.tokensBefore, firstKeptEntryId: branch[index + 1]?.id ?? "" };
+	}
+
+	/** Drops the precomputed summary and aborts the job still producing it. */
+	private _resetCcPrecompute(): void {
+		if (this._ccPrecompute.kind === "running") this._ccPrecompute.controller.abort();
+		this._ccPrecompute = { kind: "idle" };
+	}
+
+	/** A compaction landed: any summary computed for the old history is stale, and earlier failures no longer predict the next one. */
+	private _onCcCompactionSuccess(): void {
+		this._resetCcPrecompute();
+		this._ccPrecomputeFailures = 0;
+		this._ccPrecomputeFailedLeaf = undefined;
 	}
 
 	private _clearManualCompactionState(): void {
@@ -3266,6 +3304,7 @@ export class AgentSession {
 			}
 
 			this._ccCompactionHealth = { failures: 0, rapidRefills: 0, turnsSinceCompact: 0 };
+			this._onCcCompactionSuccess();
 			const compactionResult: CompactionResult = {
 				summary,
 				firstKeptEntryId,
@@ -3314,8 +3353,7 @@ export class AgentSession {
 	 * Cancel in-progress compaction (manual or auto).
 	 */
 	abortCompaction(): void {
-		if (this._ccPrecompute.kind === "running") this._ccPrecompute.controller.abort();
-		this._ccPrecompute = { kind: "idle" };
+		this._resetCcPrecompute();
 		this._compactionAbortController?.abort();
 		this._autoCompactionAbortController?.abort();
 	}
@@ -3495,20 +3533,32 @@ export class AgentSession {
 	private _maybePrecomputeCompaction(tokens: number): void {
 		const policy = this._ccPolicy?.compaction;
 		const model = this.model;
-		if (!policy?.precompute || !model || !this.autoCompactionEnabled || this._ccPrecompute.kind !== "idle") return;
-		if (tokens < ccCompactionLimits(policy, model).precompute) return;
+		if (!policy?.precompute || !model || !this.autoCompactionEnabled) return;
 		const branch = this.sessionManager.getBranch();
-		const preparation = prepareCcCompaction(branch, this.settingsManager.getCompactionSettings(model));
+		const current = this._ccPrecompute;
+		if (current.kind !== "idle") {
+			if (current.model === model.id && branch.some((entry) => entry.id === current.leaf)) return;
+			this._resetCcPrecompute();
+		}
 		const leaf = branch.at(-1)?.id;
+		if (this._ccPrecomputeFailures >= CC_PRECOMPUTE_FAILURE_LIMIT || leaf === this._ccPrecomputeFailedLeaf) return;
+		if (tokens < ccCompactionLimits(policy, model).precompute) return;
+		const preparation = prepareCcCompaction(branch, this.settingsManager.getCompactionSettings(model));
 		if (!preparation || !leaf) return;
 		const controller = new AbortController();
-		const promise = this._runDefaultCompaction(preparation, model, undefined, controller.signal, "manual")
+		const promise = this._summarizeCc(preparation, model, undefined, controller.signal, "threshold")
 			.then((result) => {
-				if (this._ccPrecompute.kind === "running" && this._ccPrecompute.controller === controller)
+				if (this._ccPrecompute.kind === "running" && this._ccPrecompute.controller === controller) {
 					this._ccPrecompute = { kind: "ready", leaf, model: model.id, result };
+					this._ccPrecomputeFailures = 0;
+				}
 				return controller.signal.aborted ? undefined : result;
 			})
 			.catch(() => {
+				if (!controller.signal.aborted) {
+					this._ccPrecomputeFailures++;
+					this._ccPrecomputeFailedLeaf = leaf;
+				}
 				if (this._ccPrecompute.kind === "running" && this._ccPrecompute.controller === controller)
 					this._ccPrecompute = { kind: "idle" };
 				return undefined;
@@ -3657,6 +3707,7 @@ export class AgentSession {
 
 			this._ccCompactionHealth.failures = 0;
 			this._ccCompactionHealth.turnsSinceCompact = 0;
+			this._onCcCompactionSuccess();
 			const result: CompactionResult = {
 				summary,
 				firstKeptEntryId,
@@ -3729,8 +3780,7 @@ export class AgentSession {
 	setAutoCompactionEnabled(enabled: boolean): void {
 		if (this._ccPolicy) {
 			this._ccAutoEnabled = enabled;
-			if (!enabled && this._ccPrecompute.kind === "running") this._ccPrecompute.controller.abort();
-			if (!enabled) this._ccPrecompute = { kind: "idle" };
+			if (!enabled) this._resetCcPrecompute();
 		} else this.settingsManager.setCompactionEnabled(enabled);
 	}
 
@@ -4653,6 +4703,7 @@ export class AgentSession {
 				this.sessionManager.appendLabelChange(targetId, label);
 			}
 
+			this._resetCcPrecompute();
 			// Update finalized context from the canonical session projection.
 			this._refreshFinalizedContext();
 			this._restoreToolsFromTranscript();

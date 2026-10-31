@@ -4,6 +4,9 @@ import type { CompactionResult } from "./compaction.ts";
 export const CC_NOT_ENOUGH_MESSAGES = "Not enough messages to compact.";
 export const CC_COMPACT_DISABLED = "Compaction is disabled by DISABLE_COMPACT";
 
+/** Consecutive failed speculative summaries after which precomputing stops until a compaction succeeds. */
+export const CC_PRECOMPUTE_FAILURE_LIMIT = 3;
+
 export interface CcCompactionPolicy {
 	enabled: boolean;
 	automaticDisabled: boolean;

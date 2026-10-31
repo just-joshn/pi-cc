@@ -17,6 +17,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { buildCcPolicy } from "../src/core/cc-policy.ts";
 import { ccCompactionLimits, ccCompactionPolicy } from "../src/core/compaction/cc-policy.ts";
 import { truncateCcSummaryHistory } from "../src/core/compaction/cc-summary.ts";
+import type { LoadExtensionsResult } from "../src/core/extensions/types.ts";
 import { convertToLlm } from "../src/core/messages.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -24,7 +25,7 @@ import { runPrintMode } from "../src/modes/print-mode.ts";
 import { SdkHost } from "../src/modes/sdk/host.ts";
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 import { createHarness } from "./suite/harness.ts";
-import { createTestResourceLoader } from "./utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
 const disposals: Array<() => void> = [];
 afterEach(() => {
@@ -33,8 +34,10 @@ afterEach(() => {
 
 async function createSession(
 	settings: Record<string, unknown> = {},
-	turns: Array<{ text?: string; tokens?: number; error?: string }> = [],
+	turns: Array<{ text?: string; tokens?: number; error?: string; hang?: boolean }> = [],
 	env: NodeJS.ProcessEnv = {},
+	flags: Parameters<typeof buildCcPolicy>[0]["flags"] = {},
+	extensionsResult?: LoadExtensionsResult,
 ) {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-cc-compact-"));
 	const model = { ...getModel("anthropic", "claude-sonnet-4-5")!, contextWindow: 200_000, maxTokens: 20_000 };
@@ -67,6 +70,7 @@ async function createSession(
 				timestamp: Date.now() + requests.length,
 			};
 			const stream = createAssistantMessageEventStream();
+			if (turn.hang) return stream;
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: message });
 				stream.push(
@@ -89,10 +93,10 @@ async function createSession(
 		cwd,
 		modelRuntime: getModelRuntime(registry),
 		resourceLoader: {
-			...createTestResourceLoader(),
+			...createTestResourceLoader({ extensionsResult }),
 			getAppendSystemPrompt: () => append.current,
 		},
-		ccPolicy: buildCcPolicy({ flags: {}, customPrompt: false, entrypoint: "sdk-cli", settings, env }),
+		ccPolicy: buildCcPolicy({ flags, customPrompt: false, entrypoint: "sdk-cli", settings, env }),
 	});
 	session.subscribe((event) => events.push(event));
 	disposals.push(() => {
@@ -149,6 +153,8 @@ async function runText(session: AgentSession, messages: string[]) {
 	const exitCode = await runPrintMode(runtime, { mode: "text", messages });
 	return { exitCode, stdout: stdout.join(""), stderr: stderr.join("") };
 }
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 function text(messages: TranscriptMessages): string {
 	return JSON.stringify(messages);
@@ -272,6 +278,105 @@ describe("Claude Code session compaction", () => {
 		expect(text(requests[3])).toContain("PRECOMPUTED");
 		expect(text(requests[3])).toContain("new tail");
 		expect(text(requests[3])).not.toContain("old history");
+	});
+	it("drops a precomputed checkpoint once an extension-supplied compaction replaces the history it summarized", async () => {
+		let supplied = false;
+		const extensionsResult = await createTestExtensionsResult([
+			(pi) => {
+				pi.on("session_before_compact", (event) => {
+					if (supplied) return undefined;
+					supplied = true;
+					return {
+						compaction: {
+							summary: "EXTENSION CHECKPOINT",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+						},
+					};
+				});
+			},
+		]);
+		const { session, requests } = await createSession(
+			{ precomputeCompactionEnabled: true },
+			[
+				{ tokens: 150_000 },
+				{ text: "STALE PRECOMPUTE" },
+				{ tokens: 170_000 },
+				{ tokens: 170_000 },
+				{ text: "SECOND PRECOMPUTE" },
+				{ text: "done" },
+			],
+			{},
+			{},
+			extensionsResult,
+		);
+		await session.prompt("one");
+		await tick();
+		await session.prompt("two");
+		await session.prompt("three");
+		await tick();
+		await session.prompt("four");
+		expect(requests).toHaveLength(6);
+		expect(text(requests[5])).toContain("SECOND PRECOMPUTE");
+		expect(text(requests[5])).not.toContain("STALE PRECOMPUTE");
+	});
+	it("drops a precomputed checkpoint whose leaf left the branch and precomputes the new branch", async () => {
+		const { session, requests, manager } = await createSession({ precomputeCompactionEnabled: true }, [
+			{ tokens: 150_000 },
+			{ text: "ABANDONED BRANCH" },
+			{ tokens: 150_000 },
+			{ text: "NEW BRANCH" },
+		]);
+		await session.prompt("first branch");
+		await tick();
+		const first = manager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "user");
+		await session.navigateTree(first!.id);
+		await session.prompt("second branch");
+		await tick();
+		expect(requests).toHaveLength(4);
+		expect(text(requests[3])).toContain("second branch");
+		expect(text(requests[3])).not.toContain("first branch");
+	});
+	it("lets an aborted compaction stop waiting on a precompute that never finishes", async () => {
+		const { session } = await createSession({ precomputeCompactionEnabled: true }, [
+			{ tokens: 150_000 },
+			{ hang: true },
+			{ tokens: 170_000 },
+		]);
+		await session.prompt("one");
+		await session.prompt("two");
+		const compacting = session.prompt("three");
+		await tick();
+		session.abortCompaction();
+		const outcome = await Promise.race([
+			compacting.then(
+				() => "settled",
+				() => "settled",
+			),
+			new Promise((resolve) => setTimeout(() => resolve("hung"), 1000)),
+		]);
+		expect(outcome).toBe("settled");
+	});
+	it("stops speculative summaries after repeated failures until a compaction succeeds", async () => {
+		const failures = Array.from({ length: 3 }, () => [{ tokens: 150_000 }, { error: "checkpoint rejected" }]).flat();
+		const { session, requests } = await createSession({ precomputeCompactionEnabled: true }, [
+			...failures,
+			{ tokens: 150_000 },
+			{ tokens: 150_000 },
+			{ text: "MANUAL" },
+			{ tokens: 150_000 },
+			{ text: "PRECOMPUTE AGAIN" },
+		]);
+		for (let i = 0; i < 5; i++) {
+			await session.prompt(`task ${i}`);
+			await tick();
+		}
+		expect(requests).toHaveLength(8);
+		await session.compact();
+		await session.prompt("after compaction");
+		await tick();
+		expect(requests).toHaveLength(11);
+		expect(text(requests[10])).toContain("after compaction");
 	});
 	it("configures auto-compaction windows without treating the command as an enable toggle", async () => {
 		const { session } = await createSession();
