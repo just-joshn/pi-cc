@@ -133,6 +133,11 @@ export class CustomEditor extends Editor {
 		this.flat = flat;
 	}
 
+	/** Without Claude Code terminal settings the prompt keeps pi's own navigation: no rule, pi's arrow edges. */
+	protected override ccPromptNavigation(): boolean {
+		return this.promptShortcuts;
+	}
+
 	protected override renderBottomBorder(width: number, hiddenLineCount: number): string {
 		return this.flat && hiddenLineCount === 0 ? "" : super.renderBottomBorder(width, hiddenLineCount);
 	}

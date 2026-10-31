@@ -306,6 +306,9 @@ function isUsageSessionEntry(item: RenderSessionItem): item is Extract<SessionEn
 // EIO: tty reads/ioctls from an orphaned background process group, or writes after hangup.
 // ENOTTY: the tty was revoked (macOS) and stdin is no longer a terminal.
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN", "ENOTTY"]);
+/** Claude Code's armed-exit window (dossier chunk-r9b933wk.js `var a = 800`): one r8 timeout both
+ * shows the "again to exit" line and gates the exit press. */
+const CC_EXIT_PENDING_MS = 800;
 
 function isDeadTerminalError(error: unknown): boolean {
 	if (!error || typeof error !== "object" || !("code" in error)) {
@@ -518,6 +521,8 @@ export class InteractiveMode {
 
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
+	/** Armed "Press Ctrl-C again to exit" line timer; see handleCtrlC. */
+	private exitHintTimer: ReturnType<typeof setTimeout> | undefined;
 	private changelogMarkdown: string | undefined = undefined;
 	private extensionChangelogUpdates: ExtensionChangelogUpdate[] = [];
 	private startupNoticesShown = false;
@@ -680,9 +685,12 @@ export class InteractiveMode {
 			autocompleteMaxVisible,
 			embedWorkingStatus: true,
 			promptShortcuts: this.ccTui.promptShortcuts,
-			history: new PromptHistoryStore(path.join(getAgentDir(), "prompt-history.jsonl"), () =>
-				JSON.stringify([this.sessionManager.getCwd(), this.sessionManager.getSessionId()]),
-			),
+			// Claude Code keeps its own prompt history; plain pi writes none (main parity).
+			history: this.ccTui.promptShortcuts
+				? new PromptHistoryStore(path.join(getAgentDir(), "prompt-history.jsonl"), () =>
+						JSON.stringify([this.sessionManager.getCwd(), this.sessionManager.getSessionId()]),
+					)
+				: undefined,
 		});
 		this.editor = this.defaultEditor;
 		this.defaultEditor.setVimMode(this.ccTui.vim);
@@ -4438,13 +4446,23 @@ export class InteractiveMode {
 
 	private handleCtrlC(): void {
 		const now = Date.now();
-		if (now - this.lastSigintTime < 500) {
+		const cc = this.ccTui.promptShortcuts;
+		if (now - this.lastSigintTime < (cc ? CC_EXIT_PENDING_MS : 500)) {
 			void this.shutdown();
 		} else {
-			// Claude Code holds a non-empty draft or edited browsed entry (the next Up restores it) instead of clearing,
-			// and shows the armed-exit line in place of the mode indicator.
-			if (!(this.editor.holdClearedOnInterrupt?.() ?? false)) this.clearEditor();
-			this.editor.setTransientStatus?.("Press Ctrl-C again to exit");
+			if (!cc) {
+				this.clearEditor();
+			} else {
+				// Claude Code holds a non-empty draft or edited browsed entry (the next Up restores it) instead of clearing,
+				// and shows the armed-exit line in place of the mode indicator until the window closes.
+				if (!(this.editor.holdClearedOnInterrupt?.() ?? false)) this.clearEditor();
+				this.editor.setTransientStatus?.("Press Ctrl-C again to exit");
+				if (this.exitHintTimer !== undefined) clearTimeout(this.exitHintTimer);
+				this.exitHintTimer = setTimeout(() => {
+					this.exitHintTimer = undefined;
+					this.editor.setTransientStatus?.(undefined);
+				}, CC_EXIT_PENDING_MS);
+			}
 			this.lastSigintTime = now;
 		}
 	}
@@ -4464,6 +4482,10 @@ export class InteractiveMode {
 	private async shutdown(options?: { fromSignal?: boolean }): Promise<void> {
 		if (this.isShuttingDown) return;
 		this.isShuttingDown = true;
+		if (this.exitHintTimer !== undefined) {
+			clearTimeout(this.exitHintTimer);
+			this.exitHintTimer = undefined;
+		}
 		// Keep signal handlers registered until terminal cleanup has completed.
 		// `signal-exit` checks the listener list during the same SIGTERM/SIGHUP
 		// dispatch and re-sends the signal if only its own listeners remain.

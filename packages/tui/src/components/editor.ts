@@ -648,8 +648,21 @@ export class Editor implements Component, Focusable {
 		// No cached state to invalidate currently
 	}
 
+	/**
+	 * Whether this editor runs Claude Code's prompt navigation: the History n/N rule, browsing from
+	 * any first-line cursor, and no line-end jump on Down. Hosts without Claude Code terminal
+	 * settings keep pi's own edges.
+	 */
+	protected ccPromptNavigation(): boolean {
+		return true;
+	}
+
 	protected renderTopBorder(width: number, hiddenLineCount: number): string {
-		if (this.promptNav.kind === "browsing" && this.getText() === this.promptNav.installed) {
+		if (
+			this.ccPromptNavigation() &&
+			this.promptNav.kind === "browsing" &&
+			this.getText() === this.promptNav.installed
+		) {
 			const label = `─── History ${Math.max(1, this.history.length - this.promptNav.index)}/${this.history.length} `;
 			return this.borderColor(label + "─".repeat(Math.max(0, width - label.length)));
 		}
@@ -1099,11 +1112,17 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		// Arrow key navigation (with history support)
+		// Arrow key navigation (with history support). Claude Code browses history from any first-line
+		// cursor; pi browses only from an empty input, an active browse, or column 0 and jumps to the
+		// line start/end otherwise.
 		if (kb.matches(data, "tui.editor.cursorUp")) {
-			// Claude Code browses history from any first-line cursor and moves within the text otherwise
-			if (this.isOnFirstVisualLine()) {
+			if (
+				this.isOnFirstVisualLine() &&
+				(this.ccPromptNavigation() || this.getText() === "" || this.isBrowsingHistory || this.state.cursorCol === 0)
+			) {
 				this.navigateHistory(-1);
+			} else if (this.isOnFirstVisualLine()) {
+				this.moveToLineStart();
 			} else {
 				this.moveCursor(-1, 0);
 			}
@@ -1112,6 +1131,7 @@ export class Editor implements Component, Focusable {
 		if (kb.matches(data, "tui.editor.cursorDown")) {
 			if (this.isOnLastVisualLine()) {
 				if (this.isBrowsingHistory) this.navigateHistory(1);
+				else if (!this.ccPromptNavigation()) this.moveToLineEnd();
 			} else {
 				this.moveCursor(1, 0);
 			}
