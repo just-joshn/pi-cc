@@ -183,4 +183,54 @@ describe("prompt navigation before application shortcuts", () => {
 		expect(screen(editor)).not.toContain("/ for commands");
 		expect(editor.getText()).toBe("abc");
 	});
+
+	it("Enter accepts a search parked under help, submits the draft, and one Escape dismisses the rest", () => {
+		const editor = createEditor(true);
+		editor.addToHistory("alpha one");
+		editor.setBuffer("W:2", 3);
+		editor.handleInput("\x1b");
+		editor.handleInput("?");
+		editor.handleInput("/");
+		editor.handleInput("al");
+		expect(screen(editor)).toContain("/ for commands");
+		expect(screen(editor)).not.toContain("search prompts:");
+		expect(editor.getText()).toBe("W:2");
+		const submitted: string[] = [];
+		editor.onSubmit = (text) => submitted.push(text);
+		editor.handleInput("\r");
+		expect(submitted).toEqual(["W:2"]);
+		expect(editor.getText()).toBe("");
+		expect(screen(editor)).toContain("/ for commands");
+		expect(screen(editor)).not.toContain("search prompts:");
+		editor.handleInput("\x1b");
+		expect(screen(editor)).not.toContain("/ for commands");
+		editor.handleInput("i");
+		editor.handleInput("Q");
+		expect(editor.getVimMode()).toBe("insert");
+		expect(editor.getText()).toBe("Q");
+		expect(screen(editor)).not.toContain("no matching prompt:");
+	});
+
+	it("Tab accepts a search parked under help without submitting, and one Escape dismisses the rest", () => {
+		const editor = createEditor(true);
+		editor.addToHistory("alpha one");
+		editor.setBuffer("W:2", 3);
+		editor.handleInput("\x1b");
+		editor.handleInput("?");
+		editor.handleInput("/");
+		editor.handleInput("al");
+		const submitted: string[] = [];
+		editor.onSubmit = (text) => submitted.push(text);
+		editor.handleInput("\t");
+		expect(submitted).toEqual([]);
+		expect(editor.getText()).toBe("W:2");
+		expect(screen(editor)).toContain("/ for commands");
+		expect(screen(editor)).not.toContain("search prompts:");
+		editor.handleInput("\x1b");
+		expect(screen(editor)).not.toContain("/ for commands");
+		editor.handleInput("i");
+		editor.handleInput("Q");
+		expect(editor.getText()).toBe("W:2Q");
+		expect(screen(editor)).not.toContain("no matching prompt:");
+	});
 });
