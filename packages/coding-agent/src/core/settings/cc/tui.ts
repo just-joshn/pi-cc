@@ -9,6 +9,8 @@ import { CC_DEFAULT_CLOCK, type CcClock, resolveCcClock } from "./clock.ts";
 import type { CcSettings } from "./types.ts";
 
 export interface CcTuiSettings {
+	/** Opt-in CC prompt shortcuts, leaving an unconfigured pi prompt unchanged. */
+	readonly promptShortcuts: boolean;
 	/** `tui`: `fullscreen` selects pi's alternate-screen renderer and `default` its main-screen one. */
 	readonly tuiMode: TuiMode | undefined;
 	readonly reducedMotion: boolean;
@@ -23,6 +25,7 @@ export interface CcTuiSettings {
 
 /** What a run with no Claude Code terminal settings resolves to, and what pi alone behaves as. */
 export const NO_CC_TUI: CcTuiSettings = {
+	promptShortcuts: false,
 	tuiMode: undefined,
 	reducedMotion: false,
 	maxProseWidth: undefined,
@@ -56,6 +59,8 @@ export function resolveCcTuiSettings(settings: CcSettings, inputs: CcTuiInputs):
 	const { values } = settings;
 	const tui = values.tui;
 	return {
+		promptShortcuts:
+			values.editorMode !== undefined || values.tui !== undefined || Boolean(inputs.env.CLAUDE_CONFIG_DIR),
 		tuiMode: tui === "fullscreen" ? "fullscreen" : tui === "default" ? "regular" : undefined,
 		reducedMotion: values.prefersReducedMotion === true,
 		maxProseWidth: typeof values.maxProseWidth === "number" ? values.maxProseWidth : undefined,

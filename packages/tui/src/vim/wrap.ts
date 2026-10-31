@@ -3,6 +3,30 @@ import { cjkBreakRegex, getGraphemeSegmenter, isWhitespaceChar, visibleWidth } f
 
 const graphemeSegmenter = getGraphemeSegmenter();
 
+/** Prompt tabs advance to the next eight-column stop. */
+export function displayWidth(text: string, startColumn = 0): number {
+	let column = startColumn;
+	const parts = text.split("\t");
+	for (let index = 0; index < parts.length; index++) {
+		if (index > 0) column += 8 - (column % 8);
+		column += visibleWidth(parts[index]!);
+	}
+	return column - startColumn;
+}
+
+/** Expand tabs before the terminal renderer applies its generic tab width. */
+export function expandDisplayTabs(text: string): string {
+	let column = 0;
+	return text
+		.split("\t")
+		.map((part, index) => {
+			const spaces = index === 0 ? "" : " ".repeat(8 - (column % 8));
+			column += spaces.length + visibleWidth(part);
+			return spaces + part;
+		})
+		.join("");
+}
+
 /** Non-global version for single-segment testing. */
 export const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
 
@@ -37,7 +61,7 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 		return [{ text: "", startIndex: 0, endIndex: 0 }];
 	}
 
-	const lineWidth = visibleWidth(line);
+	const lineWidth = displayWidth(line);
 	if (lineWidth <= maxWidth) {
 		return [{ text: line, startIndex: 0, endIndex: line.length }];
 	}
@@ -56,7 +80,7 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 	for (let i = 0; i < segments.length; i++) {
 		const seg = segments[i]!;
 		const grapheme = seg.segment;
-		const gWidth = visibleWidth(grapheme);
+		let gWidth = displayWidth(grapheme, currentWidth);
 		const charIndex = seg.index;
 		const isWs = !isPasteMarker(grapheme) && isWhitespaceChar(grapheme);
 
@@ -67,7 +91,7 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 				// plus the current grapheme still fits within maxWidth).
 				chunks.push({ text: line.slice(chunkStart, wrapOppIndex), startIndex: chunkStart, endIndex: wrapOppIndex });
 				chunkStart = wrapOppIndex;
-				currentWidth -= wrapOppWidth;
+				currentWidth = displayWidth(line.slice(chunkStart, charIndex));
 			} else if (chunkStart < charIndex) {
 				// No viable wrap opportunity: force-break at current position.
 				// This also handles the case where backtracking to a word
@@ -79,9 +103,10 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 				currentWidth = 0;
 			}
 			wrapOppIndex = -1;
+			gWidth = displayWidth(grapheme, currentWidth);
 		}
 
-		if (gWidth > maxWidth) {
+		if (gWidth > maxWidth && [...graphemeSegmenter.segment(grapheme)].length > 1) {
 			// Single atomic segment wider than maxWidth (e.g. paste marker
 			// in a narrow terminal). Re-wrap it at grapheme granularity.
 
@@ -94,7 +119,7 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 			}
 			const last = subChunks[subChunks.length - 1]!;
 			chunkStart = charIndex + last.startIndex;
-			currentWidth = visibleWidth(last.text);
+			currentWidth = displayWidth(last.text);
 			wrapOppIndex = -1;
 			continue;
 		}
@@ -123,7 +148,45 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 	// Push final chunk.
 	chunks.push({ text: line.slice(chunkStart), startIndex: chunkStart, endIndex: line.length });
 
-	return chunks;
+	return enforceRowWidth(chunks, maxWidth);
+}
+
+/**
+ * A tab's expansion depends on its column, so backtracking can leave a row whose prefix widened
+ * past maxWidth. Re-split those rows at grapheme granularity; a lone unit wider than maxWidth stays
+ * whole, matching the atomic-segment rule above.
+ */
+function enforceRowWidth(chunks: TextChunk[], maxWidth: number): TextChunk[] {
+	if (chunks.every((chunk) => displayWidth(chunk.text) <= maxWidth)) return chunks;
+	const result: TextChunk[] = [];
+	for (const chunk of chunks) {
+		if (displayWidth(chunk.text) <= maxWidth) {
+			result.push(chunk);
+			continue;
+		}
+		let pieceStart = 0;
+		let width = 0;
+		for (const { segment, index } of graphemeSegmenter.segment(chunk.text)) {
+			const unitWidth = displayWidth(segment, width);
+			const atomic = [...graphemeSegmenter.segment(segment)].length > 1;
+			if (width > 0 && width + unitWidth > maxWidth && !atomic) {
+				result.push({
+					text: chunk.text.slice(pieceStart, index),
+					startIndex: chunk.startIndex + pieceStart,
+					endIndex: chunk.startIndex + index,
+				});
+				pieceStart = index;
+				width = 0;
+			}
+			width += displayWidth(segment, width);
+		}
+		result.push({
+			text: chunk.text.slice(pieceStart),
+			startIndex: chunk.startIndex + pieceStart,
+			endIndex: chunk.endIndex,
+		});
+	}
+	return result;
 }
 
 /** One display row of a logical line: the column range [start, end) of the line it shows. */
@@ -137,6 +200,6 @@ export interface LineRow {
  * so callers can defer paste-marker-aware segmentation.
  */
 export function lineRows(line: string, width: number, segments: (line: string) => Intl.SegmentData[]): LineRow[] {
-	if (line.length === 0 || visibleWidth(line) <= width) return [{ start: 0, end: line.length }];
+	if (line.length === 0 || displayWidth(line) <= width) return [{ start: 0, end: line.length }];
 	return wordWrapLine(line, width, segments(line)).map((chunk) => ({ start: chunk.startIndex, end: chunk.endIndex }));
 }

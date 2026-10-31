@@ -127,10 +127,7 @@ export function visualKey(
 		return state.pending === "" ? leave(state, buffer) : step({ ...state, pending: "" });
 	}
 	if (input.kind === "other") {
-		return {
-			...step({ ...state, mode: "normal", pending: "", visual: undefined, wanted: undefined }),
-			keepCursor: true,
-		};
+		return step({ ...state, mode: "normal", pending: "", visual: undefined, wanted: undefined });
 	}
 	const cancelled = { ...state, pending: "" };
 	const [, digits = "", letter = ""] = PENDING.exec(state.pending) ?? [];

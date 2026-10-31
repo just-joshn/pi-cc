@@ -3,6 +3,7 @@ import { type Keybinding, type KeyId, matchesKey } from "@earendil-works/pi-tui"
 export interface CcBinding {
 	keys: readonly [KeyId, ...KeyId[]];
 	action: Keybinding;
+	global?: boolean;
 }
 
 export type CcDispatch =
@@ -22,21 +23,26 @@ const CHORD_TIMEOUT_MS = 3000;
  */
 export class CcLayer {
 	private bindings: readonly CcBinding[] = [];
+	private globalBindings: readonly CcBinding[] = [];
 	private pending: Pending | undefined;
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private statusTarget: ((message: string | undefined) => void) | undefined;
 
 	get active(): boolean {
-		return this.bindings.length > 0;
+		return this.bindings.length > 0 || this.globalBindings.length > 0;
 	}
 
 	getBindings(): readonly CcBinding[] {
 		return this.bindings;
 	}
 
-	setBindings(bindings: readonly CcBinding[]): void {
+	setBindings(
+		bindings: readonly CcBinding[],
+		globalBindings: readonly CcBinding[] = bindings.filter((binding) => binding.global),
+	): void {
 		this.cancel();
 		this.bindings = bindings;
+		this.globalBindings = globalBindings;
 	}
 
 	cancel(): void {
@@ -50,8 +56,13 @@ export class CcLayer {
 	}
 
 	/** Resolves one keystroke. Chord feedback goes to the editor that received it. */
-	dispatch(data: string, onStatus?: (message: string | undefined) => void, now = Date.now()): CcDispatch {
-		const result = this.resolve(data, now);
+	dispatch(
+		data: string,
+		onStatus?: (message: string | undefined) => void,
+		now = Date.now(),
+		globalOnly = false,
+	): CcDispatch {
+		const result = this.resolve(data, now, globalOnly);
 		if (result.kind === "pending") {
 			if (this.timer !== undefined) clearTimeout(this.timer);
 			this.statusTarget = onStatus;
@@ -69,16 +80,18 @@ export class CcLayer {
 		return result;
 	}
 
-	private resolve(data: string, now: number): CcDispatch {
+	private resolve(data: string, now: number, globalOnly: boolean): CcDispatch {
 		const pending = this.pending;
 		this.pending = undefined;
 		if (pending && now < pending.expires) {
 			if (matchesKey(data, "escape")) return { kind: "cancelled" };
-			const hits = pending.candidates.filter((binding) => matchesKey(data, binding.keys[pending.index]!));
+			const hits = pending.candidates.filter(
+				(binding) => (!globalOnly || binding.global) && matchesKey(data, binding.keys[pending.index]!),
+			);
 			return hits.length > 0 ? this.advance(hits, pending.index + 1, now) : { kind: "cancelled" };
 		}
 		return this.advance(
-			this.bindings.filter((binding) => matchesKey(data, binding.keys[0])),
+			(globalOnly ? this.globalBindings : this.bindings).filter((binding) => matchesKey(data, binding.keys[0])),
 			1,
 			now,
 		);

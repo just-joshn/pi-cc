@@ -27,6 +27,7 @@ export function useWindowsKeybindings(
 const windowsKeybindings = useWindowsKeybindings();
 
 const APP_KEYBINDINGS = {
+	"app.help.toggle": { defaultKeys: "?", description: "Toggle prompt shortcuts" },
 	"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
 	"app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
@@ -427,8 +428,10 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 				(typeof value === "string" ? [value] : (value ?? [])).map((key) => sequenceIdentity([key])),
 			),
 		);
-		const bindings = resolveLayer(declarations).filter((binding) => !piKeys.has(sequenceIdentity([binding.keys[0]])));
-		this.cc.setBindings(bindings);
+		const unclaimed = (binding: CcBinding) => !piKeys.has(sequenceIdentity([binding.keys[0]]));
+		const bindings = resolveLayer(declarations).filter(unclaimed);
+		const globals = resolveLayer(declarations.filter((binding) => binding.global)).filter(unclaimed);
+		this.cc.setBindings(bindings, globals);
 		this.warnHiddenSingleKeyActions(bindings);
 	}
 

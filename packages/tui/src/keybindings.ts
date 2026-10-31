@@ -10,6 +10,11 @@ export interface Keybindings {
 	"tui.editor.cursorDown": true;
 	"tui.editor.historyPrevious": true;
 	"tui.editor.historyNext": true;
+	"tui.editor.historySearch": true;
+	"tui.historySearch.next": true;
+	"tui.historySearch.accept": true;
+	"tui.historySearch.cancel": true;
+	"tui.historySearch.execute": true;
 	"tui.editor.cursorLeft": true;
 	"tui.editor.cursorRight": true;
 	"tui.editor.cursorWordLeft": true;
@@ -79,6 +84,14 @@ export const TUI_KEYBINDINGS = {
 		defaultKeys: [],
 		description: "Select next prompt history entry",
 	},
+	"tui.editor.historySearch": { defaultKeys: "ctrl+r", description: "Search prompt history" },
+	"tui.historySearch.next": { defaultKeys: "ctrl+r", description: "Find an older matching prompt" },
+	"tui.historySearch.accept": {
+		defaultKeys: ["escape", "tab", "shift+tab"],
+		description: "Accept the matching prompt",
+	},
+	"tui.historySearch.cancel": { defaultKeys: "ctrl+c", description: "Restore the draft before searching" },
+	"tui.historySearch.execute": { defaultKeys: "enter", description: "Submit the matching prompt" },
 	"tui.editor.cursorLeft": {
 		defaultKeys: ["left", "ctrl+b"],
 		description: "Move cursor left",

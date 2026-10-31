@@ -101,8 +101,6 @@ export interface VimStep {
 	readonly history?: "up" | "down";
 	/** The key is not vim's: give it to the editor unchanged. */
 	readonly passThrough: boolean;
-	/** Leave the cursor where it is, even past the last character (a chord that ends visual mode). */
-	readonly keepCursor?: boolean;
 }
 
 export const INSERT_STATE: VimState = { mode: "insert", pending: "" };
@@ -655,7 +653,7 @@ export function vimKey(state: VimState, input: VimInput, buffer: Buffer): VimSte
 	if (state.visual !== undefined) return visualKey(state, state.visual, input, buffer, visualMotion);
 	if (input.kind === "escape") return { state: { ...state, pending: "" }, passThrough: state.pending === "" };
 	if (input.kind === "other") return { state, passThrough: true };
-	const here = { ...buffer, offset: clampNormal(buffer.text, buffer.offset) };
+	const here = { ...buffer, offset: snapStart(buffer.text, buffer.offset) };
 	const history = historyStep(state, input.key, here.text, here.offset);
 	if (history !== undefined) return history;
 	if ((input.key === "v" || input.key === "V") && /^(?:[1-9]\d*)?$/.test(state.pending)) {
