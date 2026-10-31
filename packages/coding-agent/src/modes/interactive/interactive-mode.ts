@@ -220,6 +220,10 @@ interface Expandable {
 
 interface ActiveEditor extends EditorComponent {
 	getCursor?(): { line: number; col: number };
+	/** Claude Code's Ctrl+C hold; present on the prompt editor, absent on embedded dialogs. */
+	holdClearedOnInterrupt?(): boolean;
+	/** One-line status shown until the next key. */
+	setTransientStatus?(status: string | undefined): void;
 }
 
 interface WorkingStatusEditor extends EditorComponent {
@@ -4437,7 +4441,10 @@ export class InteractiveMode {
 		if (now - this.lastSigintTime < 500) {
 			void this.shutdown();
 		} else {
-			this.clearEditor();
+			// Claude Code holds a non-empty draft or edited browsed entry (the next Up restores it) instead of clearing,
+			// and shows the armed-exit line in place of the mode indicator.
+			if (!(this.editor.holdClearedOnInterrupt?.() ?? false)) this.clearEditor();
+			this.editor.setTransientStatus?.("Press Ctrl-C again to exit");
 			this.lastSigintTime = now;
 		}
 	}

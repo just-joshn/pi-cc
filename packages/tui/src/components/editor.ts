@@ -130,6 +130,14 @@ export interface PromptHistory {
 	append(entry: PromptHistoryEntry): void;
 }
 
+/**
+ * Prompt-navigation state: the input shows either the user's draft or a browsed history entry.
+ * `installed` is the entry text the browser put in the input; a current value that diverges from it
+ * is an edit riding on the browsed slot (it hides the History n/N rule, like Claude Code's
+ * historyEdited) and is saved over the slot when browsing moves on.
+ */
+type PromptNav = { kind: "draft" } | { kind: "browsing"; index: number; installed: string };
+
 type HistorySearch =
 	| { kind: "closed" }
 	| {
@@ -285,8 +293,12 @@ export class Editor implements Component, Focusable {
 
 	// Prompt history for up/down navigation
 	private history: string[] = [];
-	private historyIndex: number = -1; // -1 = not browsing, 0 = most recent, 1 = older, etc.
+	private promptNav: PromptNav = { kind: "draft" };
 	private historyDraft: EditorState | null = null;
+	// Per-slot replacements saved when leaving a browsed entry (edits ride along instead of ending the browse)
+	private navOverrides: Map<number, string> = new Map();
+	// Value held by Ctrl+C; the next Up on an empty input restores it
+	private heldCleared: string | null = null;
 	private historySearch: HistorySearch = { kind: "closed" };
 	private persistentHistory: PromptHistory | undefined;
 
@@ -312,6 +324,9 @@ export class Editor implements Component, Focusable {
 
 	// Vim mode: undefined when off.
 	private vim: VimRuntime | undefined;
+
+	// One-line status shown in place of the mode line until the next key (e.g. an armed interrupt).
+	private transientStatus: string | undefined;
 
 	public onToggleHelp?: () => void;
 	/** True while the host help overlay owns the footer row the search line would render into. */
@@ -393,7 +408,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	protected get isBrowsingHistory(): boolean {
-		return this.historyIndex >= 0;
+		return this.promptNav.kind === "browsing";
 	}
 
 	protected cancelHistorySearch(): void {
@@ -523,10 +538,6 @@ export class Editor implements Component, Focusable {
 		search.failed = true;
 	}
 
-	private isEditorEmpty(): boolean {
-		return this.state.lines.length === 1 && this.state.lines[0] === "";
-	}
-
 	private isOnFirstVisualLine(): boolean {
 		const visualLines = this.buildVisualLineMap(this.lastWidth);
 		const currentVisualLine = this.findCurrentVisualLine(visualLines);
@@ -541,39 +552,82 @@ export class Editor implements Component, Focusable {
 
 	private navigateHistory(direction: 1 | -1): void {
 		this.lastAction = null;
-		if (this.history.length === 0) return;
-
-		const newIndex = this.historyIndex - direction; // Up(-1) increases index, Down(1) decreases
-		if (newIndex < -1 || newIndex >= this.history.length) return;
-
-		// Capture state when first entering history browsing mode
-		if (this.historyIndex === -1 && newIndex >= 0) {
-			this.pushUndoSnapshot();
-			this.historyDraft = structuredClone(this.state);
+		if (direction === -1 && this.heldCleared !== null && this.getText() === "") {
+			const held = this.heldCleared;
+			this.heldCleared = null;
+			this.setTextInternal(held, "end");
+			return;
 		}
-
-		this.historyIndex = newIndex;
-
-		if (this.historyIndex === -1) {
-			const draft = this.historyDraft;
-			this.historyDraft = null;
-			if (draft) {
-				this.state = draft;
-				this.preferredVisualCol = null;
-				this.snappedFromCursorCol = null;
-				this.scrollOffset = 0;
-				if (this.onChange) this.onChange(this.getText());
+		if (this.history.length === 0) return;
+		const index = this.promptNav.kind === "browsing" ? this.promptNav.index : -1;
+		const value = this.getText();
+		if (direction === -1) {
+			// Up: toward older entries, clamped at the oldest
+			if (index >= this.history.length - 1) return;
+			const next = index + 1;
+			if (index === -1) {
+				this.pushUndoSnapshot();
+				this.historyDraft = value.trim() === "" ? null : structuredClone(this.state);
 			} else {
-				this.setTextInternal("");
+				this.navOverrides.set(index, value);
 			}
+			const text = (this.navOverrides.get(next) ?? this.history[next]) || "";
+			this.setTextInternal(text, "end");
+			this.promptNav = { kind: "browsing", index: next, installed: text };
 		} else {
-			this.setTextInternal(this.history[this.historyIndex] || "", direction === -1 ? "start" : "end");
+			// Down: toward newer entries; from the newest back to the draft, no-op on the draft
+			if (index === -1) return;
+			this.navOverrides.set(index, value);
+			if (index === 0) {
+				this.promptNav = { kind: "draft" };
+				const draft = this.historyDraft;
+				this.historyDraft = null;
+				if (draft) {
+					this.state = structuredClone(draft);
+					this.state.cursorLine = 0;
+					this.setCursorCol(0);
+					this.preferredVisualCol = null;
+					this.snappedFromCursorCol = null;
+					this.scrollOffset = 0;
+					if (this.onChange) this.onChange(this.getText());
+				} else {
+					this.setTextInternal("");
+				}
+			} else {
+				const next = index - 1;
+				const text = (this.navOverrides.get(next) ?? this.history[next]) || "";
+				this.setTextInternal(text, "start");
+				this.promptNav = { kind: "browsing", index: next, installed: text };
+			}
 		}
 	}
 
 	private exitHistoryBrowsing(): void {
-		this.historyIndex = -1;
+		this.promptNav = { kind: "draft" };
 		this.historyDraft = null;
+		this.navOverrides.clear();
+		this.heldCleared = null;
+	}
+
+	/**
+	 * Claude Code's Ctrl+C guard: a non-empty draft or an edited browsed entry is held, the input
+	 * clears, and the next Up restores it. Returns false (arm the exit instead) for an empty input
+	 * or an unedited browsed entry.
+	 */
+	holdClearedOnInterrupt(): boolean {
+		if (this.historySearch.kind === "searching") return false;
+		const value = this.getText();
+		if (this.promptNav.kind === "browsing" && value === this.promptNav.installed) return false;
+		if (value.trim() === "") return false;
+		this.exitHistoryBrowsing();
+		this.heldCleared = value;
+		this.cancelAutocomplete();
+		this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+		this.scrollOffset = 0;
+		this.lastAction = null;
+		this.onChange?.("");
+		this.tui.requestRender();
+		return true;
 	}
 
 	/** Internal setText that doesn't reset history state - used by navigateHistory */
@@ -595,8 +649,8 @@ export class Editor implements Component, Focusable {
 	}
 
 	protected renderTopBorder(width: number, hiddenLineCount: number): string {
-		if (this.isBrowsingHistory) {
-			const label = `─── History ${this.history.length - this.historyIndex}/${this.history.length} `;
+		if (this.promptNav.kind === "browsing" && this.getText() === this.promptNav.installed) {
+			const label = `─── History ${Math.max(1, this.history.length - this.promptNav.index)}/${this.history.length} `;
 			return this.borderColor(label + "─".repeat(Math.max(0, width - label.length)));
 		}
 		const border = hiddenLineCount > 0 ? createScrollBorder("↑", hiddenLineCount, width) : "─".repeat(width);
@@ -735,7 +789,7 @@ export class Editor implements Component, Focusable {
 				`${leftPadding}${prefix}${query}${this.focused ? CURSOR_MARKER : ""}${renderFakeCursor(" ")}${tail}`,
 			);
 		} else {
-			const modeLine = this.vimModeLine();
+			const modeLine = this.transientStatus ?? this.vimModeLine();
 			if (modeLine !== undefined) result.push(`${leftPadding}${modeLine}`.slice(0, width));
 		}
 
@@ -800,12 +854,12 @@ export class Editor implements Component, Focusable {
 		this.state.cursorLine = visualLine.logicalLine;
 		this.setCursorCol(visualLine.startCol + targetIndex);
 		this.lastAction = null;
-		this.exitHistoryBrowsing();
 		if (this.autocompleteState) this.updateAutocomplete();
 		return { handled: true, focus: true };
 	}
 
 	handleInput(data: string): void {
+		this.transientStatus = undefined;
 		if (this.handleHistorySearchInput(data)) return;
 		if (this.vimDropsKey(data)) return;
 		const kb = getKeybindings();
@@ -1047,25 +1101,17 @@ export class Editor implements Component, Focusable {
 
 		// Arrow key navigation (with history support)
 		if (kb.matches(data, "tui.editor.cursorUp")) {
-			if (
-				this.isOnFirstVisualLine() &&
-				(this.isEditorEmpty() || this.historyIndex > -1 || this.state.cursorCol === 0)
-			) {
+			// Claude Code browses history from any first-line cursor and moves within the text otherwise
+			if (this.isOnFirstVisualLine()) {
 				this.navigateHistory(-1);
-			} else if (this.isOnFirstVisualLine()) {
-				// Already at top - jump to start of line
-				this.moveToLineStart();
 			} else {
 				this.moveCursor(-1, 0);
 			}
 			return;
 		}
 		if (kb.matches(data, "tui.editor.cursorDown")) {
-			if (this.historyIndex > -1 && this.isOnLastVisualLine()) {
-				this.navigateHistory(1);
-			} else if (this.isOnLastVisualLine()) {
-				// Already at bottom - jump to end of line
-				this.moveToLineEnd();
+			if (this.isOnLastVisualLine()) {
+				if (this.isBrowsingHistory) this.navigateHistory(1);
 			} else {
 				this.moveCursor(1, 0);
 			}
@@ -1361,8 +1407,6 @@ export class Editor implements Component, Focusable {
 
 	// All the editor methods from before...
 	private insertCharacter(char: string, skipUndoCoalescing?: boolean): void {
-		this.exitHistoryBrowsing();
-
 		// Undo coalescing (fish-style):
 		// - Consecutive word chars coalesce into one undo unit
 		// - Space captures state before itself (so undo removes space+following word together)
@@ -1421,7 +1465,6 @@ export class Editor implements Component, Focusable {
 
 	private handlePaste(pastedText: string): void {
 		this.cancelAutocomplete();
-		this.exitHistoryBrowsing();
 		this.lastAction = null;
 
 		this.pushUndoSnapshot();
@@ -1489,7 +1532,6 @@ export class Editor implements Component, Focusable {
 
 	private addNewLine(): void {
 		this.cancelAutocomplete();
-		this.exitHistoryBrowsing();
 		this.lastAction = null;
 
 		this.pushUndoSnapshot();
@@ -1541,7 +1583,6 @@ export class Editor implements Component, Focusable {
 	}
 
 	private handleBackspace(): void {
-		this.exitHistoryBrowsing();
 		this.lastAction = null;
 
 		if (this.state.cursorCol > 0) {
@@ -1786,8 +1827,6 @@ export class Editor implements Component, Focusable {
 	}
 
 	private deleteToStartOfLine(): void {
-		this.exitHistoryBrowsing();
-
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
 		if (this.state.cursorCol > 0) {
@@ -1821,8 +1860,6 @@ export class Editor implements Component, Focusable {
 	}
 
 	private deleteToEndOfLine(): void {
-		this.exitHistoryBrowsing();
-
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
 		if (this.state.cursorCol < currentLine.length) {
@@ -1853,8 +1890,6 @@ export class Editor implements Component, Focusable {
 	}
 
 	private deleteWordBackwards(): void {
-		this.exitHistoryBrowsing();
-
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
 		// If at start of line, behave like backspace at column 0 (merge with previous line)
@@ -1898,8 +1933,6 @@ export class Editor implements Component, Focusable {
 	}
 
 	private deleteWordForward(): void {
-		this.exitHistoryBrowsing();
-
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
 		// If at end of line, merge with next line (delete the newline)
@@ -1940,7 +1973,6 @@ export class Editor implements Component, Focusable {
 	}
 
 	private handleForwardDelete(): void {
-		this.exitHistoryBrowsing();
 		this.lastAction = null;
 
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
@@ -2182,7 +2214,6 @@ export class Editor implements Component, Focusable {
 	 * Insert text at cursor position (used by yank operations).
 	 */
 	private insertYankedText(text: string): void {
-		this.exitHistoryBrowsing();
 		const lines = text.split("\n");
 
 		if (lines.length === 1) {
@@ -2268,7 +2299,6 @@ export class Editor implements Component, Focusable {
 
 	/** Undo the last edit. */
 	undo(): void {
-		this.exitHistoryBrowsing();
 		const snapshot = this.undoStack.pop();
 		if (!snapshot) return;
 		Object.assign(this.state, snapshot.state);
@@ -2312,6 +2342,12 @@ export class Editor implements Component, Focusable {
 
 	getVimMode(): VimMode | undefined {
 		return this.vim?.state.mode;
+	}
+
+	/** Show a one-line status in place of the mode line until the next key press. */
+	setTransientStatus(status: string | undefined): void {
+		this.transientStatus = status;
+		this.tui.requestRender();
 	}
 
 	/**
