@@ -328,3 +328,25 @@ describe("prompt navigation before application shortcuts", () => {
 		},
 	);
 });
+
+describe("Ctrl+C reaches the app.clear action with a non-empty draft", () => {
+	it("routes Ctrl+C to the registered handler like interactive-mode's hold-and-arm wiring", () => {
+		const editor = createEditor(true);
+		let cleared = 0;
+		editor.actionHandlers.set("app.clear", () => {
+			cleared++;
+			if (!editor.holdClearedOnInterrupt()) editor.setText("");
+			editor.setTransientStatus("Press Ctrl-C again to exit");
+		});
+		editor.handleInput("h");
+		editor.handleInput("i");
+		editor.handleInput("\x03");
+		expect(cleared).toBe(1);
+		expect(editor.getText()).toBe("");
+		expect(screen(editor)).toContain("Press Ctrl-C again to exit");
+		editor.handleInput("\x1b[A");
+		expect(editor.getText()).toBe("hi");
+		expect(editor.getCursorOffset()).toBe(2);
+		expect(screen(editor)).not.toContain("Press Ctrl-C again to exit");
+	});
+});
