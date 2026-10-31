@@ -3767,10 +3767,15 @@ export class AgentSession {
 		if (policy.windowSource === "environment")
 			return "CLAUDE_CODE_AUTO_COMPACT_WINDOW takes precedence; unset it before changing the window.";
 		const input = argument.trim().toLowerCase();
-		const value = parseAutocompact(["reset", "unset", "default"].includes(input) ? "auto" : input);
+		if (["reset", "unset", "default"].includes(input)) {
+			this.abortCompaction();
+			delete policy.sessionByModel[model.id];
+			return `Auto-compact window reset to ${this.compactionLimits?.window} tokens.`;
+		}
+		const value = parseAutocompact(input);
 		if (value === undefined) return "Expected auto or a window between 100k and 1M tokens.";
 		this.abortCompaction();
-		policy.byModel[model.id] = value;
+		policy.sessionByModel[model.id] = value;
 		return `Auto-compact window set to ${value === "auto" ? "auto" : `${value} tokens`}.`;
 	}
 

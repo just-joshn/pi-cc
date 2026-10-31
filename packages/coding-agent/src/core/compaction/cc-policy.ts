@@ -13,6 +13,8 @@ export interface CcCompactionPolicy {
 	disabled: boolean;
 	window?: number;
 	byModel: Record<string, number | "auto">;
+	/** `/autocompact` choices for this session, which win over every configured window. */
+	sessionByModel: Record<string, number | "auto">;
 	windowSource: "model-default" | "session_override" | "environment" | "settings_top_level";
 	percent?: number;
 	blockingLimit?: number;
@@ -87,6 +89,7 @@ export function ccCompactionPolicy(
 		disabled: enabledEnv(env.DISABLE_COMPACT),
 		window: environment ?? sessionWindow ?? setting,
 		byModel: sessionWindow !== undefined || environment !== undefined ? {} : byModel,
+		sessionByModel: {},
 		windowSource:
 			environment !== undefined
 				? "environment"
@@ -107,7 +110,7 @@ export function ccCompactionLimits(
 	policy: CcCompactionPolicy,
 	model: Pick<Model<string>, "id" | "contextWindow" | "maxTokens">,
 ): CcCompactionLimits {
-	const override = policy.byModel[model.id];
+	const override = policy.sessionByModel[model.id] ?? policy.byModel[model.id];
 	const window = Math.min(
 		model.contextWindow,
 		override === "auto" ? model.contextWindow : (override ?? policy.window ?? model.contextWindow),

@@ -378,6 +378,30 @@ describe("Claude Code session compaction", () => {
 		expect(requests).toHaveLength(11);
 		expect(text(requests[10])).toContain("after compaction");
 	});
+	it("returns /autocompact reset, unset and default to the configured window without storing auto", async () => {
+		const { session } = await createSession({}, [], {}, { autocompact: "150k" });
+		expect(session.compactionLimits?.window).toBe(150_000);
+		session.configureAutoCompaction("120k");
+		expect(session.compactionLimits?.window).toBe(120_000);
+		for (const word of ["reset", "unset", "default"]) {
+			session.configureAutoCompaction("120k");
+			session.configureAutoCompaction(word);
+			expect(session.compactionLimits?.window).toBe(150_000);
+		}
+		session.configureAutoCompaction("auto");
+		expect(session.compactionLimits?.window).toBe(200_000);
+		session.configureAutoCompaction("reset");
+		expect(session.compactionLimits?.window).toBe(150_000);
+	});
+	it("keeps a per-model setting after /autocompact reset", async () => {
+		const { session } = await createSession({
+			autoCompactWindow: 180_000,
+			modelSettings: { "claude-sonnet-4-5": { autoCompactWindow: 130_000 } },
+		});
+		session.configureAutoCompaction("120k");
+		session.configureAutoCompaction("reset");
+		expect(session.compactionLimits?.window).toBe(130_000);
+	});
 	it("configures auto-compaction windows without treating the command as an enable toggle", async () => {
 		const { session } = await createSession();
 		expect(session.configureAutoCompaction()).toContain("200000");
