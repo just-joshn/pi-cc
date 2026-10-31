@@ -87,6 +87,24 @@ function probe(file: unknown, ccFile?: unknown) {
 }
 
 describe("CC keybinding file import", () => {
+	it("reactivates a shadowed Global binding when search disables Chat", () => {
+		const p = probe({
+			bindings: [
+				{ context: "Global", bindings: { "ctrl+y": "app.tools.expand" } },
+				{ context: "Chat", bindings: { "ctrl+y": "chat:newline" } },
+			],
+		});
+		p.editor.onAction("app.tools.expand", () => p.events.push("tools"));
+		p.editor.setText("draft");
+		expect(p.press("\x19").text).toBe("draft\n");
+		p.editor.setText("draft");
+		expect(p.press("\x12", "\x19")).toEqual({ text: "draft", events: ["tools"] });
+	});
+
+	it("retains Global context when constructing the active layer", () => {
+		const imported = importCcKeybindings(ccGlobal({ "ctrl+y": "app.tools.expand" }), new Set(["app.tools.expand"]));
+		expect(resolveLayer(imported.bindings)).toEqual([{ keys: ["ctrl+y"], action: "app.tools.expand", global: true }]);
+	});
 	it("validates the CC array envelope and rejects malformed blocks atomically", () => {
 		expect(importCcKeybindings({ bindings: {} }, new Set()).diagnostics).toHaveLength(1);
 		expect(

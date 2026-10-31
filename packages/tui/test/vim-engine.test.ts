@@ -430,6 +430,19 @@ wrappedTable("vim gj and gk with an operator", [
 	["aaaa bbbb cc|cc dddd", "d3gk", "aa|aa bbbb cccc dddd"],
 ]);
 
+describe("tab-stop columns in display motions", () => {
+	for (const [from, keys, to] of [
+		["\t|ab\n0123456789", "gj", "\tab\n01234567|89"],
+		["|\tab\n0123456789", "gj", "\tab\n0123456|789"],
+		["0123456|789\n\tab", "gjgk", "0123456|789\n\tab"],
+		["|a\tbcd", "gj", "a\t|bcd"],
+	] as const) {
+		it(`${JSON.stringify(from)} ${keys}`, () => {
+			assert.strictEqual(wrapped(from, keys).text, to);
+		});
+	}
+});
+
 describe("vim gj and gk without a wrap width", () => {
 	it("move like j and k", () => {
 		assert.strictEqual(normal("ab|c\ndef", "gj").text, "abc\nde|f");

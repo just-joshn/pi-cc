@@ -4,6 +4,15 @@
 
 ### Added
 
+- Added inline prompt-history reverse search to `Editor`. Ctrl+R or vim normal `/` opens it. It matches case-insensitive substrings newest first, Ctrl+R continues to older matches, Escape and Tab accept at the match, Ctrl+C cancels and restores the draft, and Enter executes. Hosts supply storage through `EditorOptions.history` (`PromptHistory`)
+- Added the `tui.historySearch.next`, `tui.historySearch.accept`, `tui.historySearch.cancel`, and `tui.historySearch.execute` keybinding actions for the search overlay
+- Added `Editor.helpOpen` so hosts can suppress the search line while a help overlay owns the footer row
+
+### Fixed
+
+- Fixed vim normal-mode cursor left past the last character being clamped before the next command. Claude Code keeps it there, so `x` after Ctrl+E deletes nothing
+- Fixed `gj`/`gk` display columns using plain text width instead of tab-stop-8 expansion
+- Fixed word wrapping producing rows wider than the width when a column-relative tab expansion moved a word to a new row
 - Added `replaceControlCharacters()` to replace runs of C0 and C1 control characters with a space
 - Added `Component.capturesViewportInput`. While a component that sets it has focus, `TuiAltScreen` sends viewport keys such as PageUp/PageDown to it instead of scrolling the transcript, as it already does for focused overlays. `SelectList`, `SettingsList`, and `Editor` with open autocomplete set it ([#7629](https://github.com/earendil-works/pi/issues/7629), based on [#7680](https://github.com/earendil-works/pi/pull/7680) by [@muyiyr](https://github.com/muyiyr))
 - Added `getSelectPageIndex()` to compute the selection after a `tui.select.pageUp` or `tui.select.pageDown` key ([#7629](https://github.com/earendil-works/pi/issues/7629), based on [#7680](https://github.com/earendil-works/pi/pull/7680) by [@muyiyr](https://github.com/muyiyr))

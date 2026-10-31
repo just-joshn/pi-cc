@@ -1,9 +1,8 @@
 // gj and gk: cursor motion over display rows, the lines of the prompt as it wraps on screen.
 // Follows Claude Code's `le` and Cursor.down/up (chunk-hz2c9q6k.js:509-513, chunk-ybhw3dyg.js:698-727).
-import { visibleWidth } from "../utils.ts";
 import { targetColumn, type Wanted } from "./motions.ts";
 import { offsetAtColumn, prevUnit, snapStart, unitSegments } from "./text.ts";
-import { lineRows } from "./wrap.ts";
+import { displayWidth, lineRows } from "./wrap.ts";
 
 interface Row {
 	readonly start: number;
@@ -73,8 +72,8 @@ export function displayMove(
 		const current = rows[index];
 		if (next === undefined || current === undefined) break;
 		const column = Math.min(
-			visibleWidth(text.slice(current.start, stepped)),
-			visibleWidth(text.slice(next.start, next.end)),
+			displayWidth(text.slice(current.start, stepped)),
+			displayWidth(text.slice(next.start, next.end)),
 		);
 		stepped = offsetOnRow(text, next, column);
 		index += down ? 1 : -1;

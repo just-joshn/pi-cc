@@ -28,6 +28,26 @@
           "$ref": "#/$defs/KeybindingValue",
           "description": "Select next prompt history entry"
         },
+        "tui.editor.historySearch": {
+          "$ref": "#/$defs/KeybindingValue",
+          "description": "Search prompt history"
+        },
+        "tui.historySearch.next": {
+          "$ref": "#/$defs/KeybindingValue",
+          "description": "Find an older matching prompt"
+        },
+        "tui.historySearch.accept": {
+          "$ref": "#/$defs/KeybindingValue",
+          "description": "Accept the matching prompt"
+        },
+        "tui.historySearch.cancel": {
+          "$ref": "#/$defs/KeybindingValue",
+          "description": "Restore the draft before searching"
+        },
+        "tui.historySearch.execute": {
+          "$ref": "#/$defs/KeybindingValue",
+          "description": "Submit the matching prompt"
+        },
         "tui.editor.cursorLeft": {
           "$ref": "#/$defs/KeybindingValue",
           "description": "Move cursor left"
@@ -199,6 +219,10 @@
         "tui.altScreen.bottom": {
           "$ref": "#/$defs/KeybindingValue",
           "description": "Scroll viewport to bottom"
+        },
+        "app.help.toggle": {
+          "$ref": "#/$defs/KeybindingValue",
+          "description": "Toggle prompt shortcuts"
         },
         "app.interrupt": {
           "$ref": "#/$defs/KeybindingValue",

@@ -1,5 +1,5 @@
 import type { Container } from "@earendil-works/pi-tui";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { type CcTuiSettings, NO_CC_TUI } from "../src/core/settings/cc/tui.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -41,7 +41,7 @@ describe("InteractiveMode Claude Code terminal settings", () => {
 	test("rebinding a session re-reads the admitted settings, so a directory change is seen", () => {
 		const applyCcTui = method("applyCcTui");
 		let admitted: CcTuiSettings = { ...NO_CC_TUI, screenReader: true };
-		const defaultEditor = { setVimMode: vi.fn(), setFlat: vi.fn() };
+		const defaultEditor = { setVimMode: vi.fn(), setPromptShortcuts: vi.fn(), setFlat: vi.fn() };
 		const self = {
 			options: { ccTui: () => admitted },
 			ccTui: NO_CC_TUI,
@@ -60,11 +60,74 @@ describe("InteractiveMode Claude Code terminal settings", () => {
 
 	test("with no handoff the editor and indicators stay as pi's", () => {
 		const applyCcTui = method("applyCcTui");
-		const defaultEditor = { setVimMode: vi.fn(), setFlat: vi.fn() };
+		const defaultEditor = { setVimMode: vi.fn(), setPromptShortcuts: vi.fn(), setFlat: vi.fn() };
 		const self = { options: {}, ccTui: NO_CC_TUI, defaultEditor, setWorkingIndicator: vi.fn() };
 		applyCcTui.call(self);
 		expect(self.ccTui).toBe(NO_CC_TUI);
 		expect(defaultEditor.setVimMode).toHaveBeenCalledWith(undefined);
 		expect(defaultEditor.setFlat).toHaveBeenCalledWith(false);
+	});
+});
+
+describe("InteractiveMode Ctrl+C arming", () => {
+	afterEach(() => vi.useRealTimers());
+
+	const ccTuiSelf = (ccTui: Partial<CcTuiSettings>) => {
+		const editor = {
+			holdClearedOnInterrupt: vi.fn(() => true),
+			setTransientStatus: vi.fn(),
+		};
+		const self = {
+			ccTui: { ...NO_CC_TUI, ...ccTui },
+			editor,
+			lastSigintTime: 0,
+			exitHintTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+			clearEditor: vi.fn(),
+			shutdown: vi.fn(),
+		};
+		return { editor, self };
+	};
+
+	const pressCtrlC = (self: { lastSigintTime: number }, at: number) => {
+		vi.setSystemTime(at);
+		method("handleCtrlC").call(self);
+	};
+
+	test("with Claude Code terminal settings the draft is held, the line arms, and it expires at 800ms", () => {
+		vi.useFakeTimers();
+		const { editor, self } = ccTuiSelf({ promptShortcuts: true });
+		pressCtrlC(self, 1000);
+		expect(editor.holdClearedOnInterrupt).toHaveBeenCalledOnce();
+		expect(self.clearEditor).not.toHaveBeenCalled();
+		expect(editor.setTransientStatus).toHaveBeenCalledWith("Press Ctrl-C again to exit");
+		vi.advanceTimersByTime(800);
+		expect(editor.setTransientStatus).toHaveBeenLastCalledWith(undefined);
+	});
+
+	test("the second press inside Claude Code's 800ms window exits; after it the arm re-arms", () => {
+		vi.useFakeTimers();
+		const { self } = ccTuiSelf({ promptShortcuts: true });
+		pressCtrlC(self, 1000);
+		pressCtrlC(self, 1799);
+		expect(self.shutdown).toHaveBeenCalledOnce();
+		const again = ccTuiSelf({ promptShortcuts: true });
+		pressCtrlC(again.self, 1000);
+		vi.advanceTimersByTime(800);
+		pressCtrlC(again.self, 1801);
+		expect(again.self.shutdown).not.toHaveBeenCalled();
+		expect(again.editor.setTransientStatus).toHaveBeenLastCalledWith("Press Ctrl-C again to exit");
+	});
+
+	test("with plain pi settings Ctrl+C clears, arms nothing, and keeps the 500ms exit window", () => {
+		vi.useFakeTimers();
+		const { editor, self } = ccTuiSelf({});
+		pressCtrlC(self, 1000);
+		expect(self.clearEditor).toHaveBeenCalledOnce();
+		expect(editor.holdClearedOnInterrupt).not.toHaveBeenCalled();
+		expect(editor.setTransientStatus).not.toHaveBeenCalled();
+		pressCtrlC(self, 1599);
+		expect(self.shutdown).not.toHaveBeenCalled();
+		pressCtrlC(self, 2000);
+		expect(self.shutdown).toHaveBeenCalledOnce();
 	});
 });
