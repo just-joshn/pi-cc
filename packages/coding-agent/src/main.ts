@@ -5,6 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
@@ -54,6 +55,7 @@ import {
 import { ccSettingsSessionModel } from "./core/anthropic-model-env.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
+import { buildCcPolicy } from "./core/cc-policy.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
@@ -448,6 +450,25 @@ function validateForkFlags(parsed: Args): void {
 	if (conflictingFlags.length > 0) {
 		console.error(chalk.red(`Error: --fork cannot be combined with ${conflictingFlags.join(", ")}`));
 		process.exit(1);
+	}
+}
+
+/** Read `--system-prompt-file` and `--append-system-prompt-file` into the prompt fields, verbatim. */
+function applyPromptFiles(parsed: Args): void {
+	const read = (path: string, label: string): string => {
+		try {
+			return readFileSync(path, "utf8");
+		} catch (error) {
+			const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+			console.error(chalk.red(`Error: ${label} ${missing ? "not found" : "could not be read"}: ${path}`));
+			process.exit(1);
+		}
+	};
+	if (parsed.systemPromptFile !== undefined) {
+		parsed.systemPrompt = read(parsed.systemPromptFile, "System prompt file");
+	}
+	for (const path of parsed.appendSystemPromptFile ?? []) {
+		parsed.appendSystemPrompt = [...(parsed.appendSystemPrompt ?? []), read(path, "Append system prompt file")];
 	}
 }
 
@@ -851,6 +872,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
+	applyPromptFiles(parsed);
 	const sdkProblem = sdkFlagProblem({
 		mode: parsed.mode,
 		outputFormat: parsed.outputFormat,
@@ -1106,6 +1128,11 @@ export async function main(args: string[], options?: MainOptions) {
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
 			fixedTools: sessionOptions.fixedTools,
+			ccPolicy: buildCcPolicy({
+				flags: parsed,
+				entrypoint: appMode === "interactive" ? "cli" : "sdk-cli",
+				customPrompt: parsed.systemPrompt !== undefined,
+			}),
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,

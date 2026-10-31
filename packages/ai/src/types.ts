@@ -198,6 +198,13 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 	 */
 	identity?: ClientIdentity;
 	/**
+	 * Claude Code wire profile. Present, the Anthropic transport splits the leading prompt into the
+	 * identity and working `system` blocks, places `SystemMessage.context` as a system-role
+	 * message after the first user message, and sends `effort` directly with no effort markers.
+	 * Other transports ignore it.
+	 */
+	ccWire?: CcWireProfile;
+	/**
 	 * HTTP request timeout in milliseconds for providers/SDKs that support it.
 	 * For example, OpenAI and Anthropic SDK clients default to 10 minutes.
 	 */
@@ -215,6 +222,20 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
 	 * Default: 60000 (60 seconds). Set to 0 to disable the cap.
 	 */
 	maxRetryDelayMs?: number;
+}
+
+/** The request-level choices of the Claude Code wire shape, decided by the caller. */
+export interface CcWireProfile {
+	/** Effort the operator asked for, which beats everything else. */
+	effort?: "low" | "medium" | "high" | "xhigh" | "max";
+	/** Effort of the model when nothing else chooses one. Omitted for a model without effort control. */
+	defaultEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+	/** The reasoning level of the request was chosen by the operator, so it sets the effort or thinking budget. */
+	levelChosen: boolean;
+	/** Beta names added to the automatic list. */
+	extraBetas: readonly string[];
+	/** Output cap of the request, replacing the model's own. */
+	maxTokens?: number;
 }
 
 export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
@@ -587,6 +608,12 @@ export interface SystemMessage {
 	toolsAdded?: Tool[];
 	/** Tools that stop being available at this point. */
 	toolsRemoved?: ToolReference[];
+	/**
+	 * Per-machine context (working directory, environment, project instructions). It belongs to the
+	 * prompt record and replays like `content`, but a transport with a separate slot for it places it
+	 * there. Single-block transports render it after the sections. A later message's value replaces it.
+	 */
+	context?: string;
 	timestamp: number; // Unix timestamp in milliseconds
 }
 

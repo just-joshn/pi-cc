@@ -127,6 +127,22 @@ describe("Claude Code tool surface", () => {
 		});
 	});
 
+	it("rewrites pi's tool rules in the machine context as it does in a section", () => {
+		const [head] = projectMessagesForModel([
+			{
+				role: "system",
+				content: "",
+				context:
+					"# Environment\n\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)",
+				timestamp: 1,
+			},
+		]);
+
+		const context = (head as { context: string }).context;
+		expect(context).toContain("- Use Read to examine files");
+		expect(context).not.toContain("oldText");
+	});
+
 	it("replays a recorded Claude Code call through the OpenAI provider", () => {
 		const model = { ...getModel("openai", "gpt-4o-mini"), api: "openai-completions" as const };
 		const history = projectMessagesForModel([

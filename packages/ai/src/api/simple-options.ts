@@ -53,6 +53,7 @@ export function buildBaseOptions(
 		sessionId: options?.sessionId,
 		headers: options?.headers,
 		identity: options?.identity,
+		ccWire: options?.ccWire,
 		onPayload: options?.onPayload,
 		onResponse: options?.onResponse,
 		onProviderStreamEvent: options?.onProviderStreamEvent,

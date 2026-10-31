@@ -1,0 +1,154 @@
+{
+	"id": "prompt/section-order",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text",
+							"cache_control": {
+								"type": "ephemeral"
+							}
+						},
+						{
+							"type": "text",
+							"cache_control": {
+								"type": "ephemeral"
+							}
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyAt": {
+					"system.0.text": {
+						"match": [
+							"^x-anthropic-billing-header: cc_version=2\\.1\\.312\\.[0-9a-f]+; cc_entrypoint=sdk-cli;$"
+						]
+					},
+					"system.0": {
+						"notMatch": [
+							"cache_control"
+						]
+					},
+					"system.1.text": {
+						"match": [
+							"^You are"
+						]
+					},
+					"messages.1.content.0.text": {
+						"match": [
+							"^# Environment"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.0.text": {
+						"around": 74,
+						"tolerance": 0.05
+					},
+					"system.1.text": {
+						"around": 62
+					},
+					"system.2.text": {
+						"around": 5890
+					},
+					"messages.1.content.0.text": {
+						"around": 9215
+					}
+				},
+				"side": "claude",
+				"deviation": "store/deviations.md, Client identity (P13, #20). Oracle retains observed client identification."
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text",
+							"cache_control": {
+								"type": "ephemeral"
+							}
+						},
+						{
+							"type": "text",
+							"cache_control": {
+								"type": "ephemeral"
+							}
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyAt": {
+					"system.0.text": {
+						"match": [
+							"^You are"
+						]
+					},
+					"messages.1.content.0.text": {
+						"match": [
+							"^# Environment"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.0.text": {
+						"around": 62
+					},
+					"system.1.text": {
+						"around": 5890
+					},
+					"messages.1.content.0.text": {
+						"around": 9215
+					}
+				},
+				"side": "pi-cc",
+				"deviation": "store/deviations.md, Client identity (P13, #20). pi-cc never identifies as an Anthropic client.",
+				"bodyExcludes": [
+					"x-anthropic-billing-header:",
+					"You are Claude Code, Anthropic's official CLI for Claude."
+				]
+			}
+		]
+	},
+	"skip": []
+}

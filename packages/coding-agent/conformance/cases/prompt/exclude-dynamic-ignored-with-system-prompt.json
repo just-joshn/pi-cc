@@ -1,0 +1,105 @@
+{
+	"id": "prompt/exclude-dynamic-ignored-with-system-prompt",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--exclude-dynamic-system-prompt-sections",
+		"--system-prompt",
+		"PROBE_REPLACE_PROMPT_MARKER you are a helpful assistant for this probe."
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyNotMatch": [
+					"# Memory\\\\n",
+					"# This session"
+				],
+				"bodyLength": {
+					"system.2.text": {
+						"around": 71,
+						"tolerance": 0.05
+					}
+				},
+				"side": "claude",
+				"deviation": "store/deviations.md, Client identity (P13, #20). Oracle retains observed client identification."
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyNotMatch": [
+					"# Memory\\\\n",
+					"# This session"
+				],
+				"bodyLength": {
+					"system.1.text": {
+						"around": 71,
+						"tolerance": 0.05
+					}
+				},
+				"side": "pi-cc",
+				"deviation": "store/deviations.md, Client identity (P13, #20). pi-cc never identifies as an Anthropic client.",
+				"bodyExcludes": [
+					"x-anthropic-billing-header:",
+					"You are Claude Code, Anthropic's official CLI for Claude."
+				]
+			}
+		]
+	},
+	"skip": []
+}

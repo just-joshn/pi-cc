@@ -1,0 +1,31 @@
+{
+	"id": "prompt/autocompact-out-of-range-is-an-error",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--autocompact",
+		"50"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 1,
+		"stderr": {
+			"contains": [
+				"error: option '--autocompact <auto|tokens>' argument '50' is invalid. It must be 'auto', or between 100k and 1M (e.g. 500k, 200000, or 200 as shorthand)"
+			]
+		},
+		"requests": []
+	},
+	"skip": []
+}

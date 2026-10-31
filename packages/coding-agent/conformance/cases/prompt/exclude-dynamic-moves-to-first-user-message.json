@@ -1,0 +1,129 @@
+{
+	"id": "prompt/exclude-dynamic-moves-to-first-user-message",
+	"area": "prompt",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--exclude-dynamic-system-prompt-sections"
+	],
+	"env": {},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"^<system-reminder>\\n# "
+						]
+					},
+					"messages.1.content.0.text": {
+						"match": [
+							"^# Environment"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.2.text": {
+						"around": 3260
+					},
+					"messages.0.content.0.text": {
+						"around": 2477
+					},
+					"messages.1.content.0.text": {
+						"around": 9211
+					}
+				},
+				"side": "claude",
+				"deviation": "store/deviations.md, Client identity (P13, #20). Oracle retains observed client identification."
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"system": [
+						{
+							"type": "text"
+						},
+						{
+							"type": "text"
+						}
+					],
+					"messages": [
+						{
+							"role": "user"
+						},
+						{
+							"role": "system"
+						}
+					]
+				},
+				"bodyAt": {
+					"messages.0.content.0.text": {
+						"match": [
+							"^<system-reminder>\\n# "
+						]
+					},
+					"messages.1.content.0.text": {
+						"match": [
+							"^# Environment"
+						]
+					}
+				},
+				"bodyLength": {
+					"system.1.text": {
+						"around": 3260
+					},
+					"messages.0.content.0.text": {
+						"around": 2477
+					},
+					"messages.1.content.0.text": {
+						"around": 9211
+					}
+				},
+				"side": "pi-cc",
+				"deviation": "store/deviations.md, Client identity (P13, #20). pi-cc never identifies as an Anthropic client.",
+				"bodyExcludes": [
+					"x-anthropic-billing-header:",
+					"You are Claude Code, Anthropic's official CLI for Claude."
+				]
+			}
+		]
+	},
+	"skip": []
+}
