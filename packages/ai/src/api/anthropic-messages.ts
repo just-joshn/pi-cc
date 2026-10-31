@@ -57,6 +57,7 @@ import {
 	createAnthropicTransport,
 	OAUTH_API_BETA,
 } from "./anthropic-http.ts";
+import { capAnthropicMedia } from "./anthropic-media.ts";
 import type {
 	AnthropicCacheControl,
 	AnthropicContentBlock,
@@ -1211,6 +1212,13 @@ function buildParams(
 	};
 
 	if (ccWire) {
+		params.messages = capAnthropicMedia(params.messages, {
+			items: 100,
+			itemBuffer: 20,
+			bytes: 78_643_200,
+			byteBuffer: 10_485_760,
+			documentBytes: 0,
+		});
 		params.system = ccSystemBlocks(initialSystemMessage, cacheControl);
 	} else if (initialSystemText) {
 		params.system = [
@@ -1291,6 +1299,10 @@ function buildParams(
 				display,
 			};
 		}
+	}
+
+	if (ccWire && params.thinking && params.thinking.type !== "disabled") {
+		params.context_management = { edits: [{ type: "clear_thinking_20251015", keep: "all" }] };
 	}
 
 	if (options?.metadata) {

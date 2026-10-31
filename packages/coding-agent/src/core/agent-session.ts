@@ -55,6 +55,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { parseAutocompact } from "../cli/cc-flags.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { processImage } from "../utils/image-process.ts";
@@ -64,7 +65,9 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { generateBugReportSummary } from "./bug-report.ts";
 import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
-import { CC_FAILURES_PER_MODEL, type CcPolicy, compactionWindow } from "./cc-policy.ts";
+import { CC_FAILURES_PER_MODEL, type CcPolicy, ccWireProfile } from "./cc-policy.ts";
+import { type CcCompactionHealth, type CcPrecomputeState, ccCompactionLimits } from "./compaction/cc-policy.ts";
+import { prepareCcCompaction, summarizeCc } from "./compaction/cc-summary.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -441,6 +444,9 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
+	private _ccPrecompute: CcPrecomputeState = { kind: "idle" };
+	private _ccCompactionHealth: CcCompactionHealth = { failures: 0, rapidRefills: 0 };
+	private _ccAutoEnabled: boolean | undefined;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -858,11 +864,10 @@ export class AgentSession {
 	/** Whether `projection`, the current session projection, exceeds the compaction threshold of `model`. */
 	private _exceedsCompactionThreshold(model: Model<any>, projection: SessionProjection): boolean {
 		if (model.contextWindow <= 0) return false;
-		return shouldCompact(
-			estimateProjectedContextTokens(projection, this.sessionManager.getBranch()).tokens,
-			compactionWindow(this._ccPolicy, model.contextWindow),
-			this.settingsManager.getCompactionSettings(this.model),
-		);
+		const tokens = estimateProjectedContextTokens(projection, this.sessionManager.getBranch()).tokens;
+		if (this._ccPolicy)
+			return this.autoCompactionEnabled && tokens >= ccCompactionLimits(this._ccPolicy.compaction, model).threshold;
+		return shouldCompact(tokens, model.contextWindow, this.settingsManager.getCompactionSettings(this.model));
 	}
 
 	private async _compactBeforeNextAssistantResponse(context: AgentContext): Promise<AgentContext> {
@@ -1322,6 +1327,7 @@ export class AgentSession {
 		// extension and listener dispatch above also picks up messages that turn_end
 		// handlers queued.
 		if (event.type === "turn_end") {
+			if (this._ccCompactionHealth.turnsSinceCompact !== undefined) this._ccCompactionHealth.turnsSinceCompact++;
 			this._flushPendingCustomMessages();
 		}
 	};
@@ -2816,6 +2822,7 @@ export class AgentSession {
 		}
 
 		const previousModel = this.model;
+		if (this._ccPolicy && !modelsAreEqual(previousModel, model)) this.abortCompaction();
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
@@ -3060,8 +3067,47 @@ export class AgentSession {
 		signal: AbortSignal,
 		reason: "manual" | "threshold" | "overflow",
 	): Promise<CompactionResult> {
+		const messages = this._ccPolicy ? this.sessionManager.buildSessionProjection().messages : [];
 		// Resolve the request only when Pi summarizes itself: routing may call models or fail.
 		const request = await this._getSummarizationRequestAuth(model, signal);
+		if (this._ccPolicy) {
+			const precomputed = this._ccPrecompute;
+			if (reason !== "manual" && precomputed.kind !== "idle" && precomputed.model === model.id) {
+				const branch = this.sessionManager.getBranch();
+				const index = branch.findIndex((entry) => entry.id === precomputed.leaf);
+				if (index >= 0) {
+					const result = precomputed.kind === "ready" ? precomputed.result : await precomputed.promise;
+					this._ccPrecompute = { kind: "idle" };
+					if (result)
+						return {
+							...result,
+							tokensBefore: preparation.tokensBefore,
+							firstKeptEntryId: branch[index + 1]?.id ?? "",
+						};
+				}
+			}
+			const transformed = this.agent.transformContext
+				? await this.agent.transformContext(messages, signal)
+				: messages;
+			return summarizeCc(
+				transformed,
+				preparation,
+				request.model,
+				{
+					apiKey: request.apiKey,
+					headers: request.headers,
+					env: request.env,
+					signal,
+					cacheRetention: this._ccPolicy.compaction.cold ? "none" : "short",
+					ccWire: ccWireProfile(this._ccPolicy, request.model, true, false, this._thinkingLevelChosen),
+				},
+				this.agent.streamFunction,
+				customInstructions,
+				this.settingsManager.getRetrySettings(),
+				this._summarizationRetryCallbacks({ source: "compaction", reason }),
+				this._ccPolicy.compaction.cold,
+			);
+		}
 		return compact(
 			preparation,
 			request.model,
@@ -3099,6 +3145,7 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
+		if (this._ccPolicy?.compaction.disabled) throw new Error("Compaction is disabled by DISABLE_COMPACT");
 		await this.abort();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
@@ -3114,7 +3161,9 @@ export class AgentSession {
 			const settings = this.settingsManager.getCompactionSettings(model);
 			const pathEntries = this.sessionManager.getBranch();
 
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = this._ccPolicy
+				? prepareCcCompaction(pathEntries, settings)
+				: prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -3183,7 +3232,7 @@ export class AgentSession {
 
 			this.sessionManager.appendCompaction(
 				summary,
-				firstKeptEntryId,
+				firstKeptEntryId || null,
 				tokensBefore,
 				details,
 				fromExtension,
@@ -3209,6 +3258,7 @@ export class AgentSession {
 				});
 			}
 
+			this._ccCompactionHealth = { failures: 0, rapidRefills: 0, turnsSinceCompact: 0 };
 			const compactionResult: CompactionResult = {
 				summary,
 				firstKeptEntryId,
@@ -3257,6 +3307,8 @@ export class AgentSession {
 	 * Cancel in-progress compaction (manual or auto).
 	 */
 	abortCompaction(): void {
+		if (this._ccPrecompute.kind === "running") this._ccPrecompute.controller.abort();
+		this._ccPrecompute = { kind: "idle" };
 		this._compactionAbortController?.abort();
 		this._autoCompactionAbortController?.abort();
 	}
@@ -3291,7 +3343,7 @@ export class AgentSession {
 	 */
 	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings(this.model);
-		if (!settings.enabled) return false;
+		if (!this.autoCompactionEnabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
 		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return false;
@@ -3419,10 +3471,42 @@ export class AgentSession {
 		} else {
 			contextTokens = directContextTokens;
 		}
-		if (shouldCompact(contextTokens, compactionWindow(this._ccPolicy, contextWindow), settings)) {
+		if (this._ccPolicy) {
+			if (
+				!skipAbortedCheck &&
+				contextTokens >= ccCompactionLimits(this._ccPolicy.compaction, messageModel ?? this.model!).threshold
+			) {
+				return await this._runAutoCompaction("threshold", false);
+			}
+			this._maybePrecomputeCompaction(contextTokens);
+		} else if (shouldCompact(contextTokens, contextWindow, settings)) {
 			return await this._runAutoCompaction("threshold", false);
 		}
 		return false;
+	}
+
+	private _maybePrecomputeCompaction(tokens: number): void {
+		const policy = this._ccPolicy?.compaction;
+		const model = this.model;
+		if (!policy?.precompute || !model || !this.autoCompactionEnabled || this._ccPrecompute.kind !== "idle") return;
+		if (tokens < ccCompactionLimits(policy, model).precompute) return;
+		const branch = this.sessionManager.getBranch();
+		const preparation = prepareCcCompaction(branch, this.settingsManager.getCompactionSettings(model));
+		const leaf = branch.at(-1)?.id;
+		if (!preparation || !leaf) return;
+		const controller = new AbortController();
+		const promise = this._runDefaultCompaction(preparation, model, undefined, controller.signal, "manual")
+			.then((result) => {
+				if (this._ccPrecompute.kind === "running" && this._ccPrecompute.controller === controller)
+					this._ccPrecompute = { kind: "ready", leaf, model: model.id, result };
+				return controller.signal.aborted ? undefined : result;
+			})
+			.catch(() => {
+				if (this._ccPrecompute.kind === "running" && this._ccPrecompute.controller === controller)
+					this._ccPrecompute = { kind: "idle" };
+				return undefined;
+			});
+		this._ccPrecompute = { kind: "running", leaf, model: model.id, controller, promise };
 	}
 
 	/**
@@ -3436,6 +3520,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+		if (this._ccPolicy && !this.autoCompactionEnabled) return false;
 		const model = this.model;
 		const settings = this.settingsManager.getCompactionSettings(model);
 		let abortController: AbortController | undefined;
@@ -3449,11 +3534,31 @@ export class AgentSession {
 			}
 
 			const pathEntries = this.sessionManager.getBranch();
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = this._ccPolicy
+				? prepareCcCompaction(pathEntries, settings)
+				: prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				return false;
 			}
 
+			if (this._ccPolicy) {
+				const health = this._ccCompactionHealth;
+				if (health.turnsSinceCompact !== undefined && health.failures === 0) {
+					health.rapidRefills = health.turnsSinceCompact < 3 ? health.rapidRefills + 1 : 0;
+					if (health.rapidRefills >= 3) {
+						this._emit({
+							type: "compaction_end",
+							reason,
+							result: undefined,
+							aborted: false,
+							willRetry: false,
+							errorMessage:
+								"Auto-compaction paused after three rapid context refills. Use /compact to continue.",
+						});
+						return false;
+					}
+				}
+			}
 			abortController = new AbortController();
 			this._autoCompactionAbortController = abortController;
 			started = true;
@@ -3517,7 +3622,7 @@ export class AgentSession {
 
 			this.sessionManager.appendCompaction(
 				summary,
-				firstKeptEntryId,
+				firstKeptEntryId || null,
 				tokensBefore,
 				details,
 				fromExtension,
@@ -3543,6 +3648,8 @@ export class AgentSession {
 				});
 			}
 
+			this._ccCompactionHealth.failures = 0;
+			this._ccCompactionHealth.turnsSinceCompact = 0;
 			const result: CompactionResult = {
 				summary,
 				firstKeptEntryId,
@@ -3561,6 +3668,7 @@ export class AgentSession {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "compaction failed";
 			const aborted = abortController?.signal.aborted === true || cancelledByExtension;
+			if (this._ccPolicy && !aborted) this._ccCompactionHealth.failures++;
 			if (started) {
 				const errorMessage = aborted
 					? undefined
@@ -3592,16 +3700,49 @@ export class AgentSession {
 		}
 	}
 
+	configureAutoCompaction(argument = ""): string {
+		const policy = this._ccPolicy?.compaction;
+		const model = this.model;
+		if (!policy || !model) return "Auto-compact window controls require a selected model in CC mode.";
+		if (!argument.trim())
+			return `Auto-compact window: ${this.compactionLimits?.window} tokens (${this.autoCompactionEnabled ? "enabled" : "disabled"}).`;
+		if (policy.windowSource === "environment")
+			return "CLAUDE_CODE_AUTO_COMPACT_WINDOW takes precedence; unset it before changing the window.";
+		const input = argument.trim().toLowerCase();
+		const value = parseAutocompact(["reset", "unset", "default"].includes(input) ? "auto" : input);
+		if (value === undefined) return "Expected auto or a window between 100k and 1M tokens.";
+		this.abortCompaction();
+		policy.byModel[model.id] = value;
+		return `Auto-compact window set to ${value === "auto" ? "auto" : `${value} tokens`}.`;
+	}
+
 	/**
 	 * Toggle auto-compaction setting.
 	 */
 	setAutoCompactionEnabled(enabled: boolean): void {
-		this.settingsManager.setCompactionEnabled(enabled);
+		if (this._ccPolicy) {
+			this._ccAutoEnabled = enabled;
+			if (!enabled && this._ccPrecompute.kind === "running") this._ccPrecompute.controller.abort();
+			if (!enabled) this._ccPrecompute = { kind: "idle" };
+		} else this.settingsManager.setCompactionEnabled(enabled);
 	}
 
 	/** Whether auto-compaction is enabled */
 	get autoCompactionEnabled(): boolean {
+		if (this._ccPolicy)
+			return (
+				!this._ccPolicy.compaction.disabled &&
+				!this._ccPolicy.compaction.automaticDisabled &&
+				(this._ccAutoEnabled ?? this._ccPolicy.compaction.enabled) &&
+				this._ccCompactionHealth.failures < 3 &&
+				this._ccCompactionHealth.rapidRefills < 3
+			);
 		return this.settingsManager.getCompactionEnabled();
+	}
+
+	get compactionLimits() {
+		const model = this._limitsModel();
+		return this._ccPolicy && model ? ccCompactionLimits(this._ccPolicy.compaction, model) : undefined;
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
@@ -4613,7 +4754,9 @@ export class AgentSession {
 	private _readContextRoomTokens(): number | undefined {
 		const usage = this.getContextUsage();
 		if (usage === undefined) return undefined;
-		const threshold = usage.contextWindow - this.settingsManager.getCompactionSettings(this.model).reserveTokens;
+		const threshold =
+			this.compactionLimits?.threshold ??
+			usage.contextWindow - this.settingsManager.getCompactionSettings(this.model).reserveTokens;
 		return Math.max(0, Math.floor((threshold - (usage.tokens ?? 0)) * 0.7));
 	}
 

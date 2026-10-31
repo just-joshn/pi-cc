@@ -59,6 +59,24 @@ export type SystemStatusFrame =
 	| { type: "system"; subtype: "status"; status: "requesting"; session_id: string; uuid: string }
 	| { type: "system"; subtype: "status"; status: null; permissionMode: string; uuid: string; session_id: string };
 
+export interface CompactBoundaryFrame {
+	type: "system";
+	subtype: "compact_boundary";
+	compact_metadata: { trigger: "manual" | "auto"; pre_tokens: number; post_tokens?: number; duration_ms?: number };
+	session_id: string;
+	uuid: string;
+}
+
+export interface CompactStatusFrame {
+	type: "system";
+	subtype: "status";
+	status: "compacting" | null;
+	session_id: string;
+	uuid: string;
+	compact_result?: "success" | "failed";
+	compact_error?: string;
+}
+
 export interface AssistantFrame {
 	type: "assistant";
 	message: {
@@ -152,6 +170,8 @@ export type ControlResponseFrame =
 export type SdkFrame =
 	| SystemInitFrame
 	| SystemStatusFrame
+	| CompactBoundaryFrame
+	| CompactStatusFrame
 	| AssistantFrame
 	| SyntheticApiErrorFrame
 	| UserToolResultFrame

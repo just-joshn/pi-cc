@@ -1,0 +1,63 @@
+{
+	"id": "compact/instructions-and-history",
+	"area": "compact",
+	"argv": [
+		"-p",
+		"--model",
+		"claude-sonnet-4-5",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"ORIGINAL_COMPACTION_TASK\"}}",
+			"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"/compact Preserve TEST_INSTRUCTIONS_MARKER\"}}",
+			"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"CONTINUE_COMPACTION_TASK\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "before"
+			},
+			{
+				"text": "<summary>CHECKPOINT_MARKER</summary>"
+			},
+			{
+				"text": "after"
+			}
+		]
+	},
+	"timeout_ms": 120000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 3,
+				"bodyIncludes": [
+					"TEST_INSTRUCTIONS_MARKER"
+				],
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"CHECKPOINT_MARKER",
+							"CONTINUE_COMPACTION_TASK"
+						],
+						"notMatch": [
+							"ORIGINAL_COMPACTION_TASK"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

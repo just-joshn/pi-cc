@@ -2,6 +2,7 @@
 
 import type { Api, CcWireProfile, Model } from "@earendil-works/pi-ai";
 import { type CcFlags, parseAutocompact } from "../cli/cc-flags.ts";
+import { type CcCompactionPolicy, ccCompactionPolicy } from "./compaction/cc-policy.ts";
 
 export type CcEffort = NonNullable<CcWireProfile["effort"]>;
 
@@ -81,6 +82,7 @@ export const CC_FAILURES_PER_MODEL = 3;
 
 export interface CcPolicy {
 	entrypoint: CcEntrypoint;
+	compaction: CcCompactionPolicy;
 	/** `--effort`, already validated by the flag table. */
 	effort?: CcEffort;
 	extraBetas: readonly string[];
@@ -98,6 +100,8 @@ export interface CcPolicy {
 }
 
 export interface CcPolicyInput {
+	settings?: Record<string, unknown>;
+	env?: NodeJS.ProcessEnv;
 	flags: Pick<
 		CcFlags,
 		| "effort"
@@ -119,6 +123,7 @@ export function buildCcPolicy(input: CcPolicyInput): CcPolicy {
 	const snapshotFlag = flags.systemPromptSnapshot;
 	return {
 		entrypoint: input.entrypoint,
+		compaction: ccCompactionPolicy(input.settings, input.env, autocompactWindow(flags.autocompact)),
 		effort: parseEffort(flags.effort),
 		extraBetas: (flags.betas ?? []).filter((beta) => CC_KNOWN_BETAS.has(beta)),
 		fallbackModels: parseFallbackModels(flags.fallbackModel),

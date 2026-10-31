@@ -55,6 +55,7 @@ export class FrameRenderer {
 	private requests = 0;
 	private requestStartedAt = 0;
 	private firstBlockSeen = false;
+	private compactionStartedAt = 0;
 	private interrupted = false;
 	private readonly calls = new Map<string, SeenCall>();
 
@@ -77,6 +78,42 @@ export class FrameRenderer {
 
 	onEvent(event: AgentSessionEvent): void {
 		switch (event.type) {
+			case "compaction_start":
+				this.compactionStartedAt = this.context.now();
+				this.context.emit({
+					type: "system",
+					subtype: "status",
+					status: "compacting",
+					session_id: this.context.sessionId(),
+					uuid: randomUUID(),
+				});
+				return;
+			case "compaction_end":
+				if (event.result && event.willRetry && this.tally?.outcome.kind === "api_error")
+					this.tally.outcome = { kind: "completed" };
+				this.context.emit({
+					type: "system",
+					subtype: "status",
+					status: null,
+					compact_result: event.result ? "success" : "failed",
+					...(event.errorMessage ? { compact_error: event.errorMessage } : {}),
+					session_id: this.context.sessionId(),
+					uuid: randomUUID(),
+				});
+				if (event.result)
+					this.context.emit({
+						type: "system",
+						subtype: "compact_boundary",
+						compact_metadata: {
+							trigger: event.reason === "manual" ? "manual" : "auto",
+							pre_tokens: event.result.tokensBefore,
+							post_tokens: event.result.estimatedTokensAfter,
+							duration_ms: Math.max(0, this.context.now() - this.compactionStartedAt),
+						},
+						session_id: this.context.sessionId(),
+						uuid: randomUUID(),
+					});
+				return;
 			case "turn_start":
 				this.requestStartedAt = this.context.now();
 				this.firstBlockSeen = false;

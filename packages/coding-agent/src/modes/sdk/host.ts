@@ -151,9 +151,16 @@ export class SdkHost {
 		this.renderer.beginTurn(tally);
 		const limit = limitTurns(session.agent, this.options.maxTurns);
 		const budget = gateBudget(session.agent, () => tally.overBudget());
+		let localOutput: string | undefined;
 		try {
-			await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
-			await session.waitForIdle();
+			if (/^\/compact(?:\s|$)/.test(prompt.text)) {
+				await session.compact(prompt.text.slice(8).trim() || undefined);
+			} else if (/^\/autocompact(?:\s|$)/.test(prompt.text)) {
+				localOutput = session.configureAutoCompaction(prompt.text.slice(12));
+			} else {
+				await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
+				await session.waitForIdle();
+			}
 		} finally {
 			budget.release();
 			limit.release();
@@ -166,6 +173,9 @@ export class SdkHost {
 			};
 		}
 		const result = this.ledger.result(tally, session.sessionId, Date.now());
+		const localCommand = /^\/(compact|autocompact)(?:\s|$)/.exec(prompt.text)?.[1];
+		if (localCommand) result.local_command = localCommand;
+		if (localOutput !== undefined) result.result = localOutput;
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
 	}

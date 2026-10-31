@@ -19,6 +19,11 @@ export interface AnthropicImageBlock {
 	cache_control?: AnthropicCacheControl;
 }
 
+export interface AnthropicDocumentBlock {
+	type: "document";
+	source: { type: "base64"; media_type: string; data: string } | { type: "url"; url: string };
+}
+
 export interface AnthropicTextBlock {
 	type: "text";
 	text: string;
@@ -67,6 +72,7 @@ export interface AnthropicToolRemovalBlock {
 export type AnthropicContentBlock =
 	| AnthropicTextBlock
 	| AnthropicImageBlock
+	| AnthropicDocumentBlock
 	| AnthropicThinkingBlock
 	| AnthropicRedactedThinkingBlock
 	| AnthropicToolUseBlock
@@ -123,6 +129,7 @@ export interface AnthropicMessageRequest {
 	metadata?: { user_id: string };
 	tool_choice?: { type: "auto" | "any" | "none" } | { type: "tool"; name: string };
 	fallbacks?: Array<{ model: string }>;
+	context_management?: { edits: Array<{ type: "clear_thinking_20251015"; keep: "all" }> };
 }
 
 export interface AnthropicUsage {

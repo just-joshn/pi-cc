@@ -218,6 +218,12 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
  * what `CLAUDE_CODE_USE_BEDROCK`, `HTTPS_PROXY`, and `BUN_OPTIONS` would do and why they stay refused.
  */
 const CASE_ENV_KEYS: readonly string[] = [
+	"DISABLE_AUTO_COMPACT",
+	"DISABLE_COMPACT",
+	"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+	"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+	"CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE",
+	"CLAUDE_CODE_COLD_COMPACT",
 	"CLAUDE_CODE_TMPDIR",
 	"CLAUDE_CODE_ENTRYPOINT",
 	// P04 round 3: waives the dangerous-removal check under bypass. Removals in a case run against the seeded workspace inside the Seatbelt.

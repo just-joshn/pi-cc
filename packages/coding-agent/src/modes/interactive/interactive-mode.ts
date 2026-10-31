@@ -3449,6 +3449,11 @@ export class InteractiveMode {
 				await this.handleClearCommand();
 				return;
 			}
+			if (text === "/autocompact" || text.startsWith("/autocompact ")) {
+				this.editor.setText("");
+				this.showStatus(this.session.configureAutoCompaction(text.slice(12)));
+				return;
+			}
 			if (text === "/compact" || text.startsWith("/compact ")) {
 				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
 				this.editor.setText("");

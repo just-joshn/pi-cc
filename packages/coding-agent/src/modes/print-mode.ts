@@ -177,11 +177,18 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 		const maxBudgetUsd = mode === "text" ? options.maxBudgetUsd : undefined;
 		let reachedMaxTurns = false;
+		let localOutput: string | undefined;
 		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<void> => {
 			const limit = limitTurns(session.agent, mode === "text" ? options.maxTurns : undefined);
 			const budget = gateBudget(session.agent, () => budgetExhausted(spentUsd, maxBudgetUsd));
 			try {
-				await session.prompt(text, { images });
+				localOutput = undefined;
+				if (session.compactionLimits && /^\/compact(?:\s|$)/.test(text)) {
+					await session.compact(text.slice(8).trim() || undefined);
+					localOutput = "Compacted";
+				} else if (session.compactionLimits && /^\/autocompact(?:\s|$)/.test(text)) {
+					localOutput = session.configureAutoCompaction(text.slice(12));
+				} else await session.prompt(text, { images });
 			} finally {
 				budget.release();
 				limit.release();
@@ -208,6 +215,10 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			return 1;
 		}
 
+		if (mode === "text" && localOutput !== undefined) {
+			writeRawStdout(`${localOutput}\n`);
+			return 0;
+		}
 		if (mode === "text") {
 			const state = session.state;
 			const lastMessage = state.messages[state.messages.length - 1];
