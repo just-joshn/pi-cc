@@ -1,0 +1,109 @@
+{
+	"id": "perm/bash-redirection-forms",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "MARK_CAT_B\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi >& pwn.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi>&pwn2.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi &> pwn3.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi >&2"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cat < /etc/hosts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "cat < b.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Output redirection to [^ ]*pwn\\.txt. needs approval",
+				"Output redirection to [^ ]*pwn2\\.txt. needs approval",
+				"Output redirection to [^ ]*pwn3\\.txt. needs approval",
+				"Input redirection from '[^ ]*/etc/hosts' was blocked\\.",
+				"MARK_CAT_B"
+			]
+		},
+		"files": [],
+		"absent": [
+			"$WORKSPACE/pwn.txt",
+			"$WORKSPACE/pwn2.txt",
+			"$WORKSPACE/pwn3.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 7,
+				"bodyMatch": [
+					"Output redirection to [^ ]*pwn\\.txt. needs approval",
+					"Output redirection to [^ ]*pwn2\\.txt. needs approval",
+					"Output redirection to [^ ]*pwn3\\.txt. needs approval",
+					"Input redirection from '[^ ]*/etc/hosts' was blocked\\.",
+					"MARK_CAT_B"
+				]
+			}
+		]
+	},
+	"skip": []
+}

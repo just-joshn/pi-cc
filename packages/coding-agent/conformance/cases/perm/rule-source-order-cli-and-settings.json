@@ -1,0 +1,73 @@
+{
+	"id": "perm/rule-source-order-cli-and-settings",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Edit(/ok/**)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\": true}",
+		".claude/settings.json": "{\"permissions\":{\"deny\":[\"Edit(/ok/no/**)\"]}}"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "ok/a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "ok/no/b.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File created successfully at: ok/a.txt",
+				"File is in a directory that is denied by your permission settings"
+			]
+		},
+		"files": [
+			"ok/a.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyMatch": [
+					"File created successfully at: ok/a.txt",
+					"File is in a directory that is denied by your permission settings"
+				]
+			}
+		]
+	},
+	"skip": []
+}

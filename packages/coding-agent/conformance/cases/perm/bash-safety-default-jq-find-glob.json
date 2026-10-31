@@ -1,0 +1,80 @@
+{
+	"id": "perm/bash-safety-default-jq-find-glob",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"c.txt": "y\n",
+		"x.jq": ".",
+		"a.txt": "MARK\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "jq -n 'system(\"touch jqsys.txt\")'"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "jq -f x.jq c.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name *.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"system\\(\\) function",
+				"dangerous flags",
+				"unquoted glob characters"
+			]
+		},
+		"absent": [
+			"$WORKSPACE/jqsys.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4,
+				"bodyMatch": [
+					"system\\(\\) function",
+					"dangerous flags",
+					"unquoted glob characters"
+				]
+			}
+		]
+	},
+	"skip": []
+}

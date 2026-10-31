@@ -1,0 +1,105 @@
+{
+	"id": "perm/bypass-not-absolute",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"bypassPermissions",
+		"--settings",
+		"{\"permissions\":{\"ask\":[\"Bash(touch:*)\"],\"deny\":[\"Edit(./locked.txt)\"]}}",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"locked.txt": "a",
+		".git/HEAD": "ref"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "../outside.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch t.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "locked.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": ".git/config",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File created successfully at: a.txt",
+				"Claude requested permissions to use Bash, but you haven't granted it yet\\.",
+				"File is in a directory that is denied by your permission settings"
+			]
+		},
+		"files": [
+			"a.txt",
+			".git/config"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 6,
+				"bodyMatch": [
+					"File created successfully at: a.txt",
+					"Claude requested permissions to use Bash, but you haven't granted it yet\\.",
+					"File is in a directory that is denied by your permission settings"
+				]
+			}
+		]
+	},
+	"skip": []
+}

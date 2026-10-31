@@ -1,0 +1,77 @@
+{
+	"id": "perm/read-gate-follows-read-permission",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"acceptEdits",
+		"--settings",
+		"{\"permissions\":{\"ask\":[\"Read(./b.txt)\"]}}",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "a",
+		"c.txt": "a"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "b.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Edit",
+					"input": {
+						"file_path": "c.txt",
+						"old_string": "a",
+						"new_string": "b"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File has not been read yet",
+				"The file c\\.txt has been updated successfully"
+			]
+		},
+		"files": [
+			"c.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyMatch": [
+					"File has not been read yet",
+					"The file c\\.txt has been updated successfully"
+				]
+			}
+		]
+	},
+	"skip": []
+}

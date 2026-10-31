@@ -1,0 +1,137 @@
+{
+	"id": "perm/bash-prefix-allow-unsafe-options",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Bash(find:*)",
+		"Bash(sort:*)",
+		"Bash(jq:*)",
+		"Bash(awk:*)",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"b.txt": "MARK_B\n",
+		"c.txt": "y\n",
+		"x.jq": "."
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name b.txt -delete"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name c.txt -fprint f.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name *.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "sort -o out.txt c.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "jq -f x.jq c.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "jq 'system(\"id\")' c.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "awk 'BEGIN{system(\"touch pwned.txt\")}' c.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "find . -name c.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"find with '-delete' executes commands or modifies files",
+				"find contains unquoted glob characters",
+				"jq command contains dangerous flags",
+				"jq command contains system\\(\\) function",
+				"awk program contains system\\(\\) which executes arbitrary commands",
+				"\\./c\\.txt"
+			]
+		},
+		"files": [
+			"b.txt",
+			"c.txt",
+			"out.txt"
+		],
+		"absent": [
+			"$WORKSPACE/f.txt",
+			"$WORKSPACE/pwned.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 9,
+				"bodyMatch": [
+					"find with '-delete' executes commands or modifies files",
+					"find contains unquoted glob characters",
+					"jq command contains dangerous flags",
+					"jq command contains system\\(\\) function",
+					"awk program contains system\\(\\) which executes arbitrary commands",
+					"\\./c\\.txt"
+				]
+			}
+		]
+	},
+	"skip": []
+}

@@ -247,7 +247,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "variadic",
 		placeholder: "tools",
 		summary: "Tool allowlist for this run",
-		status: "accepted",
+		status: "wired",
 		apply: appendList("allowedTools"),
 	},
 	{
@@ -328,7 +328,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "dangerously-skip-permissions",
 		arity: "boolean",
 		summary: "Bypass every permission check",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("dangerouslySkipPermissions"),
 	},
 	{
@@ -368,7 +368,7 @@ export const CC_FLAGS: CcFlag[] = [
 		arity: "variadic",
 		placeholder: "tools",
 		summary: "Tool denylist for this run",
-		status: "accepted",
+		status: "wired",
 		apply: appendList("disallowedTools"),
 	},
 	{
@@ -553,7 +553,7 @@ export const CC_FLAGS: CcFlag[] = [
 			hard: true,
 		},
 		summary: "Permission mode for the session",
-		status: "accepted",
+		status: "wired",
 		apply: setString("permissionMode"),
 	},
 	{
@@ -562,7 +562,7 @@ export const CC_FLAGS: CcFlag[] = [
 		placeholder: "target",
 		choices: { values: ["host", "none"], hard: true },
 		summary: "Who answers permission prompts (host, none)",
-		status: "accepted",
+		status: "wired",
 		apply: setString("permissionPrompts"),
 	},
 	{

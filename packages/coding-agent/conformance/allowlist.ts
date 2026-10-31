@@ -58,6 +58,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--verbose",
 		"--session-id",
 		"--permission-mode",
+		"--dangerously-skip-permissions",
+		"--permission-prompts",
 		"--allowedTools",
 		// model selection, which both sides share and which PR #6's cases pin
 		"--model",
@@ -126,9 +128,17 @@ const SIDE_ARGV: ArgvAllowlist = {
 		// values `--permission-mode` writes in PR #7's cases
 		"acceptEdits",
 		"bypassPermissions",
+		// values `--permission-mode` and `--permission-prompts` write in P04's cases
+		"default",
+		"plan",
+		"dontAsk",
+		"none",
+		"host",
 		// values `--allowedTools` and `--tools` write in PR #7's cases
 		"Bash",
 		"Read",
+		"Write",
+		"Edit",
 		// model ids PR #7's gate cases run, whose family resolution they pin
 		"claude-sonnet-4-5",
 		"claude-opus-4-5",
@@ -180,6 +190,8 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
  */
 const CASE_ENV_KEYS: readonly string[] = [
 	"CLAUDE_CODE_TMPDIR",
+	// P04 round 3: waives the dangerous-removal check under bypass. Removals in a case run against the seeded workspace inside the Seatbelt.
+	"CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS",
 	"ANTHROPIC_AUTH_TOKEN",
 	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_CUSTOM_HEADERS",

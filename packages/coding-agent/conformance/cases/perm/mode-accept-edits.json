@@ -1,0 +1,102 @@
+{
+	"id": "perm/mode-accept-edits",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"acceptEdits",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		".git/HEAD": "ref"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "../outside.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": ".git/config",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch t.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "npm test"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"File created successfully at: a.txt",
+				"Claude requested permissions to write to [^ ]*outside\\.txt, but you haven't granted it yet\\.",
+				"Claude requested permissions to edit [^ ]*\\.git/config which is a sensitive file\\.",
+				"This command requires approval"
+			]
+		},
+		"files": [
+			"a.txt",
+			"t.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 6,
+				"bodyMatch": [
+					"File created successfully at: a.txt",
+					"Claude requested permissions to write to [^ ]*outside\\.txt, but you haven't granted it yet\\.",
+					"Claude requested permissions to edit [^ ]*\\.git/config which is a sensitive file\\.",
+					"This command requires approval"
+				]
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,113 @@
+{
+	"id": "perm/dangerous-rm-assigned-target-unfollowed",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--dangerously-skip-permissions",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n",
+		"sub/inner.txt": "INNER\n",
+		"sub/deep/x.txt": "X\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "(X=.); rmdir $X"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "X=. || true; rmdir $X"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi; X=.; rmdir $X"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "X=.; echo ${Y}; rmdir $X"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "X=.; echo $(date); rmdir $X"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "X=.; { rmdir $X; }"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "X=sub; rmdir $X"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 8,
+				"bodyMatch": [
+					"rmdir: \\.: Invalid argument",
+					"usage: rmdir",
+					"rmdir: sub: Directory not empty"
+				],
+				"bodyNotMatch": [
+					"Dangerous rmdir operation detected",
+					"requires approval"
+				]
+			}
+		],
+		"files": []
+	},
+	"skip": []
+}

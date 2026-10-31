@@ -1,0 +1,71 @@
+{
+	"id": "perm/deny-before-allow",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--allowedTools",
+		"Bash(touch:*),Write",
+		"--settings",
+		"{\"permissions\":{\"deny\":[\"Bash(touch:*)\"]}}",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch t.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Permission to use Bash with command touch t\\.txt has been denied\\.",
+				"File created successfully at: a.txt"
+			]
+		},
+		"files": [
+			"a.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyMatch": [
+					"Permission to use Bash with command touch t\\.txt has been denied\\.",
+					"File created successfully at: a.txt"
+				]
+			}
+		]
+	},
+	"skip": []
+}

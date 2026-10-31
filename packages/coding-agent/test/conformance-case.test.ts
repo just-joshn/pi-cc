@@ -23,7 +23,7 @@ const MINIMAL_CASE = {
 describe("loadCases", () => {
 	test("loads every shipped case", () => {
 		const cases = loadCases(CASES_DIR);
-		expect(cases.length).toBe(355);
+		expect(cases.length).toBe(531);
 	});
 
 	test("rejects a misspelled compare key", () => {
@@ -436,7 +436,6 @@ const SUBTRACTED: string[][] = [
 	["high"],
 	["--mcp-config", "probe"],
 	["--agents=probe"],
-	["--dangerously-skip-permissions"],
 	["--print"],
 	["probe"],
 	["--add-dir", "."],

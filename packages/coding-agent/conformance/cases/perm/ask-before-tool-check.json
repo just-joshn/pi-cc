@@ -1,0 +1,71 @@
+{
+	"id": "perm/ask-before-tool-check",
+	"area": "perm",
+	"argv": [
+		"-p",
+		"Run the permission probes",
+		"--model",
+		"claude-opus-4-7",
+		"--permission-mode",
+		"acceptEdits",
+		"--allowedTools",
+		"Bash(touch:*)",
+		"--settings",
+		"{\"permissions\":{\"ask\":[\"Bash(touch:*)\",\"Write\"]}}",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch t.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "a.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"Claude requested permissions to use Bash, but you haven't granted it yet\\.",
+				"Claude requested permissions to use Write, but you haven't granted it yet\\."
+			]
+		},
+		"files": [],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyMatch": [
+					"Claude requested permissions to use Bash, but you haven't granted it yet\\.",
+					"Claude requested permissions to use Write, but you haven't granted it yet\\."
+				]
+			}
+		]
+	},
+	"skip": []
+}
