@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { PermissionState } from "../src/core/permissions/context.ts";
 import { evaluatePermission } from "../src/core/permissions/evaluate.ts";
 
@@ -21,9 +21,15 @@ const CORPORA = [
 	"removal-fuzz-round6a",
 	"removal-fuzz-round6b",
 ];
-const root = join(realpathSync(tmpdir()), "p04-removal-replay");
+// The oracle recorded with the workspace under the macOS per-user temp dir. A /tmp ancestor of the
+// replay workspace turns `rmdir /tmp/...` targets into workspace-parent refusals the recording
+// never saw, so replay in a fresh home-directory root that no corpus target is an ancestor of.
+const root = mkdtempSync(join(realpathSync(homedir()), "p04-removal-replay-"));
 const cwd = join(root, "workspace");
 const home = join(root, "home");
+mkdirSync(cwd);
+mkdirSync(home);
+afterAll(() => rmSync(root, { recursive: true, force: true }));
 const context = new PermissionState({ cwd, home, cliMode: "bypassPermissions" }).current();
 
 function read<T>(name: string): T {
