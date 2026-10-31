@@ -350,3 +350,43 @@ describe("Ctrl+C reaches the app.clear action with a non-empty draft", () => {
 		expect(screen(editor)).not.toContain("Press Ctrl-C again to exit");
 	});
 });
+
+describe("plain pi without Claude Code terminal settings keeps pi's own navigation edges", () => {
+	function createPlainEditor() {
+		const bindings = new KeybindingsManager();
+		setKeybindings(bindings);
+		return new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, bindings, {
+			promptShortcuts: false,
+		});
+	}
+
+	it("Up on a first-line draft moves to line start instead of browsing history", () => {
+		const editor = createPlainEditor();
+		editor.addToHistory("stored entry");
+		editor.setText("hello");
+		editor.handleInput("\x1b[A");
+		expect(editor.getText()).toBe("hello");
+		expect(editor.getCursorOffset()).toBe(0);
+		expect(screen(editor)).not.toContain("History");
+	});
+
+	it("Down on the last line moves to line end", () => {
+		const editor = createPlainEditor();
+		editor.addToHistory("stored entry");
+		editor.setText("hello");
+		editor.handleInput("\x1b[A");
+		editor.handleInput("\x1b[B");
+		expect(editor.getText()).toBe("hello");
+		expect(editor.getCursorOffset()).toBe(5);
+		expect(screen(editor)).not.toContain("History");
+	});
+
+	it("an edit during a browse still shows no History rule", () => {
+		const editor = createPlainEditor();
+		editor.addToHistory("stored entry");
+		editor.handleInput("\x1b[A");
+		editor.handleInput("x");
+		expect(editor.getText()).toBe("stored entryx");
+		expect(screen(editor)).not.toContain("History");
+	});
+});
