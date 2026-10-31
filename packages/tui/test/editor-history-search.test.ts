@@ -220,4 +220,47 @@ describe("prompt history reverse search", () => {
 		key(editor, "\x1b");
 		assert.equal(editor.getText(), "draft");
 	});
+
+	it("draws the History n/N rule while browsing and clears it back on the draft", () => {
+		const editor = createEditor(true);
+		const top = () => screen(editor).split("\n")[0];
+
+		key(editor, "\x1b[A");
+		assert.equal(editor.getText(), "new ALPHA value");
+		assert.equal(top(), `─── History 2/2 ${"─".repeat(64)}`);
+
+		key(editor, "\x1b[A");
+		assert.equal(top(), `─── History 1/2 ${"─".repeat(64)}`);
+
+		key(editor, "\x1b[A");
+		assert.equal(top(), `─── History 1/2 ${"─".repeat(64)}`, "clamps at the oldest entry");
+
+		key(editor, "\x1b[B");
+		key(editor, "\x1b[B");
+		assert.equal(editor.getText(), "");
+		assert.equal(top(), "─".repeat(80));
+
+		key(editor, "\x1b");
+		key(editor, "k");
+		assert.equal(top(), `─── History 2/2 ${"─".repeat(64)}`);
+		key(editor, "k");
+		assert.equal(top(), `─── History 1/2 ${"─".repeat(64)}`);
+		key(editor, "j");
+		assert.equal(top(), `─── History 2/2 ${"─".repeat(64)}`);
+		key(editor, "j");
+		assert.equal(top(), "─".repeat(80));
+	});
+
+	it("leaves the rule plain while a history search is active and after accepting a match", () => {
+		const editor = createEditor();
+		const top = () => screen(editor).split("\n")[0];
+
+		key(editor, "\x12");
+		assert.equal(top(), "─".repeat(80));
+		key(editor, "old");
+		assert.equal(top(), "─".repeat(80));
+		key(editor, "\t");
+		assert.equal(editor.getText(), "old Alpha alpha");
+		assert.equal(top(), "─".repeat(80));
+	});
 });

@@ -238,4 +238,93 @@ describe("prompt navigation before application shortcuts", () => {
 		expect(editor.getText()).toBe("W:Q2");
 		expect(screen(editor)).not.toContain("no matching prompt:");
 	});
+
+	// One row per Claude Code capture in store/vimnav/fix-round-2: with the help
+	// sheet open and a history search parked under it, the sheet owns every key
+	// except Enter/Tab/Shift+Tab (fall through to the search), Ctrl+C (ends the
+	// search, sheet stays), and Escape (closes only the sheet, search survives).
+	const PARKED_CAPTURES: ReadonlyArray<{
+		key: string;
+		label: string;
+		endsSearch?: boolean;
+		submits?: boolean;
+		dismissesSheetOnly?: boolean;
+	}> = [
+		{ key: "\r", label: "Enter", endsSearch: true, submits: true },
+		{ key: "\t", label: "Tab", endsSearch: true },
+		{ key: "\x1b[Z", label: "Shift+Tab", endsSearch: true },
+		{ key: "\x03", label: "Ctrl+C", endsSearch: true },
+		{ key: "\x1b", label: "Escape", dismissesSheetOnly: true },
+		{ key: "\x04", label: "Ctrl+D" },
+		{ key: "\x12", label: "Ctrl+R" },
+		{ key: "\x07", label: "Ctrl+G" },
+		{ key: "\x7f", label: "Backspace" },
+		{ key: "\x1b[3~", label: "Delete" },
+		{ key: "\x1b[A", label: "Up" },
+		{ key: "\x1b[B", label: "Down" },
+		{ key: "\x1b[D", label: "Left" },
+		{ key: "\x1b[C", label: "Right" },
+		{ key: "\x1b[H", label: "Home" },
+		{ key: "\x1b[F", label: "End" },
+		{ key: "\x1b[5~", label: "PageUp" },
+		{ key: "\x1b[6~", label: "PageDown" },
+		{ key: "\x15", label: "Ctrl+U" },
+		{ key: "\x17", label: "Ctrl+W" },
+		{ key: "x", label: "printable x" },
+		{ key: "?", label: "question mark" },
+		{ key: "/", label: "slash" },
+	];
+
+	it.each(PARKED_CAPTURES)(
+		"$label under a search parked under help matches the capture",
+		({ key, endsSearch, submits, dismissesSheetOnly }) => {
+			const editor = createEditor(true);
+			editor.addToHistory("alpha one");
+			editor.setBuffer("W:2", 3);
+			editor.handleInput("\x1b");
+			editor.handleInput("?");
+			editor.handleInput("/");
+			const submitted: string[] = [];
+			editor.onSubmit = (text) => submitted.push(text);
+
+			editor.handleInput(key);
+
+			if (dismissesSheetOnly) {
+				expect(screen(editor)).not.toContain("/ for commands");
+				expect(screen(editor)).toContain("search prompts:");
+				expect(editor.getText()).toBe("W:2");
+				expect(submitted).toEqual([]);
+				editor.handleInput("\x1b");
+				expect(screen(editor)).not.toContain("search prompts:");
+				editor.handleInput("i");
+				editor.handleInput("Q");
+				expect(editor.getText()).toBe("W:Q2");
+				return;
+			}
+
+			expect(screen(editor)).toContain("/ for commands");
+			expect(submitted).toEqual(endsSearch && submits ? ["W:2"] : []);
+
+			if (!endsSearch) {
+				expect(editor.getText()).toBe("W:2");
+				expect(screen(editor)).not.toContain("search prompts:");
+				editor.handleInput("\x1b");
+				expect(screen(editor)).not.toContain("/ for commands");
+				expect(screen(editor)).toContain("search prompts:");
+				editor.handleInput("i");
+				editor.handleInput("Q");
+				expect(screen(editor)).toContain("no matching prompt:");
+				expect(editor.getText()).toBe("W:2");
+				return;
+			}
+
+			expect(screen(editor)).not.toContain("search prompts:");
+			editor.handleInput("\x1b");
+			expect(screen(editor)).not.toContain("/ for commands");
+			editor.handleInput("i");
+			editor.handleInput("Q");
+			expect(screen(editor)).not.toContain("no matching prompt:");
+			expect(editor.getText()).toBe(endsSearch && submits ? "Q" : "W:Q2");
+		},
+	);
 });
