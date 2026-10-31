@@ -392,6 +392,10 @@ export class Editor implements Component, Focusable {
 		return this.historySearch.kind === "searching";
 	}
 
+	protected get isBrowsingHistory(): boolean {
+		return this.historyIndex >= 0;
+	}
+
 	protected cancelHistorySearch(): void {
 		if (this.historySearch.kind === "closed") return;
 		this.restoreSearchDraft(this.historySearch.draft);
@@ -591,6 +595,10 @@ export class Editor implements Component, Focusable {
 	}
 
 	protected renderTopBorder(width: number, hiddenLineCount: number): string {
+		if (this.isBrowsingHistory) {
+			const label = `─── History ${this.history.length - this.historyIndex}/${this.history.length} `;
+			return this.borderColor(label + "─".repeat(Math.max(0, width - label.length)));
+		}
 		const border = hiddenLineCount > 0 ? createScrollBorder("↑", hiddenLineCount, width) : "─".repeat(width);
 		return this.borderColor(border);
 	}

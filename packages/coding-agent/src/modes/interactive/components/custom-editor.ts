@@ -18,6 +18,19 @@ export type CustomEditorOptions = EditorOptions & {
 };
 
 /**
+ * Keys Claude Code lets reach a history search parked under the help sheet,
+ * in match order; every other key stays swallowed by the sheet (captures in
+ * store/vimnav/fix-round-2). Ctrl+C cancels the search and keeps the sheet,
+ * Escape closes only the sheet, and the search actions fall through.
+ */
+const PARKED_SEARCH_KEYS: ReadonlyArray<{ action: Keybinding; dismissesSheet?: boolean }> = [
+	{ action: "tui.historySearch.cancel" },
+	{ action: "app.interrupt", dismissesSheet: true },
+	{ action: "tui.historySearch.execute" },
+	{ action: "tui.historySearch.accept" },
+];
+
+/**
  * Custom editor that handles app-level keybindings for coding-agent.
  */
 export class CustomEditor extends Editor {
@@ -125,6 +138,7 @@ export class CustomEditor extends Editor {
 	}
 
 	protected override renderTopBorder(width: number, hiddenLineCount: number): string {
+		if (this.isBrowsingHistory) return super.renderTopBorder(width, hiddenLineCount);
 		if (this.chordStatus) return this.borderColor(truncateToWidth(`── ${this.chordStatus} `, width, ""));
 		if (this.flat && hiddenLineCount === 0 && !this.workingStatusIndicator) return "";
 		if (!this.embedWorkingStatus || !this.workingStatusIndicator || width <= 0) {
@@ -180,6 +194,7 @@ export class CustomEditor extends Editor {
 
 	handleInput(data: string): void {
 		if (
+			this.help.kind === "closed" &&
 			this.isHistorySearchActive &&
 			!(
 				[
@@ -225,6 +240,20 @@ export class CustomEditor extends Editor {
 			this.onToggleHelp?.();
 			return;
 		}
+		if (this.help.kind === "open" && this.isHistorySearchActive) {
+			// Must sit above the sheet's interrupt branch so a parked search keeps
+			// Backspace from closing the sheet; dispositions come from the table.
+			const parked = PARKED_SEARCH_KEYS.find((entry) => this.keybindings.matches(data, entry.action));
+			if (!parked) return;
+			if (parked.dismissesSheet) {
+				this.help = { kind: "closed" };
+				this.tui.requestRender();
+				return;
+			}
+			this.handleHistorySearchInput(data);
+			this.keybindings.cc.cancel();
+			return;
+		}
 		if (
 			this.help.kind === "open" &&
 			(this.keybindings.matches(data, "app.interrupt") ||
@@ -239,18 +268,6 @@ export class CustomEditor extends Editor {
 		) {
 			this.help = { kind: "closed" };
 			this.tui.requestRender();
-			return;
-		}
-		if (this.help.kind === "open" && this.isHistorySearchActive) {
-			// The sheet owns every other key, but Enter/Tab reach the parked search
-			// like Claude Code: accept ends the search, Enter also submits the draft.
-			if (
-				this.keybindings.matches(data, "tui.historySearch.accept") ||
-				this.keybindings.matches(data, "tui.historySearch.execute")
-			) {
-				this.handleHistorySearchInput(data);
-				this.keybindings.cc.cancel();
-			}
 			return;
 		}
 		// Check extension-registered shortcuts first
