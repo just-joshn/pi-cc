@@ -53,7 +53,7 @@ export class CustomEditor extends Editor {
 	override render(width: number): string[] {
 		const lines = super.render(width);
 		if (this.help.kind === "closed") return lines;
-		if (this.isHistorySearchActive || lines.at(-1)?.trim().startsWith("-- ")) lines.pop();
+		if (lines.at(-1)?.trim().startsWith("-- ")) lines.pop();
 		const userBindings = this.keybindings.getUserBindings();
 		const shortcut = (action: Keybinding, fallback: string): string => {
 			const imported = this.keybindings.cc.getBindings().findLast((binding) => binding.action === action)?.keys;

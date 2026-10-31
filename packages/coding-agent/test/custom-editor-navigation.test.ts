@@ -27,6 +27,7 @@ describe("prompt navigation before application shortcuts", () => {
 		editor.handleInput(open);
 		expect(screen(editor)).toContain("/ for commands");
 		expect(screen(editor)).not.toContain("search prompts:");
+		expect(screen(editor).split("\n").filter((line) => line.startsWith("\u2500")).length).toBe(2);
 		editor.handleInput("alpha");
 		expect(editor.getText()).toBe("a");
 		editor.handleInput("\x1b");
