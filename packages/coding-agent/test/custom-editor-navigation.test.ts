@@ -230,7 +230,7 @@ describe("prompt navigation before application shortcuts", () => {
 		expect(screen(editor)).not.toContain("/ for commands");
 		editor.handleInput("i");
 		editor.handleInput("Q");
-		expect(editor.getText()).toBe("W:2Q");
+		expect(editor.getText()).toBe("W:Q2");
 		expect(screen(editor)).not.toContain("no matching prompt:");
 	});
 });

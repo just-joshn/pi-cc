@@ -241,7 +241,18 @@ export class CustomEditor extends Editor {
 			this.tui.requestRender();
 			return;
 		}
-		if (this.help.kind === "open" && this.isHistorySearchActive) return;
+		if (this.help.kind === "open" && this.isHistorySearchActive) {
+			// The sheet owns every other key, but Enter/Tab reach the parked search
+			// like Claude Code: accept ends the search, Enter also submits the draft.
+			if (
+				this.keybindings.matches(data, "tui.historySearch.accept") ||
+				this.keybindings.matches(data, "tui.historySearch.execute")
+			) {
+				this.handleHistorySearchInput(data);
+				this.keybindings.cc.cancel();
+			}
+			return;
+		}
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
 			this.keybindings.cc.cancel();
