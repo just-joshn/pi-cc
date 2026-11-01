@@ -812,6 +812,8 @@ export interface Tool<TParameters extends TSchema = TSchema> {
 	description: string;
 	parameters: TParameters;
 	constrainedSampling?: false | ConstrainedSamplingConfig;
+	/** Set false to omit eager tool-input streaming on providers that support it. */
+	eagerInputStreaming?: boolean;
 	/** Declare this tool to the provider as loaded on demand rather than up front. */
 	deferLoading?: boolean;
 }

@@ -1,0 +1,80 @@
+{
+	"id": "grepglob/t11e-subagent-bare",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--bare"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		".claude/agents/searcher.md": "---\nname: searcher\ndescription: Search fixture files\ntools: Grep, Glob\n---\nSearch the local fixtures.\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Task",
+					"input": {
+						"description": "Search fixtures",
+						"subagent_type": "searcher",
+						"prompt": "Find fixture files"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[\"Bash\",\"Edit\",\"Read\"\\]"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyEquals": {
+					"tools": [
+						{
+							"name": "Bash"
+						},
+						{
+							"name": "Edit"
+						},
+						{
+							"name": "Read"
+						}
+					]
+				},
+				"bodyAt": {
+					"tools": {
+						"notMatch": [
+							"\"name\":\"Grep\"",
+							"\"name\":\"Glob\""
+						]
+					},
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"<tool_use_error>Error: No such tool available: Task(?:\\.(?:[^\"\\\\]|\\\\.)*)?</tool_use_error>\"|\\[(?:\\{\"type\":\"text\",\"text\":\"<tool_use_error>Error: No such tool available: Task(?:\\.(?:[^\"\\\\]|\\\\.)*)?</tool_use_error>\"\\}|\\{\"text\":\"<tool_use_error>Error: No such tool available: Task(?:\\.(?:[^\"\\\\]|\\\\.)*)?</tool_use_error>\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

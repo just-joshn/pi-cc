@@ -1,0 +1,58 @@
+{
+	"id": "grepglob/t10-settings-deny-bash",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"$AGENT/trust.json": "{\"$WORKSPACE\":true}\n",
+		".claude/settings.json": "{\"permissions\":{\"deny\":[\"Bash\"]}}"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?=[^\\]]*\"Grep\")[^\\]]*\\]",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?=[^\\]]*\"Glob\")[^\\]]*\\]",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?![^\\]]*\"Bash\")[^\\]]*\\]"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"index": 0,
+				"bodyAt": {
+					"tools": {
+						"match": [
+							"\\{\"name\":\"Grep\",\"description\":\"(?:[^\"\\\\]|\\\\.){477}\",\"input_schema\":(?:\\{\"\\$schema\":\"https://json-schema\\.org/draft/2020-12/schema\",\"type\":\"object\",\"properties\":\\{\"pattern\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\},\"path\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\},\"glob\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\},\"output_mode\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\",\"enum\":\\[\"content\",\"files_with_matches\",\"count\"\\]\\},\"-B\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"number\"\\},\"-A\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"number\"\\},\"-C\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"number\"\\},\"context\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"number\"\\},\"-n\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"boolean\"\\},\"-i\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"boolean\"\\},\"-o\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"boolean\"\\},\"type\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\},\"head_limit\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"number\"\\},\"offset\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"number\"\\},\"multiline\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"boolean\"\\}\\},\"required\":\\[\"pattern\"\\],\"additionalProperties\":false\\}|\\{\"type\":\"object\",\"required\":\\[\"pattern\"\\],\"properties\":\\{\"pattern\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"path\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"glob\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"output_mode\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"enum\":\\[\"content\",\"files_with_matches\",\"count\"\\]\\},\"-B\":\\{\"type\":\"number\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"-A\":\\{\"type\":\"number\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"-C\":\\{\"type\":\"number\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"context\":\\{\"type\":\"number\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"-n\":\\{\"type\":\"boolean\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"-i\":\\{\"type\":\"boolean\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"-o\":\\{\"type\":\"boolean\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"type\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"head_limit\":\\{\"type\":\"number\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"offset\":\\{\"type\":\"number\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"multiline\":\\{\"type\":\"boolean\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\}\\},\"additionalProperties\":false,\"\\$schema\":\"https://json-schema\\.org/draft/2020-12/schema\"\\})\\}",
+							"\\{\"name\":\"Glob\",\"description\":\"(?:[^\"\\\\]|\\\\.){140}\",\"input_schema\":(?:\\{\"\\$schema\":\"https://json-schema\\.org/draft/2020-12/schema\",\"type\":\"object\",\"properties\":\\{\"pattern\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\},\"path\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\}\\},\"required\":\\[\"pattern\"\\],\"additionalProperties\":false\\}|\\{\"type\":\"object\",\"required\":\\[\"pattern\"\\],\"properties\":\\{\"pattern\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"path\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\}\\},\"additionalProperties\":false,\"\\$schema\":\"https://json-schema\\.org/draft/2020-12/schema\"\\})\\}"
+						],
+						"notMatch": [
+							"\"name\":\"Bash\""
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,66 @@
+{
+	"id": "grepglob/t02-bare",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--bare"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?![^\\]]*\"Grep\")[^\\]]*\\]",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?![^\\]]*\"Glob\")[^\\]]*\\]"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"index": 0,
+				"bodyAt": {
+					"tools": {
+						"match": [],
+						"notMatch": [
+							"\"name\":\"Grep\"",
+							"\"name\":\"Glob\""
+						]
+					}
+				},
+				"bodyEquals": {
+					"tools": [
+						{
+							"name": "Bash"
+						},
+						{
+							"name": "Edit"
+						},
+						{
+							"name": "Read"
+						}
+					]
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import type { Model, Tool } from "../src/types.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
+import { recordFetch } from "./anthropic-utils.ts";
 
 interface AnthropicToolPayload {
 	tools?: Array<{ strict?: boolean; input_schema: Record<string, unknown> }>;
@@ -36,7 +37,7 @@ function createTool(parameters: Tool["parameters"], constrainedSampling?: Tool["
 		name: "lookup",
 		description: "Look up a value",
 		parameters,
-		...(constrainedSampling ? { constrainedSampling } : {}),
+		...(constrainedSampling === undefined ? {} : { constrainedSampling }),
 	};
 }
 
@@ -68,7 +69,69 @@ async function captureFirstTool(tool: Tool): Promise<NonNullable<AnthropicToolPa
 }
 
 describe("Anthropic strict tool schemas", () => {
-	it("only sends the full input schema for strict JSON-schema tools", async () => {
+	it.each([true, false])(
+		"preserves explicitly unconstrained schemas on the wire with strict capability %s",
+		async (supportsStrictTools) => {
+			const parameters = Type.Object(
+				{ pattern: Type.String({ description: "Search expression" }), path: Type.Optional(Type.String()) },
+				{
+					$schema: "https://json-schema.org/draft/2020-12/schema",
+					additionalProperties: false,
+					title: "SearchInput",
+				},
+			);
+			const definition = { ...createTool(parameters, false), eagerInputStreaming: false };
+			const { requests, fetch } = recordFetch(() =>
+				Response.json({ error: { type: "invalid_request_error", message: "captured" } }, { status: 400 }),
+			);
+			await streamAnthropic(
+				{ ...createModel(), compat: { supportsStrictTools } },
+				normalizeContext({ messages: [{ role: "user", content: "Search", timestamp: 1 }], tools: [definition] }),
+				{ apiKey: "test-key", fetch, cacheRetention: "none", maxRetries: 0 },
+			).result();
+			expect(requests).toHaveLength(1);
+			expect(requests[0].body.tools).toEqual([
+				{
+					name: definition.name,
+					description: definition.description,
+					input_schema: JSON.parse(JSON.stringify(parameters)),
+				},
+			]);
+		},
+	);
+
+	it("keeps schema preservation and eager streaming independent", async () => {
+		const parameters = Type.Object({ value: Type.String() }, { additionalProperties: false });
+		const { requests, fetch } = recordFetch(() =>
+			Response.json({ error: { type: "invalid_request_error", message: "captured" } }, { status: 400 }),
+		);
+		await streamAnthropic(
+			createModel(),
+			normalizeContext({
+				messages: [{ role: "user", content: "Use the tools", timestamp: 1 }],
+				tools: [
+					createTool(parameters, false),
+					{ ...createTool(parameters), name: "no_stream", eagerInputStreaming: false },
+				],
+			}),
+			{ apiKey: "test-key", fetch, cacheRetention: "none", maxRetries: 0 },
+		).result();
+		expect(requests[0].body.tools).toEqual([
+			{
+				name: "lookup",
+				description: "Look up a value",
+				input_schema: JSON.parse(JSON.stringify(parameters)),
+				eager_input_streaming: true,
+			},
+			{
+				name: "no_stream",
+				description: "Look up a value",
+				input_schema: { type: "object", properties: parameters.properties, required: parameters.required },
+			},
+		]);
+	});
+
+	it("keeps the legacy schema shape unless strict or explicitly unconstrained", async () => {
 		const legacyParameters = Type.Object(
 			{ value: Type.String() },
 			{ additionalProperties: false, title: "LookupInput" },

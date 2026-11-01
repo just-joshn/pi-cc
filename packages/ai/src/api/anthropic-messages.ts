@@ -1682,17 +1682,21 @@ function convertTools(
 			required: schema.required ?? [],
 		};
 		const inputSchema =
-			strict === true
-				? {
-						...(parameters as Record<string, unknown>),
-						...legacyInputSchema,
-					}
-				: legacyInputSchema;
+			tool.constrainedSampling === false
+				? { ...(parameters as Record<string, unknown>) }
+				: strict === true
+					? {
+							...(parameters as Record<string, unknown>),
+							...legacyInputSchema,
+						}
+					: legacyInputSchema;
 
 		return {
 			name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
 			description: tool.description,
-			...(supportsEagerToolInputStreaming ? { eager_input_streaming: true } : {}),
+			...(supportsEagerToolInputStreaming && tool.eagerInputStreaming !== false
+				? { eager_input_streaming: true }
+				: {}),
 			...(strict === true ? { strict: true } : {}),
 			input_schema: inputSchema,
 			...(tool.deferLoading === true ? { defer_loading: true } : {}),

@@ -1,0 +1,68 @@
+{
+	"id": "grepglob/t05-tools-glob-read",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--tools",
+		"Glob,Read"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?=[^\\]]*\"Glob\")[^\\]]*\\]",
+				"^\\{(?=[^\\n]*\"subtype\":\"init\")[^\\n]*\"tools\":\\[(?![^\\]]*\"Grep\")[^\\]]*\\]"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"index": 0,
+				"bodyAt": {
+					"tools": {
+						"match": [
+							"\\{\"name\":\"Glob\",\"description\":\"(?:[^\"\\\\]|\\\\.){140}\",\"input_schema\":(?:\\{\"\\$schema\":\"https://json-schema\\.org/draft/2020-12/schema\",\"type\":\"object\",\"properties\":\\{\"pattern\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\},\"path\":\\{\"description\":\"(?:[^\"\\\\]|\\\\.)*\",\"type\":\"string\"\\}\\},\"required\":\\[\"pattern\"\\],\"additionalProperties\":false\\}|\\{\"type\":\"object\",\"required\":\\[\"pattern\"\\],\"properties\":\\{\"pattern\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\},\"path\":\\{\"type\":\"string\",\"description\":\"(?:[^\"\\\\]|\\\\.)*\"\\}\\},\"additionalProperties\":false,\"\\$schema\":\"https://json-schema\\.org/draft/2020-12/schema\"\\})\\}"
+						],
+						"notMatch": [
+							"\"name\":\"Grep\""
+						]
+					}
+				},
+				"bodyEquals": {
+					"tools": [
+						{
+							"name": "Glob"
+						},
+						{
+							"name": "DeferredToolPlaceholder"
+						},
+						{
+							"name": "Read"
+						}
+					]
+				}
+			}
+		]
+	},
+	"skip": []
+}

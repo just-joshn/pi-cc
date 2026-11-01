@@ -1,0 +1,180 @@
+{
+	"id": "grepglob/grep-validation-and-search-errors",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"a.txt": "alpha\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"output_mode": "bogus"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"head_limit": -1
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"offset": -1
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"type": "nope"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "(foo"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"path": "nonexistent"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 8
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"<tool_use_error>InputValidationError: \\[\\\\n  \\{\\\\n    \\\\\"code\\\\\": \\\\\"invalid_value\\\\\",\\\\n    \\\\\"values\\\\\": \\[\\\\n      \\\\\"content\\\\\",\\\\n      \\\\\"files_with_matches\\\\\",\\\\n      \\\\\"count\\\\\"\\\\n    \\],\\\\n    \\\\\"path\\\\\": \\[\\\\n      \\\\\"output_mode\\\\\"\\\\n    \\],\\\\n    \\\\\"message\\\\\": \\\\\"Invalid option: expected one of \\\\\\\\\\\\\"content\\\\\\\\\\\\\"\\|\\\\\\\\\\\\\"files_with_matches\\\\\\\\\\\\\"\\|\\\\\\\\\\\\\"count\\\\\\\\\\\\\"\\\\\"\\\\n  \\}\\\\n\\]</tool_use_error>\"|\\[(?:\\{\"type\":\"text\",\"text\":\"<tool_use_error>InputValidationError: \\[\\\\n  \\{\\\\n    \\\\\"code\\\\\": \\\\\"invalid_value\\\\\",\\\\n    \\\\\"values\\\\\": \\[\\\\n      \\\\\"content\\\\\",\\\\n      \\\\\"files_with_matches\\\\\",\\\\n      \\\\\"count\\\\\"\\\\n    \\],\\\\n    \\\\\"path\\\\\": \\[\\\\n      \\\\\"output_mode\\\\\"\\\\n    \\],\\\\n    \\\\\"message\\\\\": \\\\\"Invalid option: expected one of \\\\\\\\\\\\\"content\\\\\\\\\\\\\"\\|\\\\\\\\\\\\\"files_with_matches\\\\\\\\\\\\\"\\|\\\\\\\\\\\\\"count\\\\\\\\\\\\\"\\\\\"\\\\n  \\}\\\\n\\]</tool_use_error>\"\\}|\\{\"text\":\"<tool_use_error>InputValidationError: \\[\\\\n  \\{\\\\n    \\\\\"code\\\\\": \\\\\"invalid_value\\\\\",\\\\n    \\\\\"values\\\\\": \\[\\\\n      \\\\\"content\\\\\",\\\\n      \\\\\"files_with_matches\\\\\",\\\\n      \\\\\"count\\\\\"\\\\n    \\],\\\\n    \\\\\"path\\\\\": \\[\\\\n      \\\\\"output_mode\\\\\"\\\\n    \\],\\\\n    \\\\\"message\\\\\": \\\\\"Invalid option: expected one of \\\\\\\\\\\\\"content\\\\\\\\\\\\\"\\|\\\\\\\\\\\\\"files_with_matches\\\\\\\\\\\\\"\\|\\\\\\\\\\\\\"count\\\\\\\\\\\\\"\\\\\"\\\\n  \\}\\\\n\\]</tool_use_error>\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"<tool_use_error>head_limit must be a whole number of 0 or more, got -1\\. Pass 0 for unlimited\\.</tool_use_error>\"|\\[(?:\\{\"type\":\"text\",\"text\":\"<tool_use_error>head_limit must be a whole number of 0 or more, got -1\\. Pass 0 for unlimited\\.</tool_use_error>\"\\}|\\{\"text\":\"<tool_use_error>head_limit must be a whole number of 0 or more, got -1\\. Pass 0 for unlimited\\.</tool_use_error>\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_2_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"<tool_use_error>offset must be a whole number of 0 or more, got -1\\.</tool_use_error>\"|\\[(?:\\{\"type\":\"text\",\"text\":\"<tool_use_error>offset must be a whole number of 0 or more, got -1\\.</tool_use_error>\"\\}|\\{\"text\":\"<tool_use_error>offset must be a whole number of 0 or more, got -1\\.</tool_use_error>\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 4,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_3_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"<tool_use_error>InputValidationError: Grep failed due to the following issue:\\\\nThe required parameter `pattern` is missing</tool_use_error>\"|\\[(?:\\{\"type\":\"text\",\"text\":\"<tool_use_error>InputValidationError: Grep failed due to the following issue:\\\\nThe required parameter `pattern` is missing</tool_use_error>\"\\}|\\{\"text\":\"<tool_use_error>InputValidationError: Grep failed due to the following issue:\\\\nThe required parameter `pattern` is missing</tool_use_error>\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 5,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_4_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Search failed — ripgrep rejected the pattern, glob, or file type without searching:\\\\nrg: unrecognized file type: nope\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Search failed — ripgrep rejected the pattern, glob, or file type without searching:\\\\nrg: unrecognized file type: nope\"\\}|\\{\"text\":\"Search failed — ripgrep rejected the pattern, glob, or file type without searching:\\\\nrg: unrecognized file type: nope\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 6,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_5_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Search failed — ripgrep rejected the pattern, glob, or file type without searching:\\\\nrg: regex parse error:\\\\n    \\(\\?:\\(foo\\)\\\\n    \\^\\\\nerror: unclosed group\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Search failed — ripgrep rejected the pattern, glob, or file type without searching:\\\\nrg: regex parse error:\\\\n    \\(\\?:\\(foo\\)\\\\n    \\^\\\\nerror: unclosed group\"\\}|\\{\"text\":\"Search failed — ripgrep rejected the pattern, glob, or file type without searching:\\\\nrg: regex parse error:\\\\n    \\(\\?:\\(foo\\)\\\\n    \\^\\\\nerror: unclosed group\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 7,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_6_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Path does not exist: nonexistent\\. Note: your current working directory is [^\"]+\\.\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Path does not exist: nonexistent\\. Note: your current working directory is [^\"]+\\.\"\\}|\\{\"text\":\"Path does not exist: nonexistent\\. Note: your current working directory is [^\"]+\\.\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

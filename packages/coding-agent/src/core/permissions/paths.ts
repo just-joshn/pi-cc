@@ -170,7 +170,7 @@ function anchored(pattern: string, base: PathRuleBase): string {
 	if (pattern.startsWith("~/")) return `${base.home}/${pattern.slice(2)}`;
 	if (pattern.startsWith("/")) return `${base.cwd}${pattern}`;
 	if (pattern.startsWith("./")) return `${base.cwd}/${pattern.slice(2)}`;
-	return pattern;
+	return pattern.includes("/") ? `${base.cwd}/${pattern}` : pattern;
 }
 
 /** Whether a path rule's pattern covers the path, tried against the path as written and as it really lands. */

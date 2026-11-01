@@ -1,0 +1,154 @@
+{
+	"id": "grepglob/grep-files-default-newest-and-singular",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"src/a.ts": "export const alpha = 1;\nconst Needle = 2;\n",
+		"src/b.ts": "export const alpha = 2;\n// needle here\n",
+		"src/sub/c.ts": "alpha in c\n",
+		"src/sub/deep/d.ts": "alpha in d\n",
+		"docs/readme.md": "# Readme\nalpha docs\nneedle docs\n",
+		".hidden/h.txt": "alpha hidden\n",
+		".secret.ts": "alpha secret\n",
+		"ignored/x.ts": "alpha ignored\n",
+		"app.log": "alpha log\n",
+		"node_modules/m.js": "alpha module\n",
+		".gitignore": "ignored/\n*.log\n",
+		".git/HEAD": "ref: refs/heads/main\n",
+		".git/config": "alpha gitconfig\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch -t 202001010000 'src/a.ts' && touch -t 202101010000 'src/sub/c.ts' && touch -t 202201010000 'src/sub/deep/d.ts' && touch -t 202301010000 'src/b.ts' && touch -t 202401010000 'docs/readme.md' && touch -t 202501010000 '.hidden/h.txt' && touch -t 202601010000 '.secret.ts' && touch -t 202701010000 'node_modules/m.js' && printf SEARCH_FIXTURE_PREPARED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"output_mode": "files_with_matches"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "alpha",
+						"path": "src/a.ts"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "zzznomatch"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 6
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIXTURE_PREPARED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIXTURE_PREPARED\"\\}|\\{\"text\":\"SEARCH_FIXTURE_PREPARED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 8 files\\\\nnode_modules/m\\.js\\\\n\\.secret\\.ts\\\\n\\.hidden/h\\.txt\\\\ndocs/readme\\.md\\\\nsrc/b\\.ts\\\\nsrc/sub/deep/d\\.ts\\\\nsrc/sub/c\\.ts\\\\nsrc/a\\.ts\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 8 files\\\\nnode_modules/m\\.js\\\\n\\.secret\\.ts\\\\n\\.hidden/h\\.txt\\\\ndocs/readme\\.md\\\\nsrc/b\\.ts\\\\nsrc/sub/deep/d\\.ts\\\\nsrc/sub/c\\.ts\\\\nsrc/a\\.ts\"\\}|\\{\"text\":\"Found 8 files\\\\nnode_modules/m\\.js\\\\n\\.secret\\.ts\\\\n\\.hidden/h\\.txt\\\\ndocs/readme\\.md\\\\nsrc/b\\.ts\\\\nsrc/sub/deep/d\\.ts\\\\nsrc/sub/c\\.ts\\\\nsrc/a\\.ts\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_2_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 8 files\\\\nnode_modules/m\\.js\\\\n\\.secret\\.ts\\\\n\\.hidden/h\\.txt\\\\ndocs/readme\\.md\\\\nsrc/b\\.ts\\\\nsrc/sub/deep/d\\.ts\\\\nsrc/sub/c\\.ts\\\\nsrc/a\\.ts\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 8 files\\\\nnode_modules/m\\.js\\\\n\\.secret\\.ts\\\\n\\.hidden/h\\.txt\\\\ndocs/readme\\.md\\\\nsrc/b\\.ts\\\\nsrc/sub/deep/d\\.ts\\\\nsrc/sub/c\\.ts\\\\nsrc/a\\.ts\"\\}|\\{\"text\":\"Found 8 files\\\\nnode_modules/m\\.js\\\\n\\.secret\\.ts\\\\n\\.hidden/h\\.txt\\\\ndocs/readme\\.md\\\\nsrc/b\\.ts\\\\nsrc/sub/deep/d\\.ts\\\\nsrc/sub/c\\.ts\\\\nsrc/a\\.ts\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 4,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_3_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 1 file\\\\nsrc/a\\.ts\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 1 file\\\\nsrc/a\\.ts\"\\}|\\{\"text\":\"Found 1 file\\\\nsrc/a\\.ts\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 5,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_4_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"No files found\"|\\[(?:\\{\"type\":\"text\",\"text\":\"No files found\"\\}|\\{\"text\":\"No files found\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

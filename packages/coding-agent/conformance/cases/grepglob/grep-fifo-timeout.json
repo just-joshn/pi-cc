@@ -1,0 +1,102 @@
+{
+	"id": "grepglob/grep-fifo-timeout",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "mkfifo search-fifo && printf SEARCH_FIXTURE_PREPARED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "search-fifo"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "unlink search-fifo && printf SEARCH_FIFO_REMOVED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIXTURE_PREPARED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIXTURE_PREPARED\"\\}|\\{\"text\":\"SEARCH_FIXTURE_PREPARED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Ripgrep search timed out after 20 seconds\\. The search may have matched files but did not complete in time\\. Try searching a more specific path or pattern\\.\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Ripgrep search timed out after 20 seconds\\. The search may have matched files but did not complete in time\\. Try searching a more specific path or pattern\\.\"\\}|\\{\"text\":\"Ripgrep search timed out after 20 seconds\\. The search may have matched files but did not complete in time\\. Try searching a more specific path or pattern\\.\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_2_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIFO_REMOVED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIFO_REMOVED\"\\}|\\{\"text\":\"SEARCH_FIFO_REMOVED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

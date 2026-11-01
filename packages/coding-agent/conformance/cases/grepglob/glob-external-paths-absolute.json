@@ -1,0 +1,66 @@
+{
+	"id": "grepglob/glob-external-paths-absolute",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"inside/seed.txt": "inside\n",
+		"outside/only.txt": "outside\n"
+	},
+	"cwd": "inside",
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Glob",
+					"input": {
+						"pattern": "*.txt",
+						"path": "../outside"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"/[^\"]+/workspace/outside/only\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"/[^\"]+/workspace/outside/only\\.txt\"\\}|\\{\"text\":\"/[^\"]+/workspace/outside/only\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

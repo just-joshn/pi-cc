@@ -1,0 +1,310 @@
+{
+	"id": "grepglob/grep-files-pagination",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"many/f001.txt": "needle 1\n",
+		"many/f002.txt": "needle 2\n",
+		"many/f003.txt": "needle 3\n",
+		"many/f004.txt": "needle 4\n",
+		"many/f005.txt": "needle 5\n",
+		"many/f006.txt": "needle 6\n",
+		"many/f007.txt": "needle 7\n",
+		"many/f008.txt": "needle 8\n",
+		"many/f009.txt": "needle 9\n",
+		"many/f010.txt": "needle 10\n",
+		"many/f011.txt": "needle 11\n",
+		"many/f012.txt": "needle 12\n",
+		"many/f013.txt": "needle 13\n",
+		"many/f014.txt": "needle 14\n",
+		"many/f015.txt": "needle 15\n",
+		"many/f016.txt": "needle 16\n",
+		"many/f017.txt": "needle 17\n",
+		"many/f018.txt": "needle 18\n",
+		"many/f019.txt": "needle 19\n",
+		"many/f020.txt": "needle 20\n",
+		"many/f021.txt": "needle 21\n",
+		"many/f022.txt": "needle 22\n",
+		"many/f023.txt": "needle 23\n",
+		"many/f024.txt": "needle 24\n",
+		"many/f025.txt": "needle 25\n",
+		"many/f026.txt": "needle 26\n",
+		"many/f027.txt": "needle 27\n",
+		"many/f028.txt": "needle 28\n",
+		"many/f029.txt": "needle 29\n",
+		"many/f030.txt": "needle 30\n",
+		"many/f031.txt": "needle 31\n",
+		"many/f032.txt": "needle 32\n",
+		"many/f033.txt": "needle 33\n",
+		"many/f034.txt": "needle 34\n",
+		"many/f035.txt": "needle 35\n",
+		"many/f036.txt": "needle 36\n",
+		"many/f037.txt": "needle 37\n",
+		"many/f038.txt": "needle 38\n",
+		"many/f039.txt": "needle 39\n",
+		"many/f040.txt": "needle 40\n",
+		"many/f041.txt": "needle 41\n",
+		"many/f042.txt": "needle 42\n",
+		"many/f043.txt": "needle 43\n",
+		"many/f044.txt": "needle 44\n",
+		"many/f045.txt": "needle 45\n",
+		"many/f046.txt": "needle 46\n",
+		"many/f047.txt": "needle 47\n",
+		"many/f048.txt": "needle 48\n",
+		"many/f049.txt": "needle 49\n",
+		"many/f050.txt": "needle 50\n",
+		"many/f051.txt": "needle 51\n",
+		"many/f052.txt": "needle 52\n",
+		"many/f053.txt": "needle 53\n",
+		"many/f054.txt": "needle 54\n",
+		"many/f055.txt": "needle 55\n",
+		"many/f056.txt": "needle 56\n",
+		"many/f057.txt": "needle 57\n",
+		"many/f058.txt": "needle 58\n",
+		"many/f059.txt": "needle 59\n",
+		"many/f060.txt": "needle 60\n",
+		"many/f061.txt": "needle 61\n",
+		"many/f062.txt": "needle 62\n",
+		"many/f063.txt": "needle 63\n",
+		"many/f064.txt": "needle 64\n",
+		"many/f065.txt": "needle 65\n",
+		"many/f066.txt": "needle 66\n",
+		"many/f067.txt": "needle 67\n",
+		"many/f068.txt": "needle 68\n",
+		"many/f069.txt": "needle 69\n",
+		"many/f070.txt": "needle 70\n",
+		"many/f071.txt": "needle 71\n",
+		"many/f072.txt": "needle 72\n",
+		"many/f073.txt": "needle 73\n",
+		"many/f074.txt": "needle 74\n",
+		"many/f075.txt": "needle 75\n",
+		"many/f076.txt": "needle 76\n",
+		"many/f077.txt": "needle 77\n",
+		"many/f078.txt": "needle 78\n",
+		"many/f079.txt": "needle 79\n",
+		"many/f080.txt": "needle 80\n",
+		"many/f081.txt": "needle 81\n",
+		"many/f082.txt": "needle 82\n",
+		"many/f083.txt": "needle 83\n",
+		"many/f084.txt": "needle 84\n",
+		"many/f085.txt": "needle 85\n",
+		"many/f086.txt": "needle 86\n",
+		"many/f087.txt": "needle 87\n",
+		"many/f088.txt": "needle 88\n",
+		"many/f089.txt": "needle 89\n",
+		"many/f090.txt": "needle 90\n",
+		"many/f091.txt": "needle 91\n",
+		"many/f092.txt": "needle 92\n",
+		"many/f093.txt": "needle 93\n",
+		"many/f094.txt": "needle 94\n",
+		"many/f095.txt": "needle 95\n",
+		"many/f096.txt": "needle 96\n",
+		"many/f097.txt": "needle 97\n",
+		"many/f098.txt": "needle 98\n",
+		"many/f099.txt": "needle 99\n",
+		"many/f100.txt": "needle 100\n",
+		"many/f101.txt": "needle 101\n",
+		"many/f102.txt": "needle 102\n",
+		"many/f103.txt": "needle 103\n",
+		"many/f104.txt": "needle 104\n",
+		"many/f105.txt": "needle 105\n",
+		"many/f106.txt": "needle 106\n",
+		"many/f107.txt": "needle 107\n",
+		"many/f108.txt": "needle 108\n",
+		"many/f109.txt": "needle 109\n",
+		"many/f110.txt": "needle 110\n",
+		"many/f111.txt": "needle 111\n",
+		"many/f112.txt": "needle 112\n",
+		"many/f113.txt": "needle 113\n",
+		"many/f114.txt": "needle 114\n",
+		"many/f115.txt": "needle 115\n",
+		"many/f116.txt": "needle 116\n",
+		"many/f117.txt": "needle 117\n",
+		"many/f118.txt": "needle 118\n",
+		"many/f119.txt": "needle 119\n",
+		"many/f120.txt": "needle 120\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch -t 202501010001.59 'many/f001.txt' && touch -t 202501010001.58 'many/f002.txt' && touch -t 202501010001.57 'many/f003.txt' && touch -t 202501010001.56 'many/f004.txt' && touch -t 202501010001.55 'many/f005.txt' && touch -t 202501010001.54 'many/f006.txt' && touch -t 202501010001.53 'many/f007.txt' && touch -t 202501010001.52 'many/f008.txt' && touch -t 202501010001.51 'many/f009.txt' && touch -t 202501010001.50 'many/f010.txt' && touch -t 202501010001.49 'many/f011.txt' && touch -t 202501010001.48 'many/f012.txt' && touch -t 202501010001.47 'many/f013.txt' && touch -t 202501010001.46 'many/f014.txt' && touch -t 202501010001.45 'many/f015.txt' && touch -t 202501010001.44 'many/f016.txt' && touch -t 202501010001.43 'many/f017.txt' && touch -t 202501010001.42 'many/f018.txt' && touch -t 202501010001.41 'many/f019.txt' && touch -t 202501010001.40 'many/f020.txt' && touch -t 202501010001.39 'many/f021.txt' && touch -t 202501010001.38 'many/f022.txt' && touch -t 202501010001.37 'many/f023.txt' && touch -t 202501010001.36 'many/f024.txt' && touch -t 202501010001.35 'many/f025.txt' && touch -t 202501010001.34 'many/f026.txt' && touch -t 202501010001.33 'many/f027.txt' && touch -t 202501010001.32 'many/f028.txt' && touch -t 202501010001.31 'many/f029.txt' && touch -t 202501010001.30 'many/f030.txt' && touch -t 202501010001.29 'many/f031.txt' && touch -t 202501010001.28 'many/f032.txt' && touch -t 202501010001.27 'many/f033.txt' && touch -t 202501010001.26 'many/f034.txt' && touch -t 202501010001.25 'many/f035.txt' && touch -t 202501010001.24 'many/f036.txt' && touch -t 202501010001.23 'many/f037.txt' && touch -t 202501010001.22 'many/f038.txt' && touch -t 202501010001.21 'many/f039.txt' && touch -t 202501010001.20 'many/f040.txt' && touch -t 202501010001.19 'many/f041.txt' && touch -t 202501010001.18 'many/f042.txt' && touch -t 202501010001.17 'many/f043.txt' && touch -t 202501010001.16 'many/f044.txt' && touch -t 202501010001.15 'many/f045.txt' && touch -t 202501010001.14 'many/f046.txt' && touch -t 202501010001.13 'many/f047.txt' && touch -t 202501010001.12 'many/f048.txt' && touch -t 202501010001.11 'many/f049.txt' && touch -t 202501010001.10 'many/f050.txt' && touch -t 202501010001.09 'many/f051.txt' && touch -t 202501010001.08 'many/f052.txt' && touch -t 202501010001.07 'many/f053.txt' && touch -t 202501010001.06 'many/f054.txt' && touch -t 202501010001.05 'many/f055.txt' && touch -t 202501010001.04 'many/f056.txt' && touch -t 202501010001.03 'many/f057.txt' && touch -t 202501010001.02 'many/f058.txt' && touch -t 202501010001.01 'many/f059.txt' && touch -t 202501010001.00 'many/f060.txt' && touch -t 202501010000.59 'many/f061.txt' && touch -t 202501010000.58 'many/f062.txt' && touch -t 202501010000.57 'many/f063.txt' && touch -t 202501010000.56 'many/f064.txt' && touch -t 202501010000.55 'many/f065.txt' && touch -t 202501010000.54 'many/f066.txt' && touch -t 202501010000.53 'many/f067.txt' && touch -t 202501010000.52 'many/f068.txt' && touch -t 202501010000.51 'many/f069.txt' && touch -t 202501010000.50 'many/f070.txt' && touch -t 202501010000.49 'many/f071.txt' && touch -t 202501010000.48 'many/f072.txt' && touch -t 202501010000.47 'many/f073.txt' && touch -t 202501010000.46 'many/f074.txt' && touch -t 202501010000.45 'many/f075.txt' && touch -t 202501010000.44 'many/f076.txt' && touch -t 202501010000.43 'many/f077.txt' && touch -t 202501010000.42 'many/f078.txt' && touch -t 202501010000.41 'many/f079.txt' && touch -t 202501010000.40 'many/f080.txt' && touch -t 202501010000.39 'many/f081.txt' && touch -t 202501010000.38 'many/f082.txt' && touch -t 202501010000.37 'many/f083.txt' && touch -t 202501010000.36 'many/f084.txt' && touch -t 202501010000.35 'many/f085.txt' && touch -t 202501010000.34 'many/f086.txt' && touch -t 202501010000.33 'many/f087.txt' && touch -t 202501010000.32 'many/f088.txt' && touch -t 202501010000.31 'many/f089.txt' && touch -t 202501010000.30 'many/f090.txt' && touch -t 202501010000.29 'many/f091.txt' && touch -t 202501010000.28 'many/f092.txt' && touch -t 202501010000.27 'many/f093.txt' && touch -t 202501010000.26 'many/f094.txt' && touch -t 202501010000.25 'many/f095.txt' && touch -t 202501010000.24 'many/f096.txt' && touch -t 202501010000.23 'many/f097.txt' && touch -t 202501010000.22 'many/f098.txt' && touch -t 202501010000.21 'many/f099.txt' && touch -t 202501010000.20 'many/f100.txt' && touch -t 202501010000.19 'many/f101.txt' && touch -t 202501010000.18 'many/f102.txt' && touch -t 202501010000.17 'many/f103.txt' && touch -t 202501010000.16 'many/f104.txt' && touch -t 202501010000.15 'many/f105.txt' && touch -t 202501010000.14 'many/f106.txt' && touch -t 202501010000.13 'many/f107.txt' && touch -t 202501010000.12 'many/f108.txt' && touch -t 202501010000.11 'many/f109.txt' && touch -t 202501010000.10 'many/f110.txt' && touch -t 202501010000.09 'many/f111.txt' && touch -t 202501010000.08 'many/f112.txt' && touch -t 202501010000.07 'many/f113.txt' && touch -t 202501010000.06 'many/f114.txt' && touch -t 202501010000.05 'many/f115.txt' && touch -t 202501010000.04 'many/f116.txt' && touch -t 202501010000.03 'many/f117.txt' && touch -t 202501010000.02 'many/f118.txt' && touch -t 202501010000.01 'many/f119.txt' && touch -t 202501010000.00 'many/f120.txt' && printf SEARCH_FIXTURE_PREPARED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "many",
+						"head_limit": 5
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "many",
+						"head_limit": 5,
+						"offset": 3
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "many",
+						"head_limit": 0
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "many",
+						"offset": 118
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "many",
+						"offset": 500
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "many",
+						"head_limit": "3"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 8
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIXTURE_PREPARED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIXTURE_PREPARED\"\\}|\\{\"text\":\"SEARCH_FIXTURE_PREPARED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 5 files limit: 5\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 5 files limit: 5\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\"\\}|\\{\"text\":\"Found 5 files limit: 5\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_2_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 5 files limit: 5, offset: 3\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\\\\nmany/f006\\.txt\\\\nmany/f007\\.txt\\\\nmany/f008\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 5 files limit: 5, offset: 3\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\\\\nmany/f006\\.txt\\\\nmany/f007\\.txt\\\\nmany/f008\\.txt\"\\}|\\{\"text\":\"Found 5 files limit: 5, offset: 3\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\\\\nmany/f006\\.txt\\\\nmany/f007\\.txt\\\\nmany/f008\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 4,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_3_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 120 files\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\\\\nmany/f006\\.txt\\\\nmany/f007\\.txt\\\\nmany/f008\\.txt\\\\nmany/f009\\.txt\\\\nmany/f010\\.txt\\\\nmany/f011\\.txt\\\\nmany/f012\\.txt\\\\nmany/f013\\.txt\\\\nmany/f014\\.txt\\\\nmany/f015\\.txt\\\\nmany/f016\\.txt\\\\nmany/f017\\.txt\\\\nmany/f018\\.txt\\\\nmany/f019\\.txt\\\\nmany/f020\\.txt\\\\nmany/f021\\.txt\\\\nmany/f022\\.txt\\\\nmany/f023\\.txt\\\\nmany/f024\\.txt\\\\nmany/f025\\.txt\\\\nmany/f026\\.txt\\\\nmany/f027\\.txt\\\\nmany/f028\\.txt\\\\nmany/f029\\.txt\\\\nmany/f030\\.txt\\\\nmany/f031\\.txt\\\\nmany/f032\\.txt\\\\nmany/f033\\.txt\\\\nmany/f034\\.txt\\\\nmany/f035\\.txt\\\\nmany/f036\\.txt\\\\nmany/f037\\.txt\\\\nmany/f038\\.txt\\\\nmany/f039\\.txt\\\\nmany/f040\\.txt\\\\nmany/f041\\.txt\\\\nmany/f042\\.txt\\\\nmany/f043\\.txt\\\\nmany/f044\\.txt\\\\nmany/f045\\.txt\\\\nmany/f046\\.txt\\\\nmany/f047\\.txt\\\\nmany/f048\\.txt\\\\nmany/f049\\.txt\\\\nmany/f050\\.txt\\\\nmany/f051\\.txt\\\\nmany/f052\\.txt\\\\nmany/f053\\.txt\\\\nmany/f054\\.txt\\\\nmany/f055\\.txt\\\\nmany/f056\\.txt\\\\nmany/f057\\.txt\\\\nmany/f058\\.txt\\\\nmany/f059\\.txt\\\\nmany/f060\\.txt\\\\nmany/f061\\.txt\\\\nmany/f062\\.txt\\\\nmany/f063\\.txt\\\\nmany/f064\\.txt\\\\nmany/f065\\.txt\\\\nmany/f066\\.txt\\\\nmany/f067\\.txt\\\\nmany/f068\\.txt\\\\nmany/f069\\.txt\\\\nmany/f070\\.txt\\\\nmany/f071\\.txt\\\\nmany/f072\\.txt\\\\nmany/f073\\.txt\\\\nmany/f074\\.txt\\\\nmany/f075\\.txt\\\\nmany/f076\\.txt\\\\nmany/f077\\.txt\\\\nmany/f078\\.txt\\\\nmany/f079\\.txt\\\\nmany/f080\\.txt\\\\nmany/f081\\.txt\\\\nmany/f082\\.txt\\\\nmany/f083\\.txt\\\\nmany/f084\\.txt\\\\nmany/f085\\.txt\\\\nmany/f086\\.txt\\\\nmany/f087\\.txt\\\\nmany/f088\\.txt\\\\nmany/f089\\.txt\\\\nmany/f090\\.txt\\\\nmany/f091\\.txt\\\\nmany/f092\\.txt\\\\nmany/f093\\.txt\\\\nmany/f094\\.txt\\\\nmany/f095\\.txt\\\\nmany/f096\\.txt\\\\nmany/f097\\.txt\\\\nmany/f098\\.txt\\\\nmany/f099\\.txt\\\\nmany/f100\\.txt\\\\nmany/f101\\.txt\\\\nmany/f102\\.txt\\\\nmany/f103\\.txt\\\\nmany/f104\\.txt\\\\nmany/f105\\.txt\\\\nmany/f106\\.txt\\\\nmany/f107\\.txt\\\\nmany/f108\\.txt\\\\nmany/f109\\.txt\\\\nmany/f110\\.txt\\\\nmany/f111\\.txt\\\\nmany/f112\\.txt\\\\nmany/f113\\.txt\\\\nmany/f114\\.txt\\\\nmany/f115\\.txt\\\\nmany/f116\\.txt\\\\nmany/f117\\.txt\\\\nmany/f118\\.txt\\\\nmany/f119\\.txt\\\\nmany/f120\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 120 files\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\\\\nmany/f006\\.txt\\\\nmany/f007\\.txt\\\\nmany/f008\\.txt\\\\nmany/f009\\.txt\\\\nmany/f010\\.txt\\\\nmany/f011\\.txt\\\\nmany/f012\\.txt\\\\nmany/f013\\.txt\\\\nmany/f014\\.txt\\\\nmany/f015\\.txt\\\\nmany/f016\\.txt\\\\nmany/f017\\.txt\\\\nmany/f018\\.txt\\\\nmany/f019\\.txt\\\\nmany/f020\\.txt\\\\nmany/f021\\.txt\\\\nmany/f022\\.txt\\\\nmany/f023\\.txt\\\\nmany/f024\\.txt\\\\nmany/f025\\.txt\\\\nmany/f026\\.txt\\\\nmany/f027\\.txt\\\\nmany/f028\\.txt\\\\nmany/f029\\.txt\\\\nmany/f030\\.txt\\\\nmany/f031\\.txt\\\\nmany/f032\\.txt\\\\nmany/f033\\.txt\\\\nmany/f034\\.txt\\\\nmany/f035\\.txt\\\\nmany/f036\\.txt\\\\nmany/f037\\.txt\\\\nmany/f038\\.txt\\\\nmany/f039\\.txt\\\\nmany/f040\\.txt\\\\nmany/f041\\.txt\\\\nmany/f042\\.txt\\\\nmany/f043\\.txt\\\\nmany/f044\\.txt\\\\nmany/f045\\.txt\\\\nmany/f046\\.txt\\\\nmany/f047\\.txt\\\\nmany/f048\\.txt\\\\nmany/f049\\.txt\\\\nmany/f050\\.txt\\\\nmany/f051\\.txt\\\\nmany/f052\\.txt\\\\nmany/f053\\.txt\\\\nmany/f054\\.txt\\\\nmany/f055\\.txt\\\\nmany/f056\\.txt\\\\nmany/f057\\.txt\\\\nmany/f058\\.txt\\\\nmany/f059\\.txt\\\\nmany/f060\\.txt\\\\nmany/f061\\.txt\\\\nmany/f062\\.txt\\\\nmany/f063\\.txt\\\\nmany/f064\\.txt\\\\nmany/f065\\.txt\\\\nmany/f066\\.txt\\\\nmany/f067\\.txt\\\\nmany/f068\\.txt\\\\nmany/f069\\.txt\\\\nmany/f070\\.txt\\\\nmany/f071\\.txt\\\\nmany/f072\\.txt\\\\nmany/f073\\.txt\\\\nmany/f074\\.txt\\\\nmany/f075\\.txt\\\\nmany/f076\\.txt\\\\nmany/f077\\.txt\\\\nmany/f078\\.txt\\\\nmany/f079\\.txt\\\\nmany/f080\\.txt\\\\nmany/f081\\.txt\\\\nmany/f082\\.txt\\\\nmany/f083\\.txt\\\\nmany/f084\\.txt\\\\nmany/f085\\.txt\\\\nmany/f086\\.txt\\\\nmany/f087\\.txt\\\\nmany/f088\\.txt\\\\nmany/f089\\.txt\\\\nmany/f090\\.txt\\\\nmany/f091\\.txt\\\\nmany/f092\\.txt\\\\nmany/f093\\.txt\\\\nmany/f094\\.txt\\\\nmany/f095\\.txt\\\\nmany/f096\\.txt\\\\nmany/f097\\.txt\\\\nmany/f098\\.txt\\\\nmany/f099\\.txt\\\\nmany/f100\\.txt\\\\nmany/f101\\.txt\\\\nmany/f102\\.txt\\\\nmany/f103\\.txt\\\\nmany/f104\\.txt\\\\nmany/f105\\.txt\\\\nmany/f106\\.txt\\\\nmany/f107\\.txt\\\\nmany/f108\\.txt\\\\nmany/f109\\.txt\\\\nmany/f110\\.txt\\\\nmany/f111\\.txt\\\\nmany/f112\\.txt\\\\nmany/f113\\.txt\\\\nmany/f114\\.txt\\\\nmany/f115\\.txt\\\\nmany/f116\\.txt\\\\nmany/f117\\.txt\\\\nmany/f118\\.txt\\\\nmany/f119\\.txt\\\\nmany/f120\\.txt\"\\}|\\{\"text\":\"Found 120 files\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\\\\nmany/f004\\.txt\\\\nmany/f005\\.txt\\\\nmany/f006\\.txt\\\\nmany/f007\\.txt\\\\nmany/f008\\.txt\\\\nmany/f009\\.txt\\\\nmany/f010\\.txt\\\\nmany/f011\\.txt\\\\nmany/f012\\.txt\\\\nmany/f013\\.txt\\\\nmany/f014\\.txt\\\\nmany/f015\\.txt\\\\nmany/f016\\.txt\\\\nmany/f017\\.txt\\\\nmany/f018\\.txt\\\\nmany/f019\\.txt\\\\nmany/f020\\.txt\\\\nmany/f021\\.txt\\\\nmany/f022\\.txt\\\\nmany/f023\\.txt\\\\nmany/f024\\.txt\\\\nmany/f025\\.txt\\\\nmany/f026\\.txt\\\\nmany/f027\\.txt\\\\nmany/f028\\.txt\\\\nmany/f029\\.txt\\\\nmany/f030\\.txt\\\\nmany/f031\\.txt\\\\nmany/f032\\.txt\\\\nmany/f033\\.txt\\\\nmany/f034\\.txt\\\\nmany/f035\\.txt\\\\nmany/f036\\.txt\\\\nmany/f037\\.txt\\\\nmany/f038\\.txt\\\\nmany/f039\\.txt\\\\nmany/f040\\.txt\\\\nmany/f041\\.txt\\\\nmany/f042\\.txt\\\\nmany/f043\\.txt\\\\nmany/f044\\.txt\\\\nmany/f045\\.txt\\\\nmany/f046\\.txt\\\\nmany/f047\\.txt\\\\nmany/f048\\.txt\\\\nmany/f049\\.txt\\\\nmany/f050\\.txt\\\\nmany/f051\\.txt\\\\nmany/f052\\.txt\\\\nmany/f053\\.txt\\\\nmany/f054\\.txt\\\\nmany/f055\\.txt\\\\nmany/f056\\.txt\\\\nmany/f057\\.txt\\\\nmany/f058\\.txt\\\\nmany/f059\\.txt\\\\nmany/f060\\.txt\\\\nmany/f061\\.txt\\\\nmany/f062\\.txt\\\\nmany/f063\\.txt\\\\nmany/f064\\.txt\\\\nmany/f065\\.txt\\\\nmany/f066\\.txt\\\\nmany/f067\\.txt\\\\nmany/f068\\.txt\\\\nmany/f069\\.txt\\\\nmany/f070\\.txt\\\\nmany/f071\\.txt\\\\nmany/f072\\.txt\\\\nmany/f073\\.txt\\\\nmany/f074\\.txt\\\\nmany/f075\\.txt\\\\nmany/f076\\.txt\\\\nmany/f077\\.txt\\\\nmany/f078\\.txt\\\\nmany/f079\\.txt\\\\nmany/f080\\.txt\\\\nmany/f081\\.txt\\\\nmany/f082\\.txt\\\\nmany/f083\\.txt\\\\nmany/f084\\.txt\\\\nmany/f085\\.txt\\\\nmany/f086\\.txt\\\\nmany/f087\\.txt\\\\nmany/f088\\.txt\\\\nmany/f089\\.txt\\\\nmany/f090\\.txt\\\\nmany/f091\\.txt\\\\nmany/f092\\.txt\\\\nmany/f093\\.txt\\\\nmany/f094\\.txt\\\\nmany/f095\\.txt\\\\nmany/f096\\.txt\\\\nmany/f097\\.txt\\\\nmany/f098\\.txt\\\\nmany/f099\\.txt\\\\nmany/f100\\.txt\\\\nmany/f101\\.txt\\\\nmany/f102\\.txt\\\\nmany/f103\\.txt\\\\nmany/f104\\.txt\\\\nmany/f105\\.txt\\\\nmany/f106\\.txt\\\\nmany/f107\\.txt\\\\nmany/f108\\.txt\\\\nmany/f109\\.txt\\\\nmany/f110\\.txt\\\\nmany/f111\\.txt\\\\nmany/f112\\.txt\\\\nmany/f113\\.txt\\\\nmany/f114\\.txt\\\\nmany/f115\\.txt\\\\nmany/f116\\.txt\\\\nmany/f117\\.txt\\\\nmany/f118\\.txt\\\\nmany/f119\\.txt\\\\nmany/f120\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 5,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_4_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 2 files offset: 118\\\\nmany/f119\\.txt\\\\nmany/f120\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 2 files offset: 118\\\\nmany/f119\\.txt\\\\nmany/f120\\.txt\"\\}|\\{\"text\":\"Found 2 files offset: 118\\\\nmany/f119\\.txt\\\\nmany/f120\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 6,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_5_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"No entries at this offset\\. \\[Showing results with pagination = offset: 500\\]\"|\\[(?:\\{\"type\":\"text\",\"text\":\"No entries at this offset\\. \\[Showing results with pagination = offset: 500\\]\"\\}|\\{\"text\":\"No entries at this offset\\. \\[Showing results with pagination = offset: 500\\]\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 7,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_6_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 3 files limit: 3\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 3 files limit: 3\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\"\\}|\\{\"text\":\"Found 3 files limit: 3\\\\nmany/f001\\.txt\\\\nmany/f002\\.txt\\\\nmany/f003\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

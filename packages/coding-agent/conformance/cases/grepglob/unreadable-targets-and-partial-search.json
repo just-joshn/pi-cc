@@ -1,0 +1,263 @@
+{
+	"id": "grepglob/unreadable-targets-and-partial-search",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"locked/z.txt": "needle\n",
+		"ok.txt": "needle\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "chmod 000 locked && printf SEARCH_FIXTURE_PREPARED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Glob",
+					"input": {
+						"pattern": "*",
+						"path": "locked"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "locked"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"path": "locked/z.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "zzznomatch"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "zzznomatch",
+						"output_mode": "content"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "zzznomatch",
+						"output_mode": "count"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"output_mode": "content"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle",
+						"output_mode": "count"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "chmod 755 locked && printf SEARCH_FIXTURE_RESTORED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 12
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIXTURE_PREPARED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIXTURE_PREPARED\"\\}|\\{\"text\":\"SEARCH_FIXTURE_PREPARED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Refusing to search [^\"]+/locked: it could not be opened \\(EACCES\\) — it is unreadable, or is being replaced concurrently\\.\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Refusing to search [^\"]+/locked: it could not be opened \\(EACCES\\) — it is unreadable, or is being replaced concurrently\\.\"\\}|\\{\"text\":\"Refusing to search [^\"]+/locked: it could not be opened \\(EACCES\\) — it is unreadable, or is being replaced concurrently\\.\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_2_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Refusing to search [^\"]+/locked: it could not be opened \\(EACCES\\) — it is unreadable, or is being replaced concurrently\\.\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Refusing to search [^\"]+/locked: it could not be opened \\(EACCES\\) — it is unreadable, or is being replaced concurrently\\.\"\\}|\\{\"text\":\"Refusing to search [^\"]+/locked: it could not be opened \\(EACCES\\) — it is unreadable, or is being replaced concurrently\\.\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 4,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_3_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"EACCES: permission denied, stat '[^\"]+/locked/z\\.txt'\"|\\[(?:\\{\"type\":\"text\",\"text\":\"EACCES: permission denied, stat '[^\"]+/locked/z\\.txt'\"\\}|\\{\"text\":\"EACCES: permission denied, stat '[^\"]+/locked/z\\.txt'\",\"type\":\"text\"\\})\\]))(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 5,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_4_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 1 file\\\\nok\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 1 file\\\\nok\\.txt\"\\}|\\{\"text\":\"Found 1 file\\\\nok\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 6,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_5_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"No files found\"|\\[(?:\\{\"type\":\"text\",\"text\":\"No files found\"\\}|\\{\"text\":\"No files found\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 7,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_6_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"No matches found\"|\\[(?:\\{\"type\":\"text\",\"text\":\"No matches found\"\\}|\\{\"text\":\"No matches found\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 8,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_7_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"No matches found\\\\n\\\\nFound 0 total occurrences across 0 files\\.\"|\\[(?:\\{\"type\":\"text\",\"text\":\"No matches found\\\\n\\\\nFound 0 total occurrences across 0 files\\.\"\\}|\\{\"text\":\"No matches found\\\\n\\\\nFound 0 total occurrences across 0 files\\.\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 9,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_8_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"ok\\.txt:1:needle\"|\\[(?:\\{\"type\":\"text\",\"text\":\"ok\\.txt:1:needle\"\\}|\\{\"text\":\"ok\\.txt:1:needle\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 10,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_9_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"ok\\.txt:1\\\\n\\\\nFound 1 total occurrence across 1 file\\.\"|\\[(?:\\{\"type\":\"text\",\"text\":\"ok\\.txt:1\\\\n\\\\nFound 1 total occurrence across 1 file\\.\"\\}|\\{\"text\":\"ok\\.txt:1\\\\n\\\\nFound 1 total occurrence across 1 file\\.\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 11,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_10_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIXTURE_RESTORED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIXTURE_RESTORED\"\\}|\\{\"text\":\"SEARCH_FIXTURE_RESTORED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}
