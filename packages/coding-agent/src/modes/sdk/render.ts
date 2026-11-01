@@ -7,6 +7,8 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent } from "../../core/agent-session.ts";
+import { REJECTED_TOOL_TEXT } from "../../core/permissions/prompt.ts";
+import { ccToolUseResult } from "../../core/tools/cc-result.ts";
 import { declaredToolName, modelCallOf } from "../../core/tools/cc-surface.ts";
 import type {
 	AssistantFrame,
@@ -435,7 +437,7 @@ export class FrameRenderer {
 		return {
 			...frame,
 			message: { role: "user", content: [block] },
-			tool_use_result: toolUseResult(call, shown, message.isError),
+			tool_use_result: ccToolUseResult(call?.modelName, call?.modelInput ?? {}, shown, message.isError),
 		};
 	}
 }
@@ -459,9 +461,6 @@ function abortedMessageDelta(usage: MessageUsage): Json {
 	};
 }
 
-const REJECTED_TOOL_TEXT =
-	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
-
 /** Text-only results are one string. A result holding images is an array of blocks in the order the tool produced them. */
 function toolResultContent(message: ToolResultMessage, text: string): string | Json[] {
 	if (!message.content.some((block) => block.type === "image")) return text;
@@ -471,32 +470,4 @@ function toolResultContent(message: ToolResultMessage, text: string): string | J
 				? { type: "image", source: { type: "base64", media_type: block.mimeType, data: block.data } }
 				: { type: "text", text: block.text },
 	);
-}
-
-const NUMBERED_LINE = /^\d+\t/;
-
-/**
- * Claude Code's structured `tool_use_result`. Read and Bash have the measured structure. Every other
- * tool reports its result text, and an error reports `Error: <text>`.
- */
-function toolUseResult(call: SeenCall | undefined, text: string, isError: boolean): unknown {
-	if (isError) return `Error: ${text}`;
-	if (call?.modelName === "Bash") {
-		return { stdout: text, stderr: "", interrupted: false, isImage: false, noOutputExpected: false };
-	}
-	const lines = text.split("\n");
-	if (call?.modelName === "Read" && lines.every((line) => NUMBERED_LINE.test(line))) {
-		const offset = typeof call.modelInput.offset === "number" ? call.modelInput.offset : 1;
-		return {
-			type: "text",
-			file: {
-				filePath: String(call.modelInput.file_path ?? ""),
-				content: lines.map((line) => line.replace(NUMBERED_LINE, "")).join("\n"),
-				numLines: lines.length,
-				startLine: offset,
-				totalLines: lines.length,
-			},
-		};
-	}
-	return text;
 }

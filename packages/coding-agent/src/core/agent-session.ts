@@ -13,6 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import {
@@ -125,6 +126,12 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { type BeforeAgentStartTrigger, emitSessionShutdownEvent } from "./extensions/runner.ts";
+import type { HookConfig } from "./hooks/config.ts";
+import { callMatchesRule } from "./hooks/filter.ts";
+import type { HookSessionInfo } from "./hooks/input.ts";
+import { permissionHooksFor } from "./hooks/permission.ts";
+import { SessionHooks } from "./hooks/session.ts";
+import type { HookStreamItem } from "./hooks/stream.ts";
 import { createToolNameMatcher, isMcpToolName } from "./mcp-servers.ts";
 import { ensureAutoMemoryDir } from "./memory/auto-memory.ts";
 import { memoryForFileAccess } from "./memory/discover.ts";
@@ -143,7 +150,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { NestedToolCallRunner } from "./nested-tool-calls.ts";
 import { permissionCallFor } from "./permissions/call.ts";
 import type { PermissionState } from "./permissions/context.ts";
-import { PermissionGate } from "./permissions/gate.ts";
+import { type HookPreference, PermissionGate } from "./permissions/gate.ts";
 import { createUiPrompter } from "./permissions/ui-prompter.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -177,7 +184,7 @@ import {
 } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { isCcLegacyMutationModel } from "./tools/cc-model-family.ts";
-import { piToolNames } from "./tools/cc-surface.ts";
+import { ccToolNameFor, modelCallOf, piToolNames, projectToolCall } from "./tools/cc-surface.ts";
 import { createAllToolDefinitions, createReadState, type ReadState } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, combineUsage, createUsageTotals } from "./usage-totals.ts";
@@ -328,6 +335,10 @@ export interface AgentSessionConfig {
 	 * permission check, as pi's own tools always did.
 	 */
 	permissions?: { state: PermissionState; prompts?: "host" | "none" };
+	/** Claude Code hooks. Absent, no hook runs. */
+	hooks?: HookConfig;
+	/** Writes a hook's terminal sequence. Set only where a terminal is attached. */
+	hookTerminal?: (sequence: string) => void;
 	/** Optional denylist of tool names or patterns. When provided, matching tools are not exposed. */
 	excludedToolNames?: string[];
 	/**
@@ -511,6 +522,15 @@ export class AgentSession {
 	private _allowlistFiltersMcp = false;
 	private _excludedTools?: (name: string) => boolean;
 	private _permissionGate?: PermissionGate;
+	private _hooks?: SessionHooks;
+	/** Hook context that goes in front of the next prompt. */
+	private _promptContext: CustomMessage[] = [];
+	/** A fresh id per user prompt, which hooks report as `prompt_id`. */
+	private _promptId: string | undefined;
+	private _blockedPrompt: { text: string; reason: string } | undefined;
+	private _hookStop: { event: "PostToolUse" | "Stop"; reason: string } | undefined;
+	/** Messages SessionStart hooks added, held until the first prompt carries them. */
+	private _sessionStartMessages: CustomMessage[] = [];
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	/** Prior-read records for the Claude Code Edit and Write tools, one per session. */
 	private readonly _readState: ReadState = createReadState();
@@ -565,12 +585,45 @@ export class AgentSession {
 				config.allowedToolNames.length === 0 || config.allowedToolNames.some((entry) => entry.startsWith("mcp__"));
 		}
 		this._excludedTools = config.excludedToolNames ? createToolNameMatcher(config.excludedToolNames) : undefined;
+		if (config.hooks && !config.hooks.switches.disabled && Object.keys(config.hooks.groups).length > 0) {
+			this._hooks = new SessionHooks(
+				{
+					info: () => this._hookSessionInfo(config.permissions?.state.current().mode ?? "default"),
+					cwd: () => this._cwd,
+					signal: () => this.agent.signal,
+					steer: (message) => this.agent.steer(message),
+					lastAssistantText: () => this.getLastAssistantText() ?? "",
+					...(config.hookTerminal ? { writeTerminal: config.hookTerminal } : {}),
+				},
+				{
+					config: config.hooks,
+					projectDir: config.cwd,
+					env: () => this._hookEnv(),
+					callMatches: (filter, fields) => callMatchesRule(filter, fields, this._cwd),
+				},
+			);
+		}
 		if (config.permissions) {
 			this._permissionGate = new PermissionGate({
 				state: config.permissions.state,
+				...(this._hooks
+					? {
+							hooks: permissionHooksFor(
+								this._hooks.dispatcher,
+								() => this.agent.signal,
+								() => this._cwd,
+							),
+						}
+					: {}),
 				prompts: config.permissions.prompts,
-				prompter: () =>
-					this._extensionRunner.hasUI() ? createUiPrompter(this._extensionRunner.getUIContext()) : undefined,
+				prompter: () => {
+					if (!this._extensionRunner.hasUI()) return undefined;
+					const prompt = createUiPrompter(this._extensionRunner.getUIContext());
+					return (request) => {
+						void this._hooks?.notify("Claude needs your permission", "permission_prompt");
+						return prompt(request);
+					};
+				},
 			});
 		}
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -732,6 +785,7 @@ export class AgentSession {
 		{ toolCall, args }: BeforeToolCallContext,
 		parentToolCallId?: string,
 	): Promise<BeforeToolCallResult | undefined> {
+		if (this._hookStop) return { block: true, reason: this._hookStop.reason, terminate: true };
 		const runner = this._extensionRunner;
 		let extensionResult: BeforeToolCallResult | undefined;
 		if (runner.hasHandlers("tool_call")) {
@@ -750,11 +804,19 @@ export class AgentSession {
 				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 			}
 		}
-		if (extensionResult?.block || !this._permissionGate) {
-			return extensionResult;
-		}
+		if (extensionResult?.block) return extensionResult;
+		const hooked = this._hooks
+			? await this._hooks.preTool(toolCall, args as Record<string, unknown>, modelCallOf(toolCall))
+			: undefined;
+		if (hooked?.block) return { block: true, reason: hooked.block.reason };
+		if (!this._permissionGate) return extensionResult;
 		return (
-			(await this._checkPermission(toolCall.name, toolCall.id, args as Record<string, unknown>)) ?? extensionResult
+			(await this._checkPermission(
+				toolCall.name,
+				toolCall.id,
+				args as Record<string, unknown>,
+				hooked?.preference,
+			)) ?? extensionResult
 		);
 	}
 
@@ -763,17 +825,39 @@ export class AgentSession {
 		piName: string,
 		toolCallId: string,
 		args: Record<string, unknown>,
+		preference?: HookPreference,
 	): Promise<BeforeToolCallResult | undefined> {
 		if (!this._permissionGate || piName === "edit" || piName === "write") return undefined;
-		const outcome = await this._permissionGate.decide(permissionCallFor(piName, args), toolCallId);
-		if (outcome.action === "run") return undefined;
+		const outcome = await this._permissionGate.decide(permissionCallFor(piName, args), toolCallId, preference);
+		if (outcome.action === "run") {
+			if (outcome.updatedInput) this._applyHookInput(piName, args, outcome.updatedInput);
+			return undefined;
+		}
 		return { block: true, reason: outcome.message, ...(outcome.interrupt ? { terminate: true } : {}) };
+	}
+
+	/** A hook's rewritten input, given in the model's field names, replaces the pi arguments in place. */
+	private _applyHookInput(
+		piName: string,
+		args: Record<string, unknown>,
+		input: Readonly<Record<string, unknown>>,
+	): void {
+		const projected = projectToolCall({ name: ccToolNameFor(piName), arguments: { ...input } });
+		if (projected.inputError !== undefined) throw new Error(projected.inputError);
+		for (const key of Object.keys(args)) delete args[key];
+		Object.assign(args, projected.arguments);
 	}
 
 	/** Claude Code validates an Edit or Write before it asks, so the tool asks once its checks have passed. */
 	private async _authorizeMutation(piName: "edit" | "write", path: string): Promise<void> {
 		if (!this._permissionGate) return;
-		const outcome = await this._permissionGate.decide(permissionCallFor(piName, { path }), `${piName}:${path}`);
+		const hooked = this._hooks?.takeMutation(piName, path);
+		const call = permissionCallFor(piName, { path });
+		const outcome = await this._permissionGate.decide(
+			hooked?.input ? { ...call, input: { ...hooked.input, file_path: call.input.file_path } } : call,
+			`${piName}:${path}`,
+			hooked?.preference,
+		);
 		if (outcome.action === "refuse") throw new Error(outcome.message);
 	}
 
@@ -818,18 +902,51 @@ export class AgentSession {
 			...(resizeOptions ? { resizeOptions } : {}),
 		});
 		const memoryBlocks = (hookResult?.isError ?? isError) ? [] : this._memoryForToolCall(toolCall.name, args);
+		const finalIsError = hookResult?.isError ?? isError;
+		const post = await this._runPostToolHooks(toolCall, normalizedContent, finalIsError);
+		const finalContent = post.content ?? normalizedContent;
 
-		if (!hookResult && normalizedContent === content && memoryBlocks.length === 0) {
+		if (
+			!hookResult &&
+			finalContent === content &&
+			memoryBlocks.length === 0 &&
+			post.content === undefined &&
+			post.stop === undefined
+		) {
 			return undefined;
 		}
 
 		// The hook result already dropped structured content that replaced content no longer matches.
 		return {
-			content: [...normalizedContent, ...memoryBlocks],
+			content: [...finalContent, ...memoryBlocks],
 			details: hookResult?.details,
-			structuredContent: hookResult ? hookResult.structuredContent : result.structuredContent,
-			isError: hookResult?.isError ?? isError,
+			structuredContent: hookResult
+				? hookResult.structuredContent
+				: post.content
+					? undefined
+					: result.structuredContent,
+			isError: finalIsError,
 			usage: hookResult?.usage,
+			...(post.stop === undefined ? {} : { terminate: true }),
+		};
+	}
+
+	/** PostToolUse and PostToolUseFailure hooks: they may add text to what the model reads, or stop the run. */
+	private async _runPostToolHooks(
+		toolCall: AfterToolCallContext["toolCall"],
+		content: AfterToolCallContext["result"]["content"],
+		isError: boolean,
+	): Promise<{ content?: AfterToolCallContext["result"]["content"]; stop?: string }> {
+		const hooks = this._hooks;
+		if (!hooks) return {};
+		const text = content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+		const result = await hooks.postTool(toolCall, modelCallOf(toolCall), text, isError);
+		if (result.stop !== undefined) this._hookStop = { event: "PostToolUse", reason: result.stop };
+		if (result.text === text.replace(/\n+$/, "")) return result.stop === undefined ? {} : { stop: result.stop };
+		const kept = content.filter((block) => block.type !== "text");
+		return {
+			content: [{ type: "text", text: result.text }, ...kept],
+			...(result.stop === undefined ? {} : { stop: result.stop }),
 		};
 	}
 
@@ -1031,6 +1148,8 @@ export class AgentSession {
 	private _installAgentBoundaryHooks(): void {
 		const previousFinishTurn = this.agent.finishTurn;
 		this.agent.finishTurn = async (turn, signal) => {
+			if (this._hookStop || (await this._runPostBatchHooks(turn.message, turn.toolResults)))
+				return { action: "end" };
 			this._boundaryDispatchedMessages.add(turn.message);
 			const extensionContinue = await this._dispatchTurnEndBoundary(turn.message, turn.toolResults);
 			const previousDecision = await previousFinishTurn?.(turn, signal);
@@ -1038,6 +1157,34 @@ export class AgentSession {
 			if (extensionContinue || previousDecision?.action === "continue") return { action: "continue" };
 			return undefined;
 		};
+	}
+
+	/** PostToolBatch hooks: one report of every call a model reply made. True when a hook ended the run. */
+	private async _runPostBatchHooks(
+		message: AssistantMessage,
+		toolResults: readonly ToolResultMessage[],
+	): Promise<boolean> {
+		if (!this._hooks || toolResults.length === 0) return false;
+		const calls = toolResults.flatMap((result) => {
+			const call = message.content.find((block) => block.type === "toolCall" && block.id === result.toolCallId);
+			if (call?.type !== "toolCall") return [];
+			const model = modelCallOf(call);
+			const response = result.content
+				.flatMap((block) => (block.type === "text" ? [block.text] : []))
+				.join("\n")
+				.replace(/\n+$/, "");
+			return [{ name: model.name, input: model.arguments, toolUseId: call.id, response }];
+		});
+		const { append, stop } = await this._hooks.postBatch(calls);
+		const last = toolResults.at(-1);
+		if (append !== "" && last) {
+			const index = last.content.findLastIndex((block) => block.type === "text");
+			const block = last.content[index];
+			if (block?.type === "text") last.content[index] = { ...block, text: block.text.replace(/\n+$/, "") + append };
+			else last.content.push({ type: "text", text: append.trimStart() });
+		}
+		if (stop) this._hookStop = { event: "PostToolUse", reason: "hook_stopped" };
+		return stop;
 	}
 
 	private _installAgentNextTurnRefresh(): void {
@@ -2181,20 +2328,27 @@ export class AgentSession {
 
 		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
 		this._failedResponse = undefined;
+		this._hookStop = undefined;
+		this._hooks?.beginRun();
 		this._recordSelection();
 		// The run records the loadout in the transcript; restored tools that did not register by now
 		// are dropped, so a tool that never registers does not stay pending.
 		this._pendingToolNames.clear();
 		try {
 			await this.agent.prompt(messages);
-			while (!this._agentRunAbortRequested) {
+			while (!this._agentRunAbortRequested && !this._hookStop) {
 				if (await this._handlePostAgentRun()) {
 					if (this._agentRunAbortRequested) break;
 					await this.agent.continue();
 					continue;
 				}
-				if (this._agentRunAbortRequested || !(await this._runBeforeSettleBoundary())) break;
 				if (this._agentRunAbortRequested) break;
+				if (await this._runBeforeSettleBoundary()) {
+					if (this._agentRunAbortRequested) break;
+					await this.agent.continue();
+					continue;
+				}
+				if (this._agentRunAbortRequested || !(await this._blockedByStopHooks())) break;
 				await this.agent.continue();
 			}
 		} finally {
@@ -2235,6 +2389,7 @@ export class AgentSession {
 		if (trigger.messageType === "custom") {
 			messages.push(trigger.message);
 		} else {
+			messages.push(...this._promptContext.splice(0));
 			// Normalize images after before_agent_start so extension-driven model selection
 			// determines the resize profile used for the request and history.
 			const normalized = await this._normalizePromptImages(trigger.images);
@@ -2302,6 +2457,75 @@ export class AgentSession {
 		// The low-level loop drains both queues before agent_end. Messages queued by
 		// agent_end handlers require a fresh run before pre-settlement handlers fire.
 		return !this._agentRunAbortRequested && this.agent.hasQueuedMessages();
+	}
+
+	/** SessionStart hooks, once per session: what they print goes in front of the first prompt. */
+	private async _startSessionHooks(reason: SessionStartEvent["reason"]): Promise<void> {
+		if (!this._hooks) return;
+		const source = reason === "new" ? "clear" : reason === "fork" ? "resume" : reason;
+		this._sessionStartMessages = [...(await this._hooks.sessionStart(source))];
+	}
+
+	/** SessionEnd hooks, run when the session is torn down. */
+	async runSessionEndHooks(reason: string): Promise<void> {
+		await this._hooks?.sessionEnd(reason);
+	}
+
+	/** Where each hook's start and end, and the notices around them, are reported: the stream that carries hook events. */
+	setHookStreamSink(sink: ((item: HookStreamItem) => void) | undefined): void {
+		this._hooks?.setSink(sink);
+	}
+
+	/** The prompt a UserPromptSubmit hook dropped, once. The host reports it as the user message's result. */
+	takeBlockedPrompt(): { text: string; reason: string } | undefined {
+		const blocked = this._blockedPrompt;
+		this._blockedPrompt = undefined;
+		return blocked;
+	}
+
+	/** The reason a hook asked the run to stop (`continue: false`), once. */
+	takeHookStop(): { event: "PostToolUse" | "Stop"; reason: string } | undefined {
+		const stop = this._hookStop;
+		this._hookStop = undefined;
+		return stop;
+	}
+
+	private _hookSessionInfo(permissionMode: string): HookSessionInfo {
+		const model = this.model;
+		const effort =
+			model && model.api === "anthropic-messages" && supportsEffort(model as Model<"anthropic-messages">)
+				? (this._ccPolicy?.effort ?? defaultEffort(model as Model<"anthropic-messages">, true))
+				: undefined;
+		return {
+			sessionId: this.sessionManager.getSessionId(),
+			transcriptPath: this.sessionManager.getSessionFile() ?? "",
+			cwd: this._cwd,
+			permissionMode,
+			...(this._promptId ? { promptId: this._promptId } : {}),
+			...(effort ? { effort } : {}),
+		};
+	}
+
+	/** The variables a hook command sees besides the process's own. */
+	private _hookEnv(): Record<string, string> {
+		const info = this._hookSessionInfo("default");
+		return {
+			CLAUDE_CODE_SESSION_ID: info.sessionId,
+			CLAUDE_PID: String(process.pid),
+			CLAUDE_CODE_SESSION_ATTENDED: this._extensionRunner.hasUI() ? "1" : "0",
+			...(info.effort ? { CLAUDE_EFFORT: info.effort } : {}),
+		};
+	}
+
+	/** Stop hooks keep the run going while they block: the feedback is queued, so the agent continues. */
+	private async _blockedByStopHooks(): Promise<boolean> {
+		const hooks = this._hooks;
+		if (!hooks || this._hookStop) return false;
+		const last = this._findLastAssistantMessage();
+		if (last?.stopReason === "error" || last?.stopReason === "aborted") return false;
+		const result = await hooks.stop();
+		if (result.stopped) this._hookStop = { event: "Stop", reason: "stop_hook_prevented" };
+		return result.continue;
 	}
 
 	private async _runBeforeSettleBoundary(): Promise<boolean> {
@@ -2437,6 +2661,18 @@ export class AgentSession {
 			}
 			preflightResult?.("queued");
 			return;
+		}
+
+		if (this._hooks) {
+			this._promptId = randomUUID();
+			const submitted = await this._hooks.submitPrompt(expandedText);
+			this._promptContext = [...this._sessionStartMessages.splice(0), ...submitted.context];
+			if (submitted.blocked) {
+				this._blockedPrompt = submitted.blocked;
+				this._promptContext = [];
+				preflightResult?.("handled");
+				return;
+			}
 		}
 
 		// Validate model
@@ -3197,6 +3433,10 @@ export class AgentSession {
 		let cancelledByExtension = false;
 
 		try {
+			if (await this._hooks?.compactionBlocked("manual", customInstructions)) {
+				cancelledByExtension = true;
+				throw new Error("Compaction cancelled");
+			}
 			const model = this.model;
 			if (!model) {
 				throw new Error(formatNoModelSelectedMessage());
@@ -3622,6 +3862,10 @@ export class AgentSession {
 			this._emit({ type: "compaction_start", reason });
 			abortController.signal.throwIfAborted();
 
+			if (await this._hooks?.compactionBlocked("auto", undefined)) {
+				cancelledByExtension = true;
+				throw new Error("Compaction cancelled");
+			}
 			let extensionCompaction: CompactionResult | undefined;
 
 			if (this._extensionRunner.hasHandlers("session_before_compact")) {
@@ -3829,6 +4073,7 @@ export class AgentSession {
 
 		this._applyExtensionBindings(this._extensionRunner);
 		await this._extensionRunner.emit(this._sessionStartEvent);
+		await this._startSessionHooks(this._sessionStartEvent.reason);
 		this._extensionRunner.reportUnhandledMcpServers();
 		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 	}

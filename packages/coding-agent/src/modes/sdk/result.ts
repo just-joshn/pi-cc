@@ -72,7 +72,9 @@ export type TurnOutcome =
 	| { kind: "aborted_tools" }
 	| { kind: "max_turns"; limit: number; terminalReason: "max_turns" | "aborted_tools" }
 	| { kind: "budget"; limit: number }
-	| { kind: "local_command_error"; text: string };
+	| { kind: "local_command_error"; text: string }
+	/** A hook ended the run: a PostToolUse hook after its tool, or a Stop hook for good. */
+	| { kind: "hook_stopped"; terminalReason: "hook_stopped" | "stop_hook_prevented" };
 
 /** What one user message cost: model calls, tokens per model, and the last assistant text. */
 export class TurnTally {
@@ -270,6 +272,8 @@ function terminalReason(outcome: TurnOutcome): string {
 			return "budget_exhausted";
 		case "local_command_error":
 			return "turn_setup_failed";
+		case "hook_stopped":
+			return outcome.terminalReason;
 	}
 }
 
@@ -316,7 +320,7 @@ export class SessionLedger {
 			fast_mode_disabled_reason: "sdk_opt_in_required",
 			subagent_stats: SUBAGENT_STATS,
 			safety_stops: 0,
-			is_error: outcome.kind !== "completed",
+			is_error: outcome.kind !== "completed" && outcome.kind !== "hook_stopped",
 			num_turns: 1 + turn.toolBatches + (interrupted ? 1 : 0),
 		};
 		const tail = {
@@ -328,6 +332,18 @@ export class SessionLedger {
 			model_usage_since_last_result: modelUsageBlock(turn.models),
 		};
 		switch (outcome.kind) {
+			case "hook_stopped":
+				return {
+					...common,
+					subtype: "success",
+					api_error_status: null,
+					result: outcome.terminalReason === "hook_stopped" ? "" : turn.lastText,
+					ttft_ms: turn.ttftMs,
+					ttft_stream_ms: turn.ttftMs,
+					time_to_request_ms: 0,
+					first_content_frame_ms: turn.ttftMs,
+					...tail,
+				};
 			case "completed":
 				return {
 					...common,
@@ -375,6 +391,33 @@ export class SessionLedger {
 			case "local_command_error":
 				return { ...common, subtype: "error_during_execution", errors: [outcome.text], ...tail };
 		}
+	}
+
+	/** The result for a prompt a UserPromptSubmit hook dropped: no request went out, and the reason is the answer. */
+	blockedPromptResult(text: string, sessionId: string, now: number, startedAt: number): ResultFrame {
+		return {
+			is_error: false,
+			duration_api_ms: 0,
+			num_turns: 0,
+			stop_reason: null,
+			session_id: sessionId,
+			total_cost_usd: 0,
+			usage: usageBlock({}),
+			modelUsage: {},
+			permission_denials: [],
+			fast_mode_state: "off",
+			fast_mode_disabled_reason: "sdk_opt_in_required",
+			subagent_stats: SUBAGENT_STATS,
+			safety_stops: 0,
+			subtype: "success",
+			result: text,
+			type: "result",
+			duration_ms: now - startedAt,
+			uuid: randomUUID(),
+			queued_turn_count: 0,
+			result_index: this.nextResultIndex(),
+			model_usage_since_last_result: {},
+		};
 	}
 
 	/** The result Claude Code writes when no credentials exist: no model call happened, so nothing is timed. */

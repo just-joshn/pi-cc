@@ -18,11 +18,15 @@ export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy
 	const values: Record<string, unknown> = {};
 	const sources = new Map<string, CcSettingsSource>();
 	const pluginOptions: Record<string, Record<string, unknown>> = {};
+	const hooksBySource: Partial<Record<CcSettingsSource, unknown>> = {};
 
 	for (const source of CC_SETTINGS_ORDER) {
 		for (const document of documents) {
 			if (document.source !== source) {
 				continue;
+			}
+			if ("hooks" in document.values) {
+				hooksBySource[source] = mergeValue("hooks", hooksBySource[source], document.values.hooks);
 			}
 			for (const [key, raw] of Object.entries(document.values)) {
 				const next = key === "env" ? ccAdmitRepoEnv(source, raw) : raw;
@@ -44,6 +48,7 @@ export function mergeCcSettings(documents: readonly CcSettingsDocument[], policy
 		policy,
 		values,
 		sources,
+		hooksBySource,
 		pluginOptions,
 		operatorTier: operatorTierValues(documents),
 	};

@@ -25,7 +25,7 @@ export interface PermissionContext {
 	readonly autoModeDuringPlan: boolean;
 	/** `permissions.blockReadsOutsideWorkingDirectories`: reads outside the working directories are refused or held, bypass included. */
 	readonly blockReadsOutsideWorkingDirectories: boolean;
-	/** The operator waived the dangerous-removal breaker and nothing in the session could have narrowed a removal. */
+	/** The operator waived the dangerous-removal breaker and nothing in the session, a rule or a PermissionRequest hook, could have narrowed a removal. */
 	readonly removalWaived: boolean;
 }
 
@@ -44,6 +44,8 @@ export interface PermissionInit {
 	readonly useAutoModeDuringPlan?: boolean;
 	/** `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` is set and this is not a child session. */
 	readonly removalWaiverRequested?: boolean;
+	/** A PermissionRequest hook is configured. Such a hook can answer any ask, so the removal waiver no longer holds. */
+	readonly permissionRequestHooks?: boolean;
 }
 
 export interface SettingsPermissions {
@@ -65,6 +67,7 @@ export class PermissionState {
 	private readonly autoModeDuringPlan: boolean;
 	private readonly blockReads: boolean;
 	private readonly removalWaiverRequested: boolean;
+	private readonly permissionRequestHooks: boolean;
 
 	constructor(init: PermissionInit) {
 		this.cwd = init.cwd;
@@ -74,6 +77,7 @@ export class PermissionState {
 		this.autoModeDuringPlan = init.useAutoModeDuringPlan !== false;
 		this.blockReads = init.settings?.blockReadsOutsideWorkingDirectories === true;
 		this.removalWaiverRequested = init.removalWaiverRequested === true;
+		this.permissionRequestHooks = init.permissionRequestHooks === true;
 		this.rules = new RuleSet([
 			...rulesFromTexts(init.settings?.allow ?? [], "allow", "settings"),
 			...rulesFromTexts(init.settings?.ask ?? [], "ask", "settings"),
@@ -102,7 +106,8 @@ export class PermissionState {
 			bypassAvailable: this.bypassAvailable,
 			autoModeDuringPlan: this.autoModeDuringPlan,
 			blockReadsOutsideWorkingDirectories: this.blockReads,
-			removalWaived: this.removalWaiverRequested && !this.blockReads && !this.narrowingRules(),
+			removalWaived:
+				this.removalWaiverRequested && !this.blockReads && !this.permissionRequestHooks && !this.narrowingRules(),
 		};
 	}
 

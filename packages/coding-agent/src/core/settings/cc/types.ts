@@ -25,6 +25,8 @@ export interface CcSettings {
 	readonly sources: ReadonlyMap<string, CcSettingsSource>;
 	/** The keys CC reads only from the policy, flag and user tiers, from the first of those tiers that defines each. */
 	readonly operatorTier: Readonly<Record<string, unknown>>;
+	/** The `hooks` value each tier defined, unmerged, so the hook unit can tell managed hooks from the rest. */
+	readonly hooksBySource: Readonly<Partial<Record<CcSettingsSource, unknown>>>;
 	/** `pluginConfigs.<id>.options` per plugin id, merged over the user, flag and policy tiers. */
 	readonly pluginOptions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }

@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
+import type { HookStreamItem } from "../../core/hooks/stream.ts";
 import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
 import { catalogLimits, chargeFor, hasNativeRates, type PricingPolicy } from "../../core/usage/cost.ts";
 import { compactFailureText } from "../compact-failure.ts";
@@ -28,6 +29,8 @@ export interface SdkHostOptions {
 	/** With `json` output, the full frame array replaces the single result. */
 	verbose: boolean;
 	includePartial: boolean;
+	/** `--include-hook-events`: report each hook's start and end. */
+	includeHookEvents?: boolean;
 	replayUser: boolean;
 	permissionMode: string;
 	/** `--max-turns`: model requests one user message may take before it ends with `error_max_turns`. */
@@ -64,12 +67,16 @@ export class SdkHost {
 	private readonly defaultModel: AgentSession["model"];
 	private exitCode = 0;
 	private ended = false;
+	/** The init frame of a turn, held until its hooks have reported, as Claude Code orders them. */
+	private pendingInit: SdkFrame | undefined;
+	private tally: TurnTally | undefined;
 
 	constructor(getSession: () => AgentSession, options: SdkHostOptions) {
 		this.getSession = getSession;
 		this.options = options;
 		this.permissionMode = { current: options.permissionMode };
 		this.defaultModel = getSession().model;
+		getSession().setHookStreamSink((item) => this.onHookItem(item));
 		this.renderer = new FrameRenderer({
 			sessionId: () => this.getSession().sessionId,
 			includePartial: options.includePartial,
@@ -125,7 +132,7 @@ export class SdkHost {
 		const session = this.getSession();
 		const startedAt = Date.now();
 		const { facts, authConfigured } = this.factsOf(session);
-		this.emit(buildInitFrame(facts));
+		this.pendingInit = buildInitFrame(facts);
 		if (!authConfigured) {
 			this.emit(
 				syntheticApiErrorFrame({
@@ -150,6 +157,7 @@ export class SdkHost {
 			this.options.maxBudgetUsd,
 		);
 		this.renderer.beginTurn(tally);
+		this.tally = tally;
 		const limit = limitTurns(session.agent, this.options.maxTurns);
 		const budget = gateBudget(session.agent, () => tally.overBudget());
 		let localOutput: string | undefined;
@@ -180,9 +188,21 @@ export class SdkHost {
 				terminalReason: tally.outcome.kind === "aborted_tools" ? "aborted_tools" : "max_turns",
 			};
 		}
-		const result = this.ledger.result(tally, session.sessionId, Date.now());
+		const blocked = session.takeBlockedPrompt();
+		const stopped = session.takeHookStop();
+		if (stopped !== undefined && tally.outcome.kind === "completed") {
+			tally.outcome = {
+				kind: "hook_stopped",
+				terminalReason: stopped.event === "Stop" ? "stop_hook_prevented" : "hook_stopped",
+			};
+		}
+		const result =
+			blocked === undefined
+				? this.ledger.result(tally, session.sessionId, Date.now())
+				: this.ledger.blockedPromptResult(blocked.text, session.sessionId, Date.now(), startedAt);
 		if (localCommand) result.local_command = localCommand;
 		if (localOutput !== undefined) result.result = localOutput;
+		this.tally = undefined;
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
 	}
@@ -228,7 +248,58 @@ export class SdkHost {
 		return inbox;
 	}
 
+	/** Hook reports become system frames, and a Stop hook's feedback a synthetic user message. */
+	private onHookItem(item: HookStreamItem): void {
+		const session = this.getSession();
+		const base = { uuid: randomUUID(), session_id: session.sessionId };
+		switch (item.subtype) {
+			case "hook_started":
+			case "hook_response":
+				if (this.options.includeHookEvents === true || item.hook_event === "SessionStart")
+					this.emit({ type: "system", ...item, ...base });
+				return;
+			case "informational":
+				this.emit({
+					type: "system",
+					subtype: "informational",
+					content: item.content,
+					level: item.level,
+					...item.extra,
+					...base,
+				});
+				return;
+			case "notification":
+				this.emit({
+					type: "system",
+					subtype: "notification",
+					key: item.key,
+					text: item.text,
+					priority: item.priority,
+					...(item.color === undefined ? {} : { color: item.color }),
+					...base,
+				});
+				return;
+			case "synthetic_user":
+				if (this.tally) this.tally.toolBatches += 1;
+				this.emit({
+					type: "user",
+					message: { role: "user", content: [{ type: "text", text: item.text }] },
+					parent_tool_use_id: null,
+					session_id: session.sessionId,
+					uuid: base.uuid,
+					timestamp: new Date().toISOString(),
+					isSynthetic: true,
+				});
+				return;
+		}
+	}
+
 	private emit(frame: SdkFrame): void {
+		if (this.pendingInit !== undefined && !isHookRecord(frame)) {
+			const init = this.pendingInit;
+			this.pendingInit = undefined;
+			this.emit(init);
+		}
 		if (this.options.outputFormat === "stream-json") {
 			this.options.write(encodeFrame(frame));
 		} else if (frame.type === "result") {
@@ -286,6 +357,10 @@ class Inbox {
 		this.waiting?.();
 		this.waiting = undefined;
 	}
+}
+
+function isHookRecord(frame: SdkFrame): boolean {
+	return frame.type === "system" && (frame.subtype === "hook_started" || frame.subtype === "hook_response");
 }
 
 function closedInbox(prompts: SdkPrompt[]): Inbox {

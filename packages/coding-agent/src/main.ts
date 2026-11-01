@@ -58,6 +58,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { buildCcPolicy } from "./core/cc-policy.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
+import { hasHooksFor, hookConfigFrom } from "./core/hooks/config.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { anthropicCcModel, resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
@@ -1121,7 +1122,20 @@ export async function main(args: string[], options?: MainOptions) {
 			}
 		}
 
-		const permission = permissionSetup(parsed, ccAdmission.run.settings.values, parsed.addDir ?? [], cwd);
+		const hooks = hookConfigFrom({ settings: ccAdmission.run.settings, bare: parsed.bare === true });
+		for (const warning of hooks.warnings) {
+			console.error(chalk.yellow(warning));
+		}
+		const permission = permissionSetup(
+			parsed,
+			ccAdmission.run.settings.values,
+			parsed.addDir ?? [],
+			cwd,
+			process.env,
+			{
+				permissionRequestHooks: hasHooksFor(hooks, "PermissionRequest"),
+			},
+		);
 		for (const warning of permission.warnings) {
 			console.error(chalk.yellow(warning));
 		}
@@ -1144,6 +1158,8 @@ export async function main(args: string[], options?: MainOptions) {
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
 			permissions: { state: new PermissionState(permission.init), prompts: permission.prompts },
+			hooks,
+			...(appMode === "interactive" ? { hookTerminal: (sequence: string) => process.stdout.write(sequence) } : {}),
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
@@ -1336,6 +1352,7 @@ export async function main(args: string[], options?: MainOptions) {
 							inputFormat: parsed.inputFormat === "stream-json" ? "stream-json" : "text",
 							verbose: parsed.verbose === true,
 							includePartial: parsed.includePartialMessages === true,
+							includeHookEvents: parsed.includeHookEvents === true,
 							replayUser: parsed.replayUserMessages === true,
 							permissionMode: sdkPermissionMode(parsed.permissionMode),
 							maxTurns: parsed.maxTurns,
