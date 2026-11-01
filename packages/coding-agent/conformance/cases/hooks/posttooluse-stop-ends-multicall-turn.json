@@ -1,0 +1,71 @@
+{
+	"id": "hooks/posttooluse-stop-ends-multicall-turn",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PostToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"continue\\\":false,\\\"stopReason\\\":\\\"POST_STOP\\\"}'\",\"if\":\"Bash(touch first.txt)\"}]}],\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo FIRED > stop-fired.txt\"}]}]}}",
+		"--allowedTools",
+		"Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_uses": [
+					{
+						"name": "Bash",
+						"input": {
+							"command": "touch first.txt"
+						}
+					},
+					{
+						"name": "Bash",
+						"input": {
+							"command": "echo SECOND"
+						}
+					}
+				]
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"\"terminal_reason\":\"hook_stopped\""
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		],
+		"files": [
+			"first.txt"
+		],
+		"absent": [
+			"$WORKSPACE/stop-fired.txt"
+		]
+	},
+	"skip": []
+}

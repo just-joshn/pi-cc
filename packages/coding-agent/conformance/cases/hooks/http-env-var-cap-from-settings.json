@@ -1,0 +1,59 @@
+{
+	"id": "hooks/http-env-var-cap-from-settings",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"http\",\"url\":\"$MOCK_URL/hook/headers\",\"headers\":{\"X-Probe\":\"v-$PROBE_ALLOWED-$PROBE_OTHER\"},\"allowedEnvVars\":[\"PROBE_ALLOWED\",\"PROBE_OTHER\"]}]}]},\"httpHookAllowedEnvVars\":[\"PROBE_ALLOWED\"]}",
+		"--allowedTools",
+		"Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP",
+		"PROBE_ALLOWED": "ALLOWED_VAL",
+		"PROBE_OTHER": "OTHER_VAL"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ran.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"ran.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/hook/headers",
+				"count": 1,
+				"headers": {
+					"x-probe": "v-ALLOWED_VAL-"
+				}
+			}
+		]
+	},
+	"skip": []
+}

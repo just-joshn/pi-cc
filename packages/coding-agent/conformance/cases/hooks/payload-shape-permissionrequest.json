@@ -1,0 +1,53 @@
+{
+	"id": "hooks/payload-shape-permissionrequest",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PermissionRequest\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"cat >> ev.jsonl; echo >> ev.jsonl\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "w.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "ev.jsonl",
+				"contains": [
+					"\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/",
+					"\"content\":\"x\"},\"permission_suggestions\":[{\"type\":\"setMode\",\"mode\":\"acceptEdits\",\"destination\":\"session\"}]}"
+				]
+			}
+		]
+	},
+	"skip": []
+}

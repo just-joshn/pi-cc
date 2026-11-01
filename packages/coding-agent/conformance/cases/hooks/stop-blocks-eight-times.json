@@ -1,0 +1,102 @@
+{
+	"id": "hooks/stop-blocks-eight-times",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"KEEP_GOING\\\"}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "T0"
+			},
+			{
+				"text": "T1"
+			},
+			{
+				"text": "T2"
+			},
+			{
+				"text": "T3"
+			},
+			{
+				"text": "T4"
+			},
+			{
+				"text": "T5"
+			},
+			{
+				"text": "T6"
+			},
+			{
+				"text": "T7"
+			},
+			{
+				"text": "T8"
+			},
+			{
+				"text": "T9"
+			},
+			{
+				"text": "T10"
+			},
+			{
+				"text": "T11"
+			},
+			{
+				"text": "T12"
+			},
+			{
+				"text": "T13"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"A hook blocked the turn from ending 9 consecutive times",
+				"\"key\":\"stop-hook-block-cap\"",
+				"\"terminal_reason\":\"completed\"",
+				"\"num_turns\":10"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 9,
+				"bodyAt": {
+					"messages.2.content.0.text": {
+						"match": [
+							"^<system-reminder>\\nStop hook blocking error from command: \"[^\\n]*\": KEEP_GOING\\n</system-reminder>\\n$"
+						]
+					},
+					"messages.2.content.1.text": {
+						"match": [
+							"^Stop hook feedback:\\nKEEP_GOING$"
+						]
+					}
+				},
+				"index": 1
+			}
+		]
+	},
+	"skip": []
+}

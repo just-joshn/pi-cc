@@ -1,0 +1,14 @@
+{
+	"type": "system",
+	"subtype": "hook_response",
+	"hook_id": "$uuid",
+	"hook_name": "$string",
+	"hook_event": "$string",
+	"output": "$string",
+	"stdout": "$string",
+	"stderr": "$string",
+	"?exit_code": "$int",
+	"outcome": "$string",
+	"uuid": "$uuid",
+	"session_id": "$uuid"
+}

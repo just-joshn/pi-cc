@@ -1,0 +1,44 @@
+{
+	"id": "hooks/sessionstart-stdout-is-context",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo SS_STDOUT_CTX\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1,
+				"bodyIncludes": [
+					"SessionStart:startup hook success: SS_STDOUT_CTX"
+				]
+			}
+		]
+	},
+	"skip": []
+}

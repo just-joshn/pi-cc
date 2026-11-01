@@ -1,0 +1,9 @@
+{
+	"type": "system",
+	"subtype": "hook_started",
+	"hook_id": "$uuid",
+	"hook_name": "$string",
+	"hook_event": "$string",
+	"uuid": "$uuid",
+	"session_id": "$uuid"
+}

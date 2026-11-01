@@ -1,0 +1,12 @@
+{
+	"id": "hooks/permissiondenied-does-not-fire-for-deny-rules",
+	"area": "hooks",
+	"argv": ["-p", "Run the probe", "--model", "claude-opus-4-7", "--output-format", "stream-json", "--verbose", "--settings", "{\"hooks\":{\"PermissionDenied\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo FIRED > denied.txt\"}]}]},\"permissions\":{\"deny\":[\"Bash(touch:*)\"]}}"],
+	"env": {"CLAUDE_CODE_TMPDIR": "$TMP"},
+	"stdin": null,
+	"files": {"seed.txt": "SEED\n"},
+	"model": {"turns": [{"tool_use": {"name": "Bash", "input": {"command": "touch ran.txt"}}}, {"text": "PROBE_OK"}]},
+	"timeout_ms": 90000,
+	"compare": {"exit": 0, "absent": ["$WORKSPACE/ran.txt", "$WORKSPACE/denied.txt"], "requests": [{"pathStartsWith": "/v1/messages", "count": 2}]},
+	"skip": []
+}

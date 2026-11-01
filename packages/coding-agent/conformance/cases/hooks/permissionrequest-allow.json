@@ -1,0 +1,53 @@
+{
+	"id": "hooks/permissionrequest-allow",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PermissionRequest\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PermissionRequest\\\",\\\"decision\\\":{\\\"behavior\\\":\\\"allow\\\"}}}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ran.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"ran.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

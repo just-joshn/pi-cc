@@ -1,0 +1,10 @@
+{
+	"type": "system",
+	"subtype": "notification",
+	"key": "$string",
+	"text": "$string",
+	"priority": "$string",
+	"?color": "$string",
+	"uuid": "$uuid",
+	"session_id": "$uuid"
+}

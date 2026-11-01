@@ -1,0 +1,222 @@
+{
+	"id": "hooks/frames-hook-lifecycle",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}],\"UserPromptSubmit\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}],\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}],\"PostToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}],\"PostToolBatch\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}],\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}],\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"true\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "seed.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "frames",
+			"frames": [
+				{
+					"$ref": "cc-hook-started",
+					"set": {
+						"hook_name": "SessionStart:startup",
+						"hook_event": "SessionStart"
+					}
+				},
+				{
+					"$ref": "cc-hook-response",
+					"set": {
+						"hook_name": "SessionStart:startup",
+						"hook_event": "SessionStart",
+						"output": "",
+						"stdout": "",
+						"stderr": "",
+						"exit_code": 0,
+						"outcome": "success"
+					}
+				},
+				{
+					"$ref": "cc-hook-started",
+					"set": {
+						"hook_name": "UserPromptSubmit",
+						"hook_event": "UserPromptSubmit"
+					}
+				},
+				{
+					"$ref": "cc-hook-response",
+					"set": {
+						"hook_name": "UserPromptSubmit",
+						"hook_event": "UserPromptSubmit",
+						"output": "",
+						"stdout": "",
+						"stderr": "",
+						"exit_code": 0,
+						"outcome": "success"
+					}
+				},
+				{
+					"$ref": "cc-init"
+				},
+				{
+					"$ref": "cc-assistant-tool-use",
+					"set": {
+						"message.content": [
+							{
+								"type": "tool_use",
+								"id": "toolu_conformance_0_0",
+								"name": "Read",
+								"input": {
+									"file_path": "seed.txt"
+								}
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-hook-started",
+					"set": {
+						"hook_name": "PreToolUse:Read",
+						"hook_event": "PreToolUse"
+					}
+				},
+				{
+					"$ref": "cc-hook-response",
+					"set": {
+						"hook_name": "PreToolUse:Read",
+						"hook_event": "PreToolUse",
+						"output": "",
+						"stdout": "",
+						"stderr": "",
+						"exit_code": 0,
+						"outcome": "success"
+					}
+				},
+				{
+					"$ref": "cc-hook-started",
+					"set": {
+						"hook_name": "PostToolUse:Read",
+						"hook_event": "PostToolUse"
+					}
+				},
+				{
+					"$ref": "cc-hook-response",
+					"set": {
+						"hook_name": "PostToolUse:Read",
+						"hook_event": "PostToolUse",
+						"output": "",
+						"stdout": "",
+						"stderr": "",
+						"exit_code": 0,
+						"outcome": "success"
+					}
+				},
+				{
+					"$ref": "cc-user-tool-result",
+					"set": {
+						"message.content": [
+							{
+								"tool_use_id": "toolu_conformance_0_0",
+								"type": "tool_result",
+								"content": "1\tSEED\n2\t"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-hook-started",
+					"set": {
+						"hook_name": "PostToolBatch",
+						"hook_event": "PostToolBatch"
+					}
+				},
+				{
+					"$ref": "cc-hook-response",
+					"set": {
+						"hook_name": "PostToolBatch",
+						"hook_event": "PostToolBatch",
+						"output": "",
+						"stdout": "",
+						"stderr": "",
+						"exit_code": 0,
+						"outcome": "success"
+					}
+				},
+				{
+					"$ref": "cc-assistant-text",
+					"set": {
+						"message.content": [
+							{
+								"type": "text",
+								"text": "PROBE_OK"
+							}
+						]
+					}
+				},
+				{
+					"$ref": "cc-hook-started",
+					"set": {
+						"hook_name": "Stop",
+						"hook_event": "Stop"
+					}
+				},
+				{
+					"$ref": "cc-hook-response",
+					"set": {
+						"hook_name": "Stop",
+						"hook_event": "Stop",
+						"output": "",
+						"stdout": "",
+						"stderr": "",
+						"exit_code": 0,
+						"outcome": "success"
+					}
+				},
+				{
+					"$ref": "cc-result",
+					"set": {
+						"is_error": false,
+						"num_turns": 2,
+						"subtype": "success",
+						"result": "PROBE_OK",
+						"terminal_reason": "completed",
+						"permission_denials": [],
+						"stop_reason": "end_turn"
+					}
+				}
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

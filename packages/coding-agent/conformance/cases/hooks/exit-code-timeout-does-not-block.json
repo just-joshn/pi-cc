@@ -1,0 +1,61 @@
+{
+	"id": "hooks/exit-code-timeout-does-not-block",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"exec sleep 5\",\"timeout\":1}]}]}}",
+		"--allowedTools",
+		"Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ran.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"\"exit_code\":1,\"outcome\":\"cancelled\""
+			]
+		},
+		"files": [
+			"ran.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

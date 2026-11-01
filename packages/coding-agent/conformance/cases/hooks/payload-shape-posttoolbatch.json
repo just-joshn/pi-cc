@@ -1,0 +1,53 @@
+{
+	"id": "hooks/payload-shape-posttoolbatch",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PostToolBatch\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"cat >> ev.jsonl; echo >> ev.jsonl\"}]}]}}",
+		"--allowedTools",
+		"Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo hi"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "ev.jsonl",
+				"contains": [
+					"\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_use_id\":\"toolu_conformance_0_0\",\"tool_response\":\"hi\"}]}"
+				]
+			}
+		]
+	},
+	"skip": []
+}

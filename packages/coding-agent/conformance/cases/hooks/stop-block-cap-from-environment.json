@@ -1,0 +1,63 @@
+{
+	"id": "hooks/stop-block-cap-from-environment",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"KEEP_GOING\\\"}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP",
+		"CLAUDE_CODE_STOP_HOOK_BLOCK_CAP": "2"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "T0"
+			},
+			{
+				"text": "T1"
+			},
+			{
+				"text": "T2"
+			},
+			{
+				"text": "T3"
+			},
+			{
+				"text": "T4"
+			},
+			{
+				"text": "T5"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"A hook blocked the turn from ending 3 consecutive times"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3
+			}
+		]
+	},
+	"skip": []
+}

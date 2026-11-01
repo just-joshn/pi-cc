@@ -1,0 +1,53 @@
+{
+	"id": "hooks/matcher-regex",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"ea.\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo hit >> ev.jsonl\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Read",
+					"input": {
+						"file_path": "seed.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"ev.jsonl"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

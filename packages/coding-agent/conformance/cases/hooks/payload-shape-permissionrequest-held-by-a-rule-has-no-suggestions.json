@@ -1,0 +1,51 @@
+{
+	"id": "hooks/payload-shape-permissionrequest-held-by-a-rule-has-no-suggestions",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PermissionRequest\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"cat >> ev.jsonl; echo >> ev.jsonl\"}]}]},\"permissions\":{\"ask\":[\"Bash(touch:*)\"]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ran.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "ev.jsonl",
+				"contains": [
+					"\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"touch ran.txt\"}}"
+				]
+			}
+		]
+	},
+	"skip": []
+}

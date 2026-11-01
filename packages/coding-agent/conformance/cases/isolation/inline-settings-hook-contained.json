@@ -42,8 +42,5 @@
 			}
 		]
 	},
-	"skip": [],
-	"not_applicable": {
-		"pi-cc": "P08 wires hooks from --settings; P02 loads the hook setting but does not run the hook, so this side cannot attempt the escapes"
-	}
+	"skip": []
 }
