@@ -12,6 +12,9 @@ import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { budgetExhausted, budgetStopLine, gateBudget } from "../core/usage/budget.ts";
 import { chargeFor, type PricingPolicy, type RatesContext } from "../core/usage/cost.ts";
+import { costStateOf, restoredCostState } from "../core/usage/cost-state.ts";
+import { collectUsage } from "../core/usage/report.ts";
+import { SessionClock } from "../core/usage/session-clock.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { compactFailureText } from "./compact-failure.ts";
 import { toJsonEvent } from "./json-event.ts";
@@ -181,6 +184,15 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		}
 
 		const maxBudgetUsd = mode === "text" ? options.maxBudgetUsd : undefined;
+		const clock = new SessionClock();
+		const restored = restoredCostState(session.sessionManager.getEntries?.() ?? []);
+		if (restored !== undefined) clock.restore(restored.totalDuration, restored.startTime);
+		// The accumulator below counts this run's spend only, so the budget needs no restored-cost split here.
+		const recordCostState = (): void => {
+			const rates = { ...options.rates, selectedModel: session.model?.id };
+			const input = collectUsage(session.state.messages, clock.elapsed(), options.pricing, rates);
+			session.sessionManager.appendCostState?.(costStateOf(input, clock));
+		};
 		let reachedMaxTurns = false;
 		const localOutputs: string[] = [];
 		let ranLocalCommand = false;
@@ -213,11 +225,13 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 		if (initialMessage) {
 			await promptWithinLimit(initialMessage, initialImages);
+			recordCostState();
 		}
 
 		for (const message of messages) {
 			if (reachedMaxTurns || compactFailed || budgetExhausted(spentUsd, maxBudgetUsd)) break;
 			await promptWithinLimit(message);
+			recordCostState();
 		}
 
 		if (maxBudgetUsd !== undefined && budgetExhausted(spentUsd, maxBudgetUsd)) {

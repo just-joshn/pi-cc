@@ -13,6 +13,9 @@ import type { HookStreamItem } from "../../core/hooks/stream.ts";
 import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
 import { catalogLimits, chargeFor, type PricingPolicy, type RatesContext } from "../../core/usage/cost.ts";
 import { compactFailureText } from "../compact-failure.ts";
+import { costStateOf, restoredCostState } from "../../core/usage/cost-state.ts";
+import { collectUsage } from "../../core/usage/report.ts";
+import { SessionClock } from "../../core/usage/session-clock.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
 import { encodeFrame, parseInputLine } from "./codec.ts";
@@ -63,6 +66,7 @@ export class SdkHost {
 	private readonly getSession: () => AgentSession;
 	private readonly options: SdkHostOptions;
 	private readonly ledger = new SessionLedger();
+	private readonly clock = new SessionClock();
 	private readonly permissionMode: { current: string };
 	private readonly collected: SdkFrame[] = [];
 	private readonly renderer: FrameRenderer;
@@ -79,6 +83,11 @@ export class SdkHost {
 		this.permissionMode = { current: options.permissionMode };
 		this.defaultModel = getSession().model;
 		getSession().setHookStreamSink((item) => this.onHookItem(item));
+		const restored = restoredCostState(getSession().sessionManager.getEntries?.() ?? []);
+		if (restored !== undefined) {
+			this.clock.restore(restored.totalDuration, restored.startTime);
+			this.ledger.seed(restored.totalCostUSD);
+		}
 		this.renderer = new FrameRenderer({
 			sessionId: () => this.getSession().sessionId,
 			includePartial: options.includePartial,
@@ -120,7 +129,7 @@ export class SdkHost {
 			const next = await inbox.next();
 			if (next === undefined || this.ended) break;
 			await this.turn(next);
-			if (budgetExhausted(this.ledger.spentUSD(), this.options.maxBudgetUsd)) break;
+			if (budgetExhausted(this.ledger.freshSpentUSD(), this.options.maxBudgetUsd)) break;
 		}
 		if (inbox.failure !== undefined) {
 			this.options.fail(inbox.failure);
@@ -158,7 +167,7 @@ export class SdkHost {
 					selectedModel: session.model?.id,
 				});
 			},
-			this.ledger.spentUSD(),
+			this.ledger.freshSpentUSD(),
 			this.options.maxBudgetUsd,
 		);
 		this.renderer.beginTurn(tally);
@@ -210,6 +219,9 @@ export class SdkHost {
 		this.tally = undefined;
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
+		const rates = { ...this.options.rates, selectedModel: session.model?.id };
+		const input = collectUsage(session.state.messages, this.clock.elapsed(), this.options.pricing, rates);
+		session.sessionManager.appendCostState?.(costStateOf(input, this.clock));
 	}
 
 	private readStdin(): Inbox {
