@@ -28,6 +28,7 @@ import {
 	SettingsManager,
 } from "./settings-manager.ts";
 import { time } from "./timings.ts";
+import { createSearchToolDefinitions, selectSearchTools } from "./tools/cc-search.ts";
 import { type CcSurfaceOptions, piToolNames, projectMessagesForModel, wrapStreamFn } from "./tools/cc-surface.ts";
 import {
 	createBashTool,
@@ -89,6 +90,8 @@ export interface CreateAgentSessionOptions {
 	 * These entries take exact names. Mixing them with plain entries throws.
 	 */
 	tools?: string[];
+	/** Explicit subagent tool lists use their own search exposure, independent of parent tool denials. */
+	toolContext?: "subagent";
 	/** Keep a fixed tool list on the wire without a deferred tool placeholder, pi's or Claude Code's. */
 	fixedTools?: boolean;
 	/** Claude Code run policy. Absent, the Anthropic transport keeps pi's prompt and effort handling. */
@@ -313,7 +316,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		model = { ...model, maxTokens: maxOutputTokens };
 	}
 
-	const requestedTools = options.tools === undefined ? undefined : piToolNames(options.tools);
+	const simpleSearch = options.ccPolicy?.bare === true || /^(1|true|yes)$/i.test(process.env.CLAUDE_CODE_SIMPLE ?? "");
+	const searchNames = selectSearchTools({
+		...(options.toolContext === "subagent"
+			? { kind: "subagent" as const, tools: options.tools ?? [] }
+			: { kind: "session" as const, tools: options.tools ?? (options.noTools === "all" ? [] : undefined) }),
+		simple: simpleSearch,
+		entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
+		rules: options.permissions?.state.current().rules,
+	});
+	const effectiveTools = simpleSearch && !options.noTools ? ["bash", "edit", "read"] : options.tools;
+	const requestedTools =
+		effectiveTools === undefined || effectiveTools.includes("default") ? undefined : piToolNames(effectiveTools);
 	const toolListError = requestedTools ? getToolListError(requestedTools) : undefined;
 	if (toolListError) throw new Error(`Invalid tools option: ${toolListError}`);
 	const defaultToolNames = options.noTools ? [] : piToolNames(settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
@@ -326,9 +340,19 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			? selectedToolNames
 			: undefined
 		: (requestedTools ?? (options.noTools === "all" ? [] : undefined));
-	const excludedToolNames = options.excludeTools ? piToolNames(options.excludeTools) : undefined;
+	const excludedToolNames = options.excludeTools
+		? piToolNames(options.excludeTools).filter(
+				(name) => options.toolContext !== "subagent" || !searchNames.some((search) => search === name),
+			)
+		: undefined;
 	const isExcludedTool = excludedToolNames ? createToolNameMatcher(excludedToolNames) : undefined;
-	const initialActiveToolNames = (selectedToolNames ?? defaultToolNames).filter((name) => !isExcludedTool?.(name));
+	const initialActiveToolNames = [...new Set([...(selectedToolNames ?? defaultToolNames), ...searchNames])].filter(
+		(name) => !isExcludedTool?.(name),
+	);
+	const searchTools = createSearchToolDefinitions(cwd, searchNames, {
+		permissions: options.permissions?.state,
+		resultDirectory: join(sessionManager.getSessionDir(), sessionManager.getSessionId(), "tool-results"),
+	});
 
 	// Claude Code's tool names, schemas and result text live only at the provider boundary: the
 	// transcript keeps pi's own tool identity, and this projection is the one place that changes.
@@ -525,7 +549,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		resourceLoader,
-		customTools: options.customTools,
+		customTools: [...searchTools, ...(options.customTools ?? [])],
 		modelRuntime,
 		cacheWarmer,
 		ccPolicy,

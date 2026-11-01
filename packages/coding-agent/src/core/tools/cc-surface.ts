@@ -28,6 +28,7 @@ import type {
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { type TSchema, Type } from "typebox";
 import { isAgentsReminder, isInjectedReminder } from "../memory/wrapper.ts";
+import { SEARCH_TOOLS, searchInputError } from "./cc-search.ts";
 import { CC_READ_MAX_BYTES, CC_READ_MAX_TOKENS } from "./cc-text.ts";
 import { editToolSystemPromptContribution } from "./edit.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./truncate.ts";
@@ -101,6 +102,7 @@ interface CcTool {
 	readonly parameters: TSchema;
 	/** The description sent with {@link parameters}, when pi's own names fields the model does not have. */
 	readonly description?: string;
+	readonly eagerInputStreaming?: boolean;
 	/** Claude Code's input property names, in declaration order. */
 	readonly fields: readonly string[];
 	/** pi's input property names, so a validation message can be mapped back. */
@@ -110,6 +112,12 @@ interface CcTool {
 }
 
 const CC_TOOLS: readonly CcTool[] = [
+	...SEARCH_TOOLS.map((tool) => ({
+		...tool,
+		fields: Object.keys(tool.parameters.properties),
+		piFields: Object.keys(tool.parameters.properties),
+		toPi: (args: Record<string, unknown>) => args,
+	})),
 	{
 		pi: "bash",
 		name: "Bash",
@@ -213,6 +221,7 @@ export function projectDeclarations(tools: readonly Tool[], includePlaceholder: 
 				parameters: covered.parameters,
 				// Claude Code sends its schemas verbatim and marks no tool strict, so no strict rewrite.
 				constrainedSampling: false as const,
+				...(covered.eagerInputStreaming === false ? { eagerInputStreaming: false } : {}),
 				...(tool.deferLoading === true ? { deferLoading: true } : {}),
 			},
 		];
@@ -266,7 +275,7 @@ export function projectToolCall(call: {
 	const wrongCase = CC_TOOLS.find(
 		(tool) => tool.name.toLowerCase() === call.name.toLowerCase() && tool.name !== call.name,
 	);
-	if (wrongCase) {
+	if (wrongCase && !(call.active?.has(call.name) && !ccTool(call.name))) {
 		return {
 			name: wrongCase.pi,
 			arguments: {},
@@ -300,6 +309,8 @@ export function projectToolCall(call: {
 	if (issues.length > 0) {
 		return { name: covered.pi, arguments: {}, inputError: inputValidationText(covered.name, issues), modelCall };
 	}
+	const searchError = searchInputError(covered.name, args);
+	if (searchError) return { name: covered.pi, arguments: {}, inputError: searchError, modelCall };
 	if (covered.pi === "read") {
 		const rangeIssues = (["offset", "limit"] as const).flatMap((field) => {
 			const value = args[field];
@@ -676,6 +687,7 @@ function reverseMap(block: ToolCall): { name: string; arguments: JsonObject } {
 			},
 		};
 	}
+	if (SEARCH_TOOLS.some((tool) => tool.pi === covered.pi)) return { name: covered.name, arguments: args };
 	return { name: "Write", arguments: { file_path: args.path, content: args.content } };
 }
 
