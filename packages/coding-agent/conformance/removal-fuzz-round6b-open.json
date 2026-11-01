@@ -1,244 +1,52 @@
 {
 	"differences": [
 		{
-			"command": "{ declare X=\"*\" || rmdir $X; }",
-			"direction": "stricter"
-		},
-		{
-			"command": "while true; do declare X=sub && rmdir \"$X\"; break; done",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) export X=/\nrmdir \"$X\";; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "while true; do export X=/usr; rmdir \"$X\"; break; done",
-			"direction": "stricter"
-		},
-		{
-			"command": "true <(declare X=/usr; rmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) readonly X=$HOME || rmdir $X;; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "true $(typeset X=/usr\nrmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "true <(declare X=\"*\" && rmdir $X/usr)",
-			"direction": "stricter"
-		},
-		{
-			"command": "X='*' && rmdir \"$X\"",
+			"command": "true ${ readonly X=\"$HOME\" | rmdir $X/usr; }",
 			"direction": "message-only"
 		},
 		{
-			"command": "true <(export X=$HOME || rmdir $X/usr)",
-			"direction": "stricter"
+			"command": "if true; then typeset X='' | rmdir sub/..; fi",
+			"direction": "message-only"
 		},
 		{
-			"command": "{ typeset X=~ || rmdir $X/usr; }",
-			"direction": "stricter"
+			"command": "true ${ X=..\nrmdir ${X}/; }",
+			"direction": "message-only"
 		},
 		{
-			"command": "true >(readonly X=p04-fuzz-does-not-exist\nrmdir $X)",
-			"direction": "stricter"
+			"command": "for Y in one; do readonly X=$HOME | rmdir ..; done",
+			"direction": "message-only"
 		},
 		{
-			"command": "true <<EOF\n$(export X=\"$HOME\"; rmdir \"$X\")\nEOF",
-			"direction": "stricter"
+			"command": "if true; then X=$HOME | rmdir \"*\"; fi",
+			"direction": "message-only"
 		},
 		{
-			"command": "true >(local X=${HOME}; rmdir $X)",
-			"direction": "stricter"
+			"command": "true ${ X=\\$HOME | rmdir ${X}/; }",
+			"direction": "message-only"
 		},
 		{
-			"command": "f() { X=p04-fuzz-does-not-exist\nrmdir $X; }; true",
-			"direction": "stricter"
-		},
-		{
-			"command": "for Y in one; do local X=sub & rmdir $X; done",
-			"direction": "stricter"
-		},
-		{
-			"command": "for Y in one; do typeset X=/usr\nrmdir \"$X\"; done",
-			"direction": "stricter"
-		},
-		{
-			"command": "for Y in one; do readonly X=.. || rmdir $X; done",
-			"direction": "stricter"
-		},
-		{
-			"command": "(local X=\"$HOME\"; rmdir $X/usr)",
-			"direction": "stricter"
-		},
-		{
-			"command": "f() { local X=/; rmdir $X/usr; }; true",
-			"direction": "stricter"
-		},
-		{
-			"command": "true >(export X=.\nrmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "true $(declare X=/; rmdir $X)",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) declare X=p04-fuzz-does-not-exist || rmdir $X;; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "true $(X=${HOME} && rmdir $X)",
-			"direction": "stricter"
-		},
-		{
-			"command": "if true; then local X=.. && rmdir \"$X\"; fi",
-			"direction": "stricter"
-		},
-		{
-			"command": "(declare X=\"$HOME\" | rmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "(declare X=. | rmdir $X)",
-			"direction": "stricter"
-		},
-		{
-			"command": "true <<EOF\n$(export X=/usr && rmdir \"$X\")\nEOF",
-			"direction": "stricter"
-		},
-		{
-			"command": "if true; then local X=~ | rmdir $X; fi",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) X=\"*\" & rmdir \"$X\";; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "{ X=/usr && rmdir $X/usr; }",
-			"direction": "stricter"
+			"command": "true ${ declare X=${HOME} & rmdir ${X}/; }",
+			"direction": "message-only"
 		},
 		{
 			"command": "if true; then X=\"*\" | rmdir $HOME; fi",
 			"direction": "message-only"
 		},
 		{
-			"command": "true <<EOF\n$(declare X=\\$HOME || rmdir $X)\nEOF",
-			"direction": "stricter"
-		},
-		{
-			"command": "{ readonly X='' || rmdir \"$X\"; }",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) export X=~ && rmdir $X;; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "(X='*'\nrmdir $X/usr)",
-			"direction": "stricter"
-		},
-		{
 			"command": "(readonly X='$HOME' && rmdir $X/usr)",
 			"direction": "message-only"
 		},
 		{
-			"command": "if true; then X=\"*\"; rmdir $X; fi",
-			"direction": "stricter"
+			"command": "if true; then typeset X=\"$HOME\" | rmdir /usr; fi",
+			"direction": "message-only"
 		},
 		{
-			"command": "true `local X=${HOME}\nrmdir $X`",
-			"direction": "stricter"
+			"command": "true ${ export X=/ | rmdir $X/usr; }",
+			"direction": "message-only"
 		},
 		{
-			"command": "true $(declare X=sub & rmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "true >(X=$HOME && rmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "if true; then declare X=~ | rmdir \"$X\"; fi",
-			"direction": "stricter"
-		},
-		{
-			"command": "true <<EOF\n$(export X=. & rmdir $X)\nEOF",
-			"direction": "stricter"
-		},
-		{
-			"command": "{ X=..; rmdir $X/usr; }",
-			"direction": "stricter"
-		},
-		{
-			"command": "true <(readonly X=~ && rmdir $X)",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) local X=~\nrmdir $X;; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "if true; then local X=. || rmdir $X/usr; fi",
-			"direction": "stricter"
-		},
-		{
-			"command": "{ typeset X='*' || rmdir \"$X\"; }",
-			"direction": "stricter"
-		},
-		{
-			"command": "for Y in one; do readonly X=. | rmdir $X; done",
-			"direction": "stricter"
-		},
-		{
-			"command": "true `declare X=\"$HOME\" | rmdir \"$X\"`",
-			"direction": "stricter"
-		},
-		{
-			"command": "if true; then X=~ | rmdir $X; fi",
-			"direction": "stricter"
-		},
-		{
-			"command": "declare X=. || rmdir \"$X\"",
-			"direction": "stricter"
-		},
-		{
-			"command": "f() { readonly X=\"*\" | rmdir \"$X\"; }; true",
-			"direction": "stricter"
-		},
-		{
-			"command": "f() { export X=\"$HOME\"; rmdir \"$X\"; }; true",
-			"direction": "stricter"
-		},
-		{
-			"command": "true `declare X=/ | rmdir \"$X\"`",
-			"direction": "stricter"
-		},
-		{
-			"command": "true <(readonly X=/usr || rmdir $X/usr)",
-			"direction": "stricter"
-		},
-		{
-			"command": "case one in one) X=\"*\"\nrmdir \"$X\";; esac",
-			"direction": "stricter"
-		},
-		{
-			"command": "true $(local X=\\$HOME | rmdir \"$X\")",
-			"direction": "stricter"
-		},
-		{
-			"command": "true `export X=/\nrmdir $X`",
-			"direction": "stricter"
-		},
-		{
-			"command": "{ export X=sub && rmdir \"$X\"; }",
-			"direction": "stricter"
+			"command": "true ${ X=/usr | rmdir $X/usr; }",
+			"direction": "message-only"
 		}
 	]
 }

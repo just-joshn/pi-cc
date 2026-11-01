@@ -354,19 +354,74 @@ describe("P04b debt: lines the removal check refuses where Claude Code allows th
 		"X=/; Y=$X; rm -rf $Y",
 		"X=/; Y=$X/usr; rm -rf $Y",
 		"(X=/usr; rm -rf $X)",
-		"(X=/usr; (rm -rf $X))",
 		"export A=1; export X=/usr; rm -rf $X",
 		"X=/usr; if true; then X=/lib; rm -rf $X; fi",
-		'X="/ usr"; rm -rf $X',
-		"true <(X=. || rmdir $X/usr)",
-		'(export X=/usr || rmdir "$X")',
-		'local X=\\$HOME\nrmdir "$X"',
 		"X=$HOME; rmdir $X",
-		"X=~; rmdir $X",
 		"{ X=.\nrmdir $X; }",
 	])("asks, the safe side, for %s", (command) => {
 		expect(removal(command), command).toBeDefined();
 	});
+});
+
+// Query-only $.tool.check measurements, not execution-pipeline fixtures or default-mode expectations.
+// Claude Code 2.1.312, SHA-256 6b5ec691195e551b02c41df9f7d723f4ea61eaa03c2df90acefe3736f1aeb620,
+// bypassPermissions, outside-/tmp cwd. Provenance and calibration are in /tmp/p04b-calibration-resolution.md
+// and /tmp/p04b-arith-twin-query.md.
+describe("P04b removal decisions resolved against the pinned bypassPermissions query", () => {
+	it.each([
+		"(X=/usr; (rm -rf $X))",
+		'X="/ usr"; rm -rf $X',
+		"true <(X=. || rmdir $X/usr)",
+		"X=/usr; echo $(( $(true) + 1 )); rm -rf $X",
+	])("allows %s at the permission-decision layer", (command) => {
+		expect(evaluate(bash(command), "bypassPermissions").decision.behavior, command).toBe("allow");
+	});
+
+	it("asks with the exact critical-directory reason after following a variable-root target", () => {
+		const decision = evaluate(bash("X=/usr; rm -rf $X/"), "bypassPermissions").decision;
+		expect(decision.behavior).toBe("ask");
+		expect(decision.behavior === "ask" && decision.message).toBe(
+			"Dangerous rm operation detected: '/usr/'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.",
+		);
+	});
+
+	it("allows a followed noncritical variable-root target", () => {
+		expect(evaluate(bash("X=/tmp/scratch; rm -rf $X/"), "bypassPermissions").decision.behavior).toBe("allow");
+	});
+});
+
+// Query-only Claude Code 2.1.312 bypassPermissions evidence is in /tmp/p04b-independent-review.md.
+// These are permission decisions, not shell executions or default-mode expectations.
+describe("P04b nested executable substitution decisions from the pinned query", () => {
+	it.each([`echo ${brace("X:-$(true)$(rmdir /usr)")}`, "echo $(( $(rmdir /usr) + 1 ))", "(( $(rmdir /usr) + 1 ))"])(
+		"asks with the exact critical-directory reason for %s",
+		(command) => {
+			const decision = evaluate(bash(command), "bypassPermissions").decision;
+			expect(decision.behavior, command).toBe("ask");
+			expect(decision.behavior === "ask" && decision.message, command).toBe(
+				"Dangerous rmdir operation detected: '/usr'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.",
+			);
+		},
+	);
+});
+
+describe("P04b literal-dollar root safety from the pinned removal corpus", () => {
+	it.each([
+		"(typeset X='$HOME' && rmdir $X/usr)",
+		"{ export X=\\$HOME; rmdir $X/usr; }",
+		"(readonly X='$HOME' && rmdir $X/usr)",
+	])("keeps literal-dollar variable-root safety for %s", (command) => {
+		expect(removal(command)?.message, command).toContain("is a shell variable expansion");
+	});
+});
+
+describe("P04b debt resolved against pinned removal-fuzz-fixtures.json", () => {
+	it.each(['(export X=/usr || rmdir "$X")', 'local X=\\$HOME\nrmdir "$X"', "X=~; rmdir $X"])(
+		"allows %s, as the recorded Claude Code 2.1.312 decision does",
+		(command) => {
+			expect(removal(command), command).toBeUndefined();
+		},
+	);
 });
 
 describe("a removal target in quotes", () => {
