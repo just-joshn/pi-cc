@@ -1,7 +1,7 @@
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
-import type { SdkFrame } from "../src/modes/sdk/frames.ts";
+import type { AssistantFrame, SdkFrame } from "../src/modes/sdk/frames.ts";
 import { FrameRenderer } from "../src/modes/sdk/render.ts";
 import { SessionLedger, TurnTally } from "../src/modes/sdk/result.ts";
 
@@ -217,5 +217,42 @@ describe("tool_use_result", () => {
 		for (const event of callEvents(toolCall("echo", { value: "a" }))) instance.onEvent(event);
 		instance.onEvent(resultOf("echo:a"));
 		expect(frames[1]).toMatchObject({ tool_use_result: "echo:a" });
+	});
+});
+
+describe("assistant usage metadata", () => {
+	function textEvents(usage: Record<string, number>): AgentSessionEvent[] {
+		const partial = {
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			usage: { input: 3, output: 0, cacheRead: 0, cacheWrite: 0, ...usage },
+		} as unknown as AssistantMessage;
+		return [
+			{
+				type: "message_update",
+				message: partial,
+				assistantMessageEvent: { type: "text_start", contentIndex: 0, partial },
+			} as AgentSessionEvent,
+			{
+				type: "message_update",
+				message: partial,
+				assistantMessageEvent: { type: "text_end", contentIndex: 0, partial, content: "hi" },
+			} as AgentSessionEvent,
+		];
+	}
+
+	test("assistant frames report server tool use when the request used it", () => {
+		const { instance, frames } = renderer();
+		for (const event of textEvents({ webSearchRequests: 2 })) instance.onEvent(event);
+		expect(frames[0]).toMatchObject({
+			message: { usage: { server_tool_use: { web_search_requests: 2, web_fetch_requests: 0 } } },
+		});
+	});
+
+	test("frames without server tools leave the key out", () => {
+		const { instance, frames } = renderer();
+		for (const event of textEvents({})) instance.onEvent(event);
+		const frame = frames[0] as AssistantFrame;
+		expect(frame.message.usage.server_tool_use).toBeUndefined();
 	});
 });

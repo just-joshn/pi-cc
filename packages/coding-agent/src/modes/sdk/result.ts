@@ -245,7 +245,7 @@ function modelUsageBlock(models: Record<string, ModelTotals>): Json {
 				webSearchRequests: totals.webSearchRequests,
 				costUSD: totals.costUSD,
 				...totals.limits,
-				thinkingTokens: totals.thinkingTokens,
+				...(totals.thinkingTokens > 0 ? { thinkingTokens: totals.thinkingTokens } : {}),
 				cacheCreationEphemeral5mInputTokens: totals.cacheCreation5m,
 				cacheCreationEphemeral1hInputTokens: totals.cacheCreation1h,
 				canonicalModel: canonicalName(model),
@@ -402,6 +402,36 @@ export class SessionLedger {
 			case "local_command_error":
 				return { ...common, subtype: "error_during_execution", errors: [outcome.text], ...tail };
 		}
+	}
+
+	/** The success result of a turn a local command answered without a model call. */
+	localCommandResult(sessionId: string, now: number, startedAt: number, command: string, text: string): ResultFrame {
+		return {
+			duration_api_ms: this.apiMs,
+			stop_reason: "end_turn",
+			session_id: sessionId,
+			total_cost_usd: this.spentUSD(),
+			usage: usageBlock({}),
+			modelUsage: modelUsageBlock(this.models),
+			permission_denials: [],
+			terminal_reason: "completed",
+			fast_mode_state: "off",
+			fast_mode_disabled_reason: "sdk_opt_in_required",
+			subagent_stats: SUBAGENT_STATS,
+			safety_stops: 0,
+			is_error: false,
+			num_turns: 1,
+			subtype: "success",
+			api_error_status: null,
+			result: text,
+			local_command: command,
+			type: "result",
+			duration_ms: Math.max(0, now - startedAt),
+			uuid: randomUUID(),
+			queued_turn_count: 0,
+			result_index: this.nextResultIndex(),
+			model_usage_since_last_result: {},
+		};
 	}
 
 	/** The result for a prompt a UserPromptSubmit hook dropped: no request went out, and the reason is the answer. */
