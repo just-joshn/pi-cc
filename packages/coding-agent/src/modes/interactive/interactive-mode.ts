@@ -124,7 +124,7 @@ import { withBuiltInRenderers } from "../../core/tools/renderers/index.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import type { PricingPolicy } from "../../core/usage/cost.ts";
-import { collectUsage, formatUsageReport, nativePricedBy } from "../../core/usage/report.ts";
+import { collectUsage, formatUsageReport } from "../../core/usage/report.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { addMcpServerConfig, loadMcpConfig } from "../../extensions/mcp/config.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
@@ -6901,7 +6901,7 @@ export class InteractiveMode {
 			this.sessionManager.getBranch().flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
 			process.uptime() * 1000,
 			this.options.pricing?.(),
-			nativePricedBy((provider, model) => session.modelRuntime.getModel(provider, model)),
+			{ selectedModel: session.model?.id },
 		);
 		this.showSelector((done) => {
 			const dialog = new UsageDialogComponent(formatUsageReport(input), done);

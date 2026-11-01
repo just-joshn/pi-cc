@@ -11,7 +11,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
 import type { HookStreamItem } from "../../core/hooks/stream.ts";
 import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
-import { catalogLimits, chargeFor, hasNativeRates, type PricingPolicy } from "../../core/usage/cost.ts";
+import { catalogLimits, chargeFor, type PricingPolicy, type RatesContext } from "../../core/usage/cost.ts";
 import { compactFailureText } from "../compact-failure.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
@@ -39,6 +39,8 @@ export interface SdkHostOptions {
 	maxBudgetUsd?: number;
 	/** The operator's `modelPricing` policy setting, when one is set. */
 	pricing?: PricingPolicy;
+	/** The operator cost rows, promotions and the session's selected model, for the price chain. */
+	rates?: RatesContext;
 	/** Whether the provider has a credential, asked for the model selected now so a `set_model` shows. */
 	hasAuth(provider: string): boolean;
 	/** Where stream-json user messages and control requests arrive. */
@@ -151,8 +153,10 @@ export class SdkHost {
 		const tally = new TurnTally(
 			startedAt,
 			(message) => {
-				const model = session.modelRuntime.getModel(message.provider, message.model);
-				return chargeFor(message.model, message.usage, hasNativeRates(model?.cost), this.options.pricing);
+				return chargeFor(message.model, message.usage, this.options.pricing, {
+					...this.options.rates,
+					selectedModel: session.model?.id,
+				});
 			},
 			this.ledger.spentUSD(),
 			this.options.maxBudgetUsd,

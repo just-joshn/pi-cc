@@ -1,5 +1,5 @@
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import { type CostBasis, canonicalName, chargeFor, hasNativeRates, type PricingPolicy } from "./cost.ts";
+import { type CostBasis, canonicalName, chargeFor, type PricingPolicy, type RatesContext } from "./cost.ts";
 
 /** One model's totals, merged over every spelling of its name. */
 export interface ModelSpend {
@@ -33,15 +33,12 @@ export interface SessionMessage {
 	role: string;
 }
 
-/** Looks up whether pi's own catalog prices a model, so a model outside Claude Code's list keeps pi's cost. */
-export type NativePricedLookup = (provider: string, model: string) => boolean;
-
 /** Folds a session's messages into the report's input. Failed and aborted requests cost nothing. */
 export function collectUsage(
 	messages: readonly SessionMessage[],
 	wallMs: number,
 	policy: PricingPolicy | undefined,
-	nativePriced: NativePricedLookup,
+	rates: RatesContext | undefined,
 ): UsageReportInput {
 	const models = new Map<string, ModelSpend>();
 	let total = 0;
@@ -55,12 +52,7 @@ export function collectUsage(
 		if (message.role !== "assistant") continue;
 		const assistant = message as AssistantMessage;
 		if (assistant.stopReason === "error" || assistant.stopReason === "aborted") continue;
-		const charge = chargeFor(
-			assistant.model,
-			assistant.usage,
-			nativePriced(assistant.provider, assistant.model),
-			policy,
-		);
+		const charge = chargeFor(assistant.model, assistant.usage, policy, rates);
 		unknown ||= charge.basis === ("unknown" satisfies CostBasis);
 		total += charge.usd;
 		requests += 1;
@@ -231,11 +223,4 @@ function cacheLine(input: UsageReportInput): string | undefined {
 	if (input.requests === 0 || input.cachingObserved) return undefined;
 	const percent = Math.round((input.cacheHitRatio ?? 0) * 100);
 	return `Prompt cache (main):   ${plural(input.requests, "request")} · ${percent}% of input tokens from cache · no misses · no prompt caching reported by the API`;
-}
-
-/** Whether pi's catalog prices the model a message names, for `collectUsage`. */
-export function nativePricedBy(
-	lookup: (provider: string, model: string) => { cost: { input: number; output: number } } | undefined,
-): NativePricedLookup {
-	return (provider, model) => hasNativeRates(lookup(provider, model)?.cost);
 }

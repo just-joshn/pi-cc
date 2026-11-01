@@ -11,7 +11,7 @@ import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { budgetExhausted, budgetStopLine, gateBudget } from "../core/usage/budget.ts";
-import { chargeFor, hasNativeRates, type PricingPolicy } from "../core/usage/cost.ts";
+import { chargeFor, type PricingPolicy, type RatesContext } from "../core/usage/cost.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { compactFailureText } from "./compact-failure.ts";
 import { toJsonEvent } from "./json-event.ts";
@@ -34,6 +34,8 @@ interface PrintModeBase {
 	maxBudgetUsd?: number;
 	/** The operator's `modelPricing` policy setting, for the text mode's budget. */
 	pricing?: PricingPolicy;
+	/** The operator cost rows, promotions and the session's selected model, for the price chain. */
+	rates?: RatesContext;
 }
 
 export type PrintModeOptions =
@@ -139,8 +141,10 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				const message = event.message as AssistantMessage;
 				if (message.stopReason !== "error" && message.stopReason !== "aborted") {
-					const model = session.modelRuntime.getModel(message.provider, message.model);
-					spentUsd += chargeFor(message.model, message.usage, hasNativeRates(model?.cost), options.pricing).usd;
+					spentUsd += chargeFor(message.model, message.usage, options.pricing, {
+						...options.rates,
+						selectedModel: session.model?.id,
+					}).usd;
 				}
 			}
 			if (sdkHost !== undefined) {
