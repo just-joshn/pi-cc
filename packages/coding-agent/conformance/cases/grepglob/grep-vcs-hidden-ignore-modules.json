@@ -1,0 +1,75 @@
+{
+	"id": "grepglob/grep-vcs-hidden-ignore-modules",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		".git/config": "needle vcs\n",
+		".svn/config": "needle vcs\n",
+		".hg/config": "needle vcs\n",
+		".bzr/config": "needle vcs\n",
+		".jj/config": "needle vcs\n",
+		".sl/config": "needle vcs\n",
+		".git/HEAD": "ref: refs/heads/main\n",
+		".gitignore": "ignored/\n*.log\n",
+		"ignored/x.ts": "needle ignored\n",
+		"app.log": "needle log\n",
+		".hidden/h.txt": "needle hidden\n",
+		"node_modules/m.js": "needle module\n",
+		"Library/Containers/c.txt": "needle container\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "needle"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"(?=[^\"]*\\.hidden/h\\.txt)(?=[^\"]*node_modules/m\\.js)(?=[^\"]*Library/Containers/c\\.txt)Found 3 files\\\\n(?:\\.hidden/h\\.txt|node_modules/m\\.js|Library/Containers/c\\.txt)(?:\\\\n(?:\\.hidden/h\\.txt|node_modules/m\\.js|Library/Containers/c\\.txt)){2}\"|\\[(?:\\{\"type\":\"text\",\"text\":\"(?=[^\"]*\\.hidden/h\\.txt)(?=[^\"]*node_modules/m\\.js)(?=[^\"]*Library/Containers/c\\.txt)Found 3 files\\\\n(?:\\.hidden/h\\.txt|node_modules/m\\.js|Library/Containers/c\\.txt)(?:\\\\n(?:\\.hidden/h\\.txt|node_modules/m\\.js|Library/Containers/c\\.txt)){2}\"\\}|\\{\"text\":\"(?=[^\"]*\\.hidden/h\\.txt)(?=[^\"]*node_modules/m\\.js)(?=[^\"]*Library/Containers/c\\.txt)Found 3 files\\\\n(?:\\.hidden/h\\.txt|node_modules/m\\.js|Library/Containers/c\\.txt)(?:\\\\n(?:\\.hidden/h\\.txt|node_modules/m\\.js|Library/Containers/c\\.txt)){2}\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

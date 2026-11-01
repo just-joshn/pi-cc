@@ -1,0 +1,105 @@
+{
+	"id": "grepglob/glob-ties-membership-grep-ties-alpha",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"tie/t1.txt": "tie\n",
+		"tie/t2.txt": "tie\n",
+		"tie/t3.txt": "tie\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch -t 202501010000 tie/t1.txt tie/t2.txt tie/t3.txt && printf SEARCH_FIXTURE_PREPARED",
+						"description": "Prepare isolated search fixtures"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Glob",
+					"input": {
+						"pattern": "tie/*.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Grep",
+					"input": {
+						"pattern": "tie",
+						"path": "tie"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"SEARCH_FIXTURE_PREPARED\"|\\[(?:\\{\"type\":\"text\",\"text\":\"SEARCH_FIXTURE_PREPARED\"\\}|\\{\"text\":\"SEARCH_FIXTURE_PREPARED\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"(?=[^\"]*tie/t1\\.txt)(?=[^\"]*tie/t2\\.txt)(?=[^\"]*tie/t3\\.txt)(?:tie/t1\\.txt|tie/t2\\.txt|tie/t3\\.txt)(?:\\\\n(?:tie/t1\\.txt|tie/t2\\.txt|tie/t3\\.txt)){2}\"|\\[(?:\\{\"type\":\"text\",\"text\":\"(?=[^\"]*tie/t1\\.txt)(?=[^\"]*tie/t2\\.txt)(?=[^\"]*tie/t3\\.txt)(?:tie/t1\\.txt|tie/t2\\.txt|tie/t3\\.txt)(?:\\\\n(?:tie/t1\\.txt|tie/t2\\.txt|tie/t3\\.txt)){2}\"\\}|\\{\"text\":\"(?=[^\"]*tie/t1\\.txt)(?=[^\"]*tie/t2\\.txt)(?=[^\"]*tie/t3\\.txt)(?:tie/t1\\.txt|tie/t2\\.txt|tie/t3\\.txt)(?:\\\\n(?:tie/t1\\.txt|tie/t2\\.txt|tie/t3\\.txt)){2}\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_2_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"Found 3 files\\\\ntie/t1\\.txt\\\\ntie/t2\\.txt\\\\ntie/t3\\.txt\"|\\[(?:\\{\"type\":\"text\",\"text\":\"Found 3 files\\\\ntie/t1\\.txt\\\\ntie/t2\\.txt\\\\ntie/t3\\.txt\"\\}|\\{\"text\":\"Found 3 files\\\\ntie/t1\\.txt\\\\ntie/t2\\.txt\\\\ntie/t3\\.txt\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -1,0 +1,83 @@
+{
+	"id": "grepglob/glob-empty-and-absolute-pattern",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--allowedTools",
+		"Grep,Glob,Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"src/a.ts": "alpha\n",
+		"docs/a.md": "alpha\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Glob",
+					"input": {
+						"pattern": ""
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Glob",
+					"input": {
+						"pattern": "/etc/hosts"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 1,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"(?=[^\"]*src/a\\.ts)(?=[^\"]*docs/a\\.md)(?:src/a\\.ts|docs/a\\.md)(?:\\\\n(?:src/a\\.ts|docs/a\\.md)){1}\"|\\[(?:\\{\"type\":\"text\",\"text\":\"(?=[^\"]*src/a\\.ts)(?=[^\"]*docs/a\\.md)(?:src/a\\.ts|docs/a\\.md)(?:\\\\n(?:src/a\\.ts|docs/a\\.md)){1}\"\\}|\\{\"text\":\"(?=[^\"]*src/a\\.ts)(?=[^\"]*docs/a\\.md)(?:src/a\\.ts|docs/a\\.md)(?:\\\\n(?:src/a\\.ts|docs/a\\.md)){1}\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 2,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_1_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"/etc/hosts\"|\\[(?:\\{\"type\":\"text\",\"text\":\"/etc/hosts\"\\}|\\{\"text\":\"/etc/hosts\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -148,6 +148,8 @@ const SIDE_ARGV: ArgvAllowlist = {
 		// values `--allowedTools` and `--tools` write in PR #7's cases
 		"Bash",
 		"Read",
+		"Grep",
+		"Glob",
 		"Write",
 		"Edit",
 		// model ids PR #7's gate cases run, whose family resolution they pin
@@ -217,6 +219,7 @@ const PROBE_ARGV: Readonly<Record<ProbeName, ArgvAllowlist>> = {
  */
 const CASE_ENV_KEYS: readonly string[] = [
 	"CLAUDE_CODE_TMPDIR",
+	"CLAUDE_CODE_ENTRYPOINT",
 	// P04 round 3: waives the dangerous-removal check under bypass. Removals in a case run against the seeded workspace inside the Seatbelt.
 	"CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS",
 	"ANTHROPIC_AUTH_TOKEN",

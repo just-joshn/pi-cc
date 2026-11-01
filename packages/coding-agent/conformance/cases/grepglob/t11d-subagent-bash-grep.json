@@ -1,0 +1,77 @@
+{
+	"id": "grepglob/t11d-subagent-bash-grep",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		".claude/agents/searcher.md": "---\nname: searcher\ndescription: Search fixture files\ntools: Bash, Grep, Glob\n---\nSearch the local fixtures.\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Task",
+					"input": {
+						"description": "Search fixtures",
+						"subagent_type": "searcher",
+						"prompt": "Find fixture files",
+						"run_in_background": false
+					}
+				}
+			},
+			{
+				"text": "SUB_DONE"
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"index": 0,
+				"bodyAt": {
+					"tools": {
+						"match": [],
+						"notMatch": [
+							"\"name\":\"Grep\"",
+							"\"name\":\"Glob\""
+						]
+					}
+				}
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"bodyEquals": {
+					"tools": [
+						{
+							"name": "Bash"
+						}
+					]
+				}
+			}
+		]
+	},
+	"skip": [
+		"spec-gap"
+	]
+}

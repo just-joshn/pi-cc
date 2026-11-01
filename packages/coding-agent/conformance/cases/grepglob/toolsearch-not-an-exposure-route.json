@@ -1,0 +1,77 @@
+{
+	"id": "grepglob/toolsearch-not-an-exposure-route",
+	"area": "grepglob",
+	"argv": [
+		"-p",
+		"Reply with exactly PROBE_OK",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "ToolSearch",
+					"input": {
+						"query": "select:Grep,Glob",
+						"max_results": 5
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "ToolSearch",
+					"input": {
+						"query": "grep search files",
+						"max_results": 5
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 180000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"PROBE_OK"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"bodyAt": {
+					"tools": {
+						"notMatch": [
+							"\"name\":\"Grep\"",
+							"\"name\":\"Glob\""
+						]
+					},
+					"messages": {
+						"match": [
+							"\\{(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"type\":\"tool_result\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"tool_use_id\":\"toolu_conformance_0_0\")(?=(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"content\":(?:\"No matching deferred tools found\"|\\[(?:\\{\"type\":\"text\",\"text\":\"No matching deferred tools found\"\\}|\\{\"text\":\"No matching deferred tools found\",\"type\":\"text\"\\})\\]))(?!(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\"|\\{(?:[^\"{}]|\"(?:[^\"\\\\]|\\\\.)*\")*\\})*\"is_error\":true)"
+						],
+						"notMatch": [
+							"\"tool_name\":\"Grep\"",
+							"\"tool_name\":\"Glob\""
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": [
+		"spec-gap"
+	]
+}
