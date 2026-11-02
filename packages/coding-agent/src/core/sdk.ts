@@ -11,6 +11,7 @@ import { type CcPolicy, ccWireProfile } from "./cc-policy.ts";
 import { getClientIdentity } from "./client-identity.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import type { HookConfig } from "./hooks/config.ts";
 import { createToolNameMatcher } from "./mcp-servers.ts";
 import { convertToLlm } from "./messages.ts";
 import { anthropicEnvModel, findInitialModel } from "./model-resolver.ts";
@@ -106,6 +107,10 @@ export interface CreateAgentSessionOptions {
 	 * tools always did. The command line supplies it.
 	 */
 	permissions?: { state: PermissionState; prompts?: "host" | "none" };
+	/** Claude Code hooks for this session. Absent, no hook runs. */
+	hooks?: HookConfig;
+	/** Writes the terminal sequence a hook asked for. Set only where a terminal is attached. */
+	hookTerminal?: (sequence: string) => void;
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
 
@@ -560,6 +565,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		allowedToolNames,
 		excludedToolNames,
 		permissions: options.permissions,
+		hooks: options.hooks,
+		hookTerminal: options.hookTerminal,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});

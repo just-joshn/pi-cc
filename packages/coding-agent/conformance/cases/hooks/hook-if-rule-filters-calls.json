@@ -1,0 +1,68 @@
+{
+	"id": "hooks/hook-if-rule-filters-calls",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"cat >> ev.jsonl; echo >> ev.jsonl\",\"if\":\"Bash(git *)\"}]}]}}",
+		"--allowedTools",
+		"Bash"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "echo 1"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "git status"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "ev.jsonl",
+				"contains": [
+					"\"command\":\"git status\""
+				]
+			}
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

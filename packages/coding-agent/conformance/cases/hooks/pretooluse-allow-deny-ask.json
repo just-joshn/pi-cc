@@ -1,0 +1,86 @@
+{
+	"id": "hooks/pretooluse-allow-deny-ask",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"sh hooks/decide.sh\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n",
+		"hooks/decide.sh": "in=$(cat)\ncase \"$in\" in\n*allow.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"ALLOW_WHY\"}}';;\n*deny.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"DENY_WHY\"}}';;\n*ask.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"ASK_WHY\"}}';;\nesac\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch allow.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch deny.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ask.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"allow.txt"
+		],
+		"absent": [
+			"$WORKSPACE/deny.txt",
+			"$WORKSPACE/ask.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 4,
+				"bodyAt": {
+					"messages.4.content.0.content": {
+						"match": [
+							"^PreToolUse:Bash hook error: DENY_WHY"
+						]
+					},
+					"messages.6.content.0.content": {
+						"match": [
+							"^ASK_WHY"
+						]
+					}
+				},
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

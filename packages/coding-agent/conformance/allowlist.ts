@@ -89,6 +89,7 @@ const SIDE_ARGV: ArgvAllowlist = {
 		"--fallback-model",
 		"--betas",
 		"--autocompact",
+		"--include-hook-events",
 		// tool selection, which PR #7's cases pin
 		"--tools",
 		"--disallowedTools",
@@ -266,6 +267,10 @@ const CASE_ENV_KEYS: readonly string[] = [
 	"DO_NOT_TRACK",
 	// The memory cases switch CLAUDE.md loading off. It only removes context from the request.
 	"CLAUDE_CODE_DISABLE_CLAUDE_MDS",
+	"CLAUDE_CODE_STOP_HOOK_BLOCK_CAP",
+	"PROBE_ALLOWED",
+	"PROBE_DENIED",
+	"PROBE_OTHER",
 ];
 
 /**

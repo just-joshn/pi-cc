@@ -14,6 +14,24 @@ import type { Turn } from "../case.ts";
 /** The OTLP/HTTP signal paths, so a case can point an operator-owned exporter at the same mock port. */
 const OTLP_PATHS = ["/v1/metrics", "/v1/logs", "/v1/traces"];
 
+/** What an http hook pointed at the mock hears back, keyed by path. Every request is still recorded. */
+const HOOK_REPLIES: Readonly<Record<string, { status: number; type: string; body: string }>> = {
+	"/hook/deny": {
+		status: 200,
+		type: "application/json",
+		body: JSON.stringify({
+			hookSpecificOutput: {
+				hookEventName: "PreToolUse",
+				permissionDecision: "deny",
+				permissionDecisionReason: "HTTP_DENY_WHY",
+			},
+		}),
+	},
+	"/hook/headers": { status: 200, type: "application/json", body: "{}" },
+	"/hook/text": { status: 200, type: "text/plain", body: "HTTP_PLAIN_BODY" },
+	"/hook/fail": { status: 500, type: "text/plain", body: "boom" },
+};
+
 export interface RecordedRequest {
 	index: number;
 	path: string;
@@ -59,6 +77,11 @@ export async function startMockServer(options: { turns: Turn[]; outDir: string }
 			if (path.startsWith("/v1/messages/count_tokens")) {
 				const body = { input_tokens: Math.ceil(text.length / 4) };
 				response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+				return;
+			}
+			const hookReply = HOOK_REPLIES[path];
+			if (hookReply !== undefined) {
+				response.writeHead(hookReply.status, { "content-type": hookReply.type }).end(hookReply.body);
 				return;
 			}
 			if (!path.startsWith("/v1/messages")) {

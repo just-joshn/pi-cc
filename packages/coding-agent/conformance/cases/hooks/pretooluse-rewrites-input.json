@@ -1,0 +1,77 @@
+{
+	"id": "hooks/pretooluse-rewrites-input",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"allow\\\",\\\"updatedInput\\\":{\\\"command\\\":\\\"echo REWRITTEN > out.txt\\\"}}}'\"}]},{\"matcher\":\"Write\",\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"allow\\\",\\\"updatedInput\\\":{\\\"file_path\\\":\\\"rewritten.txt\\\",\\\"content\\\":\\\"HOOKED\\\"}}}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch ran.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Write",
+					"input": {
+						"file_path": "w.txt",
+						"content": "x"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			{
+				"path": "out.txt",
+				"contains": [
+					"REWRITTEN"
+				]
+			},
+			{
+				"path": "rewritten.txt",
+				"contains": [
+					"HOOKED"
+				]
+			}
+		],
+		"absent": [
+			"$WORKSPACE/ran.txt",
+			"$WORKSPACE/w.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

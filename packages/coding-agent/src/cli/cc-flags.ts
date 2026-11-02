@@ -495,7 +495,7 @@ export const CC_FLAGS: CcFlag[] = [
 		name: "include-hook-events",
 		arity: "boolean",
 		summary: "Include hook lifecycle events in the stream",
-		status: "accepted",
+		status: "wired",
 		apply: setBoolean("includeHookEvents"),
 	},
 	{

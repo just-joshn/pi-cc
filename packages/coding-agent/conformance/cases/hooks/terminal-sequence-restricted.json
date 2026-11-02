@@ -1,0 +1,47 @@
+{
+	"id": "hooks/terminal-sequence-restricted",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"terminalSequence\\\":\\\"\\\\u001b]0;TITLE_X\\\\u0007\\\"}'\"},{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"terminalSequence\\\":\\\"\\\\u001b[2JBADSEQ\\\"}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"\"subtype\":\"hook_response\""
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		]
+	},
+	"skip": []
+}

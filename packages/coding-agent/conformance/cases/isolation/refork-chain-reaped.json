@@ -43,8 +43,5 @@
 			}
 		]
 	},
-	"skip": [],
-	"not_applicable": {
-		"pi-cc": "hooks land in P08: this branch's pi-cc does not read settings hooks, so the hook that plants the attempt never runs on this side"
-	}
+	"skip": []
 }

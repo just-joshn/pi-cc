@@ -1,0 +1,66 @@
+{
+	"id": "hooks/permissionrequest-updated-permissions-grant-the-session",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PermissionRequest\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"if [ -e seen.txt ]; then echo again > second.txt; fi; touch seen.txt; printf '%s' '{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PermissionRequest\\\",\\\"decision\\\":{\\\"behavior\\\":\\\"allow\\\",\\\"updatedPermissions\\\":[{\\\"type\\\":\\\"addRules\\\",\\\"rules\\\":[{\\\"toolName\\\":\\\"Bash\\\",\\\"ruleContent\\\":\\\"touch:*\\\"}],\\\"behavior\\\":\\\"allow\\\",\\\"destination\\\":\\\"session\\\"}]}}}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch one.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch two.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"one.txt",
+			"two.txt",
+			"seen.txt"
+		],
+		"absent": [
+			"$WORKSPACE/second.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 3,
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

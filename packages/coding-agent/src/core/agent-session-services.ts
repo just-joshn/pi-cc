@@ -66,6 +66,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	ccPolicy?: CcPolicy;
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	permissions?: CreateAgentSessionOptions["permissions"];
+	hooks?: CreateAgentSessionOptions["hooks"];
+	hookTerminal?: CreateAgentSessionOptions["hookTerminal"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
 }
@@ -238,6 +240,8 @@ export async function createAgentSessionFromServices(
 		ccPolicy: options.ccPolicy,
 		excludeTools: options.excludeTools,
 		permissions: options.permissions,
+		hooks: options.hooks,
+		hookTerminal: options.hookTerminal,
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,

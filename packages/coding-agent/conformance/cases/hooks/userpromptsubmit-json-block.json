@@ -1,0 +1,49 @@
+{
+	"id": "hooks/userpromptsubmit-json-block",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"UserPromptSubmit\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"UPS_BLOCK_WHY\\\"}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"UserPromptSubmit operation blocked by hook:\\\\nUPS_BLOCK_WHY\\\\n\\\\nOriginal prompt: Run the probes",
+				"\"prompt_submit_outcome\":\\{\"kind\":\"blocked_by_hook\",\"prompt_kept\":false,\"reason\":\"UPS_BLOCK_WHY\"\\}",
+				"\"num_turns\":0"
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 0
+			}
+		]
+	},
+	"skip": []
+}

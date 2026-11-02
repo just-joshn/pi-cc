@@ -1,0 +1,10 @@
+{
+	"type": "system",
+	"subtype": "informational",
+	"content": "$string",
+	"level": "$string",
+	"?prevent_continuation": "$boolean",
+	"?prompt_submit_outcome": "$object",
+	"uuid": "$uuid",
+	"session_id": "$uuid"
+}

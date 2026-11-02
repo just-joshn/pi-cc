@@ -1,0 +1,104 @@
+{
+	"id": "hooks/pretooluse-merge-across-hooks",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"sh hooks/a.sh\"},{\"type\":\"command\",\"command\":\"sh hooks/b.sh\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n",
+		"hooks/a.sh": "in=$(cat)\ncase \"$in\" in\n*m1.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"A1\"}}';;\n*m2.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"K1\"}}';;\n*m3.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"D1\"}}';;\n*m4.txt*) echo E2 >&2; exit 2;;\nesac\n",
+		"hooks/b.sh": "in=$(cat)\nsleep 0.2\ncase \"$in\" in\n*m1.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"D1\"}}';;\n*m2.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"A2\"}}';;\n*m3.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"D2\"}}';;\n*m4.txt*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"A3\"}}';;\nesac\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch m1.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch m2.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch m3.txt"
+					}
+				}
+			},
+			{
+				"tool_use": {
+					"name": "Bash",
+					"input": {
+						"command": "touch m4.txt"
+					}
+				}
+			},
+			{
+				"text": "PROBE_OK"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"absent": [
+			"$WORKSPACE/m1.txt",
+			"$WORKSPACE/m2.txt",
+			"$WORKSPACE/m3.txt",
+			"$WORKSPACE/m4.txt"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 5,
+				"bodyAt": {
+					"messages.2.content.0.content": {
+						"match": [
+							"^PreToolUse:Bash hook error: D1"
+						]
+					},
+					"messages.4.content.0.content": {
+						"match": [
+							"^K1"
+						]
+					},
+					"messages.6.content.0.content": {
+						"match": [
+							"^PreToolUse:Bash hook error: D2"
+						]
+					},
+					"messages.8.content.0.content": {
+						"match": [
+							"^PreToolUse:Bash hook error: \\[sh hooks/a\\.sh\\]: E2"
+						]
+					}
+				},
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}

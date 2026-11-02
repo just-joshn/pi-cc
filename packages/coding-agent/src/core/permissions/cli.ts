@@ -75,6 +75,7 @@ export function permissionSetup(
 	addDir: readonly string[],
 	cwd: string,
 	env: Readonly<Record<string, string | undefined>> = process.env,
+	hooks: { readonly permissionRequestHooks: boolean } = { permissionRequestHooks: false },
 ): PermissionSetup {
 	const settings = settingsPermissions(settingsValues);
 	const rawDirectories = (settingsValues.permissions as { additionalDirectories?: unknown } | undefined)
@@ -101,6 +102,7 @@ export function permissionSetup(
 			removalWaiverRequested:
 				(env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS ?? "") !== "" &&
 				(env.CLAUDE_CODE_CHILD_SESSION ?? "") === "",
+			permissionRequestHooks: hooks.permissionRequestHooks,
 			...(typeof settingsValues.useAutoModeDuringPlan === "boolean"
 				? { useAutoModeDuringPlan: settingsValues.useAutoModeDuringPlan }
 				: {}),

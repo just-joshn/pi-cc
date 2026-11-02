@@ -76,10 +76,12 @@ async function main(): Promise<number> {
 		console.error("P01 isolation uses the macOS Seatbelt sandbox. Run this on macOS.");
 		return 2;
 	}
+	const caseFilter = values.case ?? process.env.CONFORMANCE_CASE;
+	const areaFilter = values.area ?? process.env.CONFORMANCE_AREA;
 	const selected = all.filter(
 		(testCase) =>
-			(values.case === undefined || testCase.id === values.case) &&
-			(values.area === undefined || testCase.area === values.area),
+			(caseFilter === undefined || testCase.id === caseFilter) &&
+			(areaFilter === undefined || testCase.area === areaFilter),
 	);
 	if (selected.length === 0) {
 		console.error("No cases matched.");

@@ -14,6 +14,18 @@ import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { SessionManager } from "./session-manager.ts";
 
+/** Claude Code's `reason` for a SessionEnd hook, from why pi tore the session down. */
+function sessionEndReason(reason: SessionShutdownEvent["reason"]): string {
+	switch (reason) {
+		case "new":
+			return "clear";
+		case "resume":
+			return "resume";
+		default:
+			return "other";
+	}
+}
+
 /**
  * Result returned by runtime creation.
  *
@@ -173,6 +185,7 @@ export class AgentSessionRuntime {
 			reason,
 			targetSessionFile,
 		});
+		await this.session.runSessionEndHooks(sessionEndReason(reason));
 		this.beforeSessionInvalidate?.();
 		this.session.dispose();
 	}
@@ -406,6 +419,7 @@ export class AgentSessionRuntime {
 			type: "session_shutdown",
 			reason: "quit",
 		});
+		await this.session.runSessionEndHooks(sessionEndReason("quit"));
 		this.beforeSessionInvalidate?.();
 		this.session.dispose();
 	}

@@ -1,0 +1,51 @@
+{
+	"id": "hooks/stop-continue-false-ends-the-run",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"printf '%s' '{\\\"continue\\\":false,\\\"stopReason\\\":\\\"STOP_CF\\\"}'\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "T0"
+			},
+			{
+				"text": "T1"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"stdout": {
+			"kind": "text",
+			"match": [
+				"\"terminal_reason\":\"stop_hook_prevented\"",
+				"\"result\":\"T0\""
+			]
+		},
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 1
+			}
+		]
+	},
+	"skip": []
+}

@@ -77,6 +77,25 @@ export interface CompactStatusFrame {
 	compact_error?: string;
 }
 
+/** The system frames hooks add: each hook's start and end, and the notices around them. */
+export type SystemHookFrame = Json & {
+	type: "system";
+	subtype: "hook_started" | "hook_response" | "informational" | "notification";
+	uuid: string;
+	session_id: string;
+};
+
+/** The user message Claude Code writes for the model when a Stop hook blocks: its feedback. */
+export interface SyntheticUserFrame {
+	type: "user";
+	message: { role: "user"; content: Json[] };
+	parent_tool_use_id: null;
+	session_id: string;
+	uuid: string;
+	timestamp: string;
+	isSynthetic: true;
+}
+
 export interface AssistantFrame {
 	type: "assistant";
 	message: {
@@ -172,6 +191,8 @@ export type SdkFrame =
 	| SystemStatusFrame
 	| CompactBoundaryFrame
 	| CompactStatusFrame
+	| SystemHookFrame
+	| SyntheticUserFrame
 	| AssistantFrame
 	| SyntheticApiErrorFrame
 	| UserToolResultFrame

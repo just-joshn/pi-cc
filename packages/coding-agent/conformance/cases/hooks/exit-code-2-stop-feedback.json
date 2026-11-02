@@ -1,0 +1,58 @@
+{
+	"id": "hooks/exit-code-2-stop-feedback",
+	"area": "hooks",
+	"argv": [
+		"-p",
+		"Run the probes",
+		"--model",
+		"claude-opus-4-7",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-hook-events",
+		"--settings",
+		"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"cat >> ev.jsonl; echo >> ev.jsonl; if [ $(wc -l < ev.jsonl) -lt 4 ]; then echo STOP_E2 >&2; exit 2; fi\"}]}]}}"
+	],
+	"env": {
+		"CLAUDE_CODE_TMPDIR": "$TMP"
+	},
+	"stdin": null,
+	"files": {
+		"seed.txt": "SEED\n"
+	},
+	"model": {
+		"turns": [
+			{
+				"text": "T0"
+			},
+			{
+				"text": "T1"
+			},
+			{
+				"text": "T2"
+			}
+		]
+	},
+	"timeout_ms": 90000,
+	"compare": {
+		"exit": 0,
+		"files": [
+			"ev.jsonl"
+		],
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"count": 2,
+				"bodyAt": {
+					"messages.2.content.0.text": {
+						"match": [
+							"^Stop hook feedback:\\n\\[cat >> ev\\.jsonl[^\\n]*\\]: STOP_E2\\n$"
+						]
+					}
+				},
+				"index": -1
+			}
+		]
+	},
+	"skip": []
+}
