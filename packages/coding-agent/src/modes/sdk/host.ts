@@ -145,6 +145,7 @@ export class SdkHost {
 			this.exitCode = 1;
 			return;
 		}
+		session.setHookStreamSink((item) => this.onHookItem(item));
 		if (this.options.includePartial) this.renderer.status();
 		if (this.options.replayUser) this.emit(replayFrame(facts.sessionId, prompt));
 		const tally = new TurnTally(

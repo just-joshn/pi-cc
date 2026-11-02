@@ -49,12 +49,22 @@ export interface HttpContext {
 }
 
 export async function runHttp(handler: HttpHandler, input: unknown, context: HttpContext): Promise<RawResult> {
-	const { allowedHttpUrls, httpEnvVarCap } = context.switches;
-	if (allowedHttpUrls && !allowedHttpUrls.some((pattern) => urlMatchesPattern(handler.url, pattern))) {
+	let normalizedUrl = handler.url;
+	try {
+		normalizedUrl = new URL(handler.url).href;
+	} catch {
 		return {
 			code: null,
 			stdout: "",
-			stderr: `HTTP hook blocked: ${handler.url} does not match any pattern in allowedHttpHookUrls`,
+			stderr: `HTTP hook blocked: malformed URL ${handler.url}`,
+		};
+	}
+	const { allowedHttpUrls, httpEnvVarCap } = context.switches;
+	if (allowedHttpUrls && !allowedHttpUrls.some((pattern) => urlMatchesPattern(normalizedUrl, pattern))) {
+		return {
+			code: null,
+			stdout: "",
+			stderr: `HTTP hook blocked: ${normalizedUrl} does not match any pattern in allowedHttpHookUrls`,
 		};
 	}
 	const named = httpEnvVarCap
@@ -68,7 +78,7 @@ export async function runHttp(handler: HttpHandler, input: unknown, context: Htt
 	const timeout = AbortSignal.timeout(handler.timeoutMs);
 	const signal = context.signal ? AbortSignal.any([timeout, context.signal]) : timeout;
 	try {
-		const response = await fetch(handler.url, {
+		const response = await fetch(normalizedUrl, {
 			method: "POST",
 			headers: { "Content-Type": "application/json", ...headers },
 			body: JSON.stringify(input),
@@ -81,7 +91,7 @@ export async function runHttp(handler: HttpHandler, input: unknown, context: Htt
 			const stderr = json ? "" : `HTTP hook must return JSON, but got non-JSON response body: ${body}`;
 			return { code: null, status: response.status, stdout: body, stderr };
 		}
-		return { code: null, status: response.status, stdout: "", stderr: `HTTP ${response.status} from ${handler.url}` };
+		return { code: null, status: response.status, stdout: "", stderr: `HTTP ${response.status} from ${normalizedUrl}` };
 	} catch (error) {
 		if (context.signal?.aborted) return { code: null, stdout: "", stderr: "Hook cancelled", failure: "cancelled" };
 		const timedOut = error instanceof Error && error.name === "TimeoutError";

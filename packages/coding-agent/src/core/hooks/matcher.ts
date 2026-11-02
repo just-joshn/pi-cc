@@ -47,6 +47,7 @@ export function selectHandlers(
 
 /** Two handlers with the same identity run once, however many tiers define them. */
 export function handlerKey(handler: HookHandler): string {
-	if (handler.type === "command") return `command:${handler.command}:${(handler.args ?? []).join("\0")}`;
-	return `http:${handler.url}:${JSON.stringify(handler.headers)}:${handler.allowedEnvVars.join(",")}`;
+	const filter = handler.filter ?? "";
+	if (handler.type === "command") return `command:${handler.command}:${(handler.args ?? []).join("\0")}:${filter}`;
+	return `http:${handler.url}:${JSON.stringify(handler.headers)}:${handler.allowedEnvVars.join(",")}:${filter}`;
 }

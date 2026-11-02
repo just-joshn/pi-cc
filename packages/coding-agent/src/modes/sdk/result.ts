@@ -397,13 +397,13 @@ export class SessionLedger {
 	blockedPromptResult(text: string, sessionId: string, now: number, startedAt: number): ResultFrame {
 		return {
 			is_error: false,
-			duration_api_ms: 0,
+			duration_api_ms: this.apiMs,
 			num_turns: 0,
 			stop_reason: null,
 			session_id: sessionId,
-			total_cost_usd: 0,
+			total_cost_usd: sum(this.models, "costUSD"),
 			usage: usageBlock({}),
-			modelUsage: {},
+			modelUsage: modelUsageBlock(this.models),
 			permission_denials: [],
 			fast_mode_state: "off",
 			fast_mode_disabled_reason: "sdk_opt_in_required",
