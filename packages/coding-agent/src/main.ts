@@ -113,6 +113,7 @@ import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
+import { parseLocalUsageCommand } from "./modes/local-usage.ts";
 import { STREAM_JSON_REQUIRES_VERBOSE, sdkFlagProblem, sdkOutputFormat } from "./modes/sdk/flags.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { captureStartupEnv, startupEnv } from "./utils/internal-env.ts";
@@ -1276,9 +1277,11 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// Claude Code prints its not-logged-in line on stdout in text mode, where stdout is human output.
 	// The SDK host reports the missing credential as frames, and pi's JSON mode reports it through pi's own path.
+	const isLocalUsage = initialMessage !== undefined && parseLocalUsageCommand(initialMessage) !== undefined;
 	if (
 		appMode === "print" &&
 		sdkFormat === undefined &&
+		!isLocalUsage &&
 		model !== undefined &&
 		!modelRuntime.hasConfiguredAuth(model.provider)
 	) {
@@ -1320,6 +1323,7 @@ export async function main(args: string[], options?: MainOptions) {
 			tuiMode: parsed.tuiMode,
 			initialThemeSetting: parsed.useTheme,
 			pricing: () => ccPricingPolicy(ccAdmission.run.settings),
+			rates: () => ccRatesContext(ccAdmission.run.settings, session.model?.id),
 			ccTui: () =>
 				resolveCcTuiSettings(ccRunSettings(ccAdmission.run.settings, parsed), {
 					axScreenReaderFlag: parsed.axScreenReader === true,

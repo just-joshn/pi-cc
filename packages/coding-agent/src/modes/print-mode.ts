@@ -204,7 +204,8 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		/** Runs one prompt; false when a local command answered it without a model call. */
 		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<boolean> => {
 			// /usage, /cost and /stats are local commands in text print mode: answered from the session totals.
-			if (parseLocalUsageCommand(text) !== undefined) {
+			if (mode === "text" && parseLocalUsageCommand(text) !== undefined) {
+				ranLocalCommand = true;
 				writeRawStdout(`${formatUsageReport(usageInput())}\n`);
 				return false;
 			}

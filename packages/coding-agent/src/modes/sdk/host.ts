@@ -12,10 +12,10 @@ import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.t
 import type { HookStreamItem } from "../../core/hooks/stream.ts";
 import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
 import { catalogLimits, chargeFor, type PricingPolicy, type RatesContext } from "../../core/usage/cost.ts";
-import { compactFailureText } from "../compact-failure.ts";
 import { costStateOf, restoredCostState } from "../../core/usage/cost-state.ts";
 import { collectUsage, formatUsageReport } from "../../core/usage/report.ts";
 import { SessionClock } from "../../core/usage/session-clock.ts";
+import { compactFailureText } from "../compact-failure.ts";
 import { parseLocalUsageCommand } from "../local-usage.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";

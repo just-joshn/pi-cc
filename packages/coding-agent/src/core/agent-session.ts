@@ -3451,8 +3451,8 @@ export class AgentSession {
 			if (!preparation) {
 				// Check why we can't compact
 				if (this._ccPolicy) throw new Error(CC_NOT_ENOUGH_MESSAGES);
-				const lastEntry = pathEntries[pathEntries.length - 1];
-				if (lastEntry?.type === "compaction") {
+				const lastTurn = pathEntries.findLast((entry) => entry.type === "compaction" || entry.type === "message");
+				if (lastTurn?.type === "compaction") {
 					throw new Error("Already compacted");
 				}
 				throw new Error("Nothing to compact (session too small)");
