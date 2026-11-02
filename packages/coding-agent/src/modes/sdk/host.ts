@@ -11,6 +11,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
 import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
 import { catalogLimits, chargeFor, hasNativeRates, type PricingPolicy } from "../../core/usage/cost.ts";
+import { compactFailureText } from "../compact-failure.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
 import { encodeFrame, parseInputLine } from "./codec.ts";
@@ -151,9 +152,23 @@ export class SdkHost {
 		this.renderer.beginTurn(tally);
 		const limit = limitTurns(session.agent, this.options.maxTurns);
 		const budget = gateBudget(session.agent, () => tally.overBudget());
+		let localOutput: string | undefined;
+		const localCommand = session.compactionLimits
+			? /^\/(compact|autocompact)(?:\s|$)/.exec(prompt.text)?.[1]
+			: undefined;
 		try {
-			await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
-			await session.waitForIdle();
+			if (localCommand === "compact") {
+				try {
+					await session.compact(prompt.text.slice(8).trim() || undefined);
+				} catch (error) {
+					tally.outcome = { kind: "local_command_error", text: compactFailureText(error) };
+				}
+			} else if (localCommand === "autocompact") {
+				localOutput = session.configureAutoCompaction(prompt.text.slice(12));
+			} else {
+				await session.prompt(prompt.text, { images: prompt.images.length > 0 ? prompt.images : undefined });
+				await session.waitForIdle();
+			}
 		} finally {
 			budget.release();
 			limit.release();
@@ -166,6 +181,8 @@ export class SdkHost {
 			};
 		}
 		const result = this.ledger.result(tally, session.sessionId, Date.now());
+		if (localCommand) result.local_command = localCommand;
+		if (localOutput !== undefined) result.result = localOutput;
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
 	}

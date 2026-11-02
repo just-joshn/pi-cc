@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { SdkFrame } from "../src/modes/sdk/frames.ts";
 import { FrameRenderer } from "../src/modes/sdk/render.ts";
-import { TurnTally } from "../src/modes/sdk/result.ts";
+import { SessionLedger, TurnTally } from "../src/modes/sdk/result.ts";
 
 function renderer(includePartial = false) {
 	const frames: SdkFrame[] = [];
@@ -14,8 +14,9 @@ function renderer(includePartial = false) {
 		now: () => 1_000,
 		limitsOf: () => ({ contextWindow: 0, maxOutputTokens: 0 }),
 	});
-	instance.beginTurn(new TurnTally(0, () => ({ usd: 0, basis: "list" })));
-	return { instance, frames };
+	const tally = new TurnTally(0, () => ({ usd: 0, basis: "list" }));
+	instance.beginTurn(tally);
+	return { instance, frames, tally };
 }
 
 function toolCall(name: string, args: Record<string, unknown>, modelCall?: ToolCall["modelCall"]): ToolCall {
@@ -78,6 +79,67 @@ function resultWith(content: unknown[]): AgentSessionEvent {
 		message: { role: "toolResult", toolCallId: "toolu_1", toolName: "x", content, isError: false, timestamp: 0 },
 	} as AgentSessionEvent;
 }
+
+describe("compaction frames", () => {
+	test("reports compacting, a success status and a boundary in oracle order", () => {
+		const { instance, frames } = renderer();
+		instance.onEvent({ type: "compaction_start", reason: "manual" });
+		instance.onEvent({
+			type: "compaction_end",
+			reason: "manual",
+			aborted: false,
+			willRetry: false,
+			result: { summary: "checkpoint", firstKeptEntryId: "", tokensBefore: 170_000, estimatedTokensAfter: 100 },
+		});
+		expect(frames).toMatchObject([
+			{ type: "system", subtype: "status", status: "compacting" },
+			{ type: "system", subtype: "status", status: null, compact_result: "success" },
+			{
+				type: "system",
+				subtype: "compact_boundary",
+				compact_metadata: {
+					trigger: "manual",
+					pre_tokens: 170_000,
+					post_tokens: 100,
+					duration_ms: 0,
+				},
+			},
+		]);
+	});
+	test("successful overflow recovery returns a successful result without clearing a budget stop", () => {
+		const { instance, tally } = renderer();
+		const ledger = new SessionLedger();
+		tally.outcome = { kind: "api_error", status: 400, text: "prompt is too long" };
+		const recovered: AgentSessionEvent = {
+			type: "compaction_end",
+			reason: "overflow",
+			aborted: false,
+			willRetry: true,
+			result: { summary: "checkpoint", firstKeptEntryId: "", tokensBefore: 200_000 },
+		};
+		instance.onEvent(recovered);
+		expect(ledger.result(tally, "session", 1000).is_error).toBe(false);
+		tally.outcome = { kind: "budget", limit: 1 };
+		instance.onEvent(recovered);
+		expect(ledger.result(tally, "session", 1000).is_error).toBe(true);
+	});
+	test("reports a failed summary without a successful boundary", () => {
+		const { instance, frames } = renderer();
+		instance.onEvent({ type: "compaction_start", reason: "threshold" });
+		instance.onEvent({
+			type: "compaction_end",
+			reason: "threshold",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+			errorMessage: "checkpoint unavailable",
+		});
+		expect(frames).toMatchObject([
+			{ status: "compacting" },
+			{ status: null, compact_result: "failed", compact_error: "checkpoint unavailable" },
+		]);
+	});
+});
 
 describe("tool_result content", () => {
 	const image = { type: "image", data: "QUJD", mimeType: "image/png" };

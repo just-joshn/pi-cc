@@ -1,0 +1,69 @@
+{
+	"id": "compact/prompt-too-long-reacts",
+	"area": "compact",
+	"argv": [
+		"-p",
+		"--model",
+		"claude-sonnet-4-5",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
+	},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"REACTIVE_HISTORY\"}}",
+			"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"REACTIVE_TASK\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "before"
+			},
+			{
+				"error": {
+					"status": 400,
+					"body": {
+						"type": "error",
+						"error": {
+							"type": "invalid_request_error",
+							"message": "prompt is too long: 210000 tokens > 200000 maximum"
+						}
+					}
+				}
+			},
+			{
+				"text": "<summary>REACTIVE_CHECKPOINT</summary>"
+			},
+			{
+				"text": "done"
+			}
+		]
+	},
+	"timeout_ms": 120000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 4,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"REACTIVE_CHECKPOINT"
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

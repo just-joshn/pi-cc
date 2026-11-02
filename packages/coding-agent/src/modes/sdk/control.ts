@@ -260,7 +260,7 @@ function getContextUsage(_request: ControlRequestBody, context: ControlContext):
 			totalTokens: used,
 			maxTokens,
 			rawMaxTokens: maxTokens,
-			autocompactSource: "model-default",
+			autocompactSource: session.compactionLimits?.source ?? "model-default",
 			percentage: usage?.percent === null || usage === undefined ? 0 : Math.round(usage.percent),
 			gridRows: [],
 			model: facts.model,
@@ -279,7 +279,7 @@ function getContextUsage(_request: ControlRequestBody, context: ControlContext):
 				tokens: 0,
 				skillFrontmatter: [],
 			},
-			autoCompactThreshold: maxTokens,
+			autoCompactThreshold: session.compactionLimits?.threshold ?? maxTokens,
 			isAutoCompactEnabled: session.autoCompactionEnabled,
 			messageBreakdown: {
 				toolCallTokens: 0,

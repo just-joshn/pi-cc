@@ -25,46 +25,7 @@
 				"text": "A"
 			},
 			{
-				"text": "SUMMARY"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
-			},
-			{
-				"text": "C"
+				"text": "<summary>SUMMARY</summary>"
 			},
 			{
 				"text": "C"
@@ -145,11 +106,24 @@
 					"x-anthropic-billing-header:",
 					"You are Claude Code, Anthropic's official CLI for Claude."
 				]
+			},
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 3,
+				"bodyAt": {
+					"messages": {
+						"match": [
+							"SUMMARY",
+							"three"
+						],
+						"notMatch": [
+							"\"one\""
+						]
+					}
+				}
 			}
 		]
 	},
-	"skip": [],
-	"not_applicable": {
-		"pi-cc": "the stream-json host does not dispatch /compact as a command yet, and the mock cannot cross an auto-compaction threshold; the compaction entry's prompt record is covered by unit tests"
-	}
+	"skip": []
 }

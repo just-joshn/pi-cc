@@ -1,0 +1,51 @@
+{
+	"id": "compact/clear-thinking-edit-present-when-thinking",
+	"area": "compact",
+	"argv": [
+		"-p",
+		"--model",
+		"claude-sonnet-4-5",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose"
+	],
+	"env": {},
+	"stdin": {
+		"kind": "stream-json",
+		"lines": [
+			"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}"
+		]
+	},
+	"files": {},
+	"model": {
+		"turns": [
+			{
+				"text": "done"
+			}
+		]
+	},
+	"timeout_ms": 120000,
+	"compare": {
+		"exit": 0,
+		"requests": [
+			{
+				"pathStartsWith": "/v1/messages",
+				"method": "POST",
+				"count": 1,
+				"bodyEquals": {
+					"context_management": {
+						"edits": [
+							{
+								"type": "clear_thinking_20251015",
+								"keep": "all"
+							}
+						]
+					}
+				}
+			}
+		]
+	},
+	"skip": []
+}

@@ -13,6 +13,7 @@ import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "..
 import { budgetExhausted, budgetStopLine, gateBudget } from "../core/usage/budget.ts";
 import { chargeFor, hasNativeRates, type PricingPolicy } from "../core/usage/cost.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
+import { compactFailureText } from "./compact-failure.ts";
 import { toJsonEvent } from "./json-event.ts";
 import { limitTurns } from "./max-turns.ts";
 import { SdkHost, type SdkHostOptions, type SdkPrompt } from "./sdk/host.ts";
@@ -177,11 +178,28 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 		const maxBudgetUsd = mode === "text" ? options.maxBudgetUsd : undefined;
 		let reachedMaxTurns = false;
+		const localOutputs: string[] = [];
+		let ranLocalCommand = false;
+		let compactFailed = false;
 		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<void> => {
 			const limit = limitTurns(session.agent, mode === "text" ? options.maxTurns : undefined);
 			const budget = gateBudget(session.agent, () => budgetExhausted(spentUsd, maxBudgetUsd));
 			try {
-				await session.prompt(text, { images });
+				ranLocalCommand = false;
+				if (session.compactionLimits && /^\/compact(?:\s|$)/.test(text)) {
+					ranLocalCommand = true;
+					try {
+						await session.compact(text.slice(8).trim() || undefined);
+						localOutputs.push("Compacted");
+					} catch (error) {
+						compactFailed = true;
+						console.error(compactFailureText(error));
+						exitCode = 1;
+					}
+				} else if (session.compactionLimits && /^\/autocompact(?:\s|$)/.test(text)) {
+					ranLocalCommand = true;
+					localOutputs.push(session.configureAutoCompaction(text.slice(12)));
+				} else await session.prompt(text, { images });
 			} finally {
 				budget.release();
 				limit.release();
@@ -194,7 +212,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		}
 
 		for (const message of messages) {
-			if (reachedMaxTurns || budgetExhausted(spentUsd, maxBudgetUsd)) break;
+			if (reachedMaxTurns || compactFailed || budgetExhausted(spentUsd, maxBudgetUsd)) break;
 			await promptWithinLimit(message);
 		}
 
@@ -208,7 +226,9 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			return 1;
 		}
 
-		if (mode === "text") {
+		if (mode === "text") for (const output of localOutputs) writeRawStdout(`${output}\n`);
+		if (compactFailed) return 1;
+		if (mode === "text" && !ranLocalCommand) {
 			const state = session.state;
 			const lastMessage = state.messages[state.messages.length - 1];
 

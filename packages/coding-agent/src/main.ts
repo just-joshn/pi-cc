@@ -1135,6 +1135,7 @@ export async function main(args: string[], options?: MainOptions) {
 			tools: sessionOptions.tools,
 			fixedTools: sessionOptions.fixedTools,
 			ccPolicy: buildCcPolicy({
+				settings: ccAdmission.run.settings.values,
 				flags: parsed,
 				entrypoint: appMode === "interactive" ? "cli" : "sdk-cli",
 				customPrompt: parsed.systemPrompt !== undefined,
