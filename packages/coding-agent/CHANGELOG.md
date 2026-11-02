@@ -4,6 +4,7 @@
 
 ### Added
 
+- Rebuilt the Bash removal permission check on the pinned-shell parser (`shell-syntax`, `shell-flow`): assignments, subshells, pipelines, heredocs, arithmetic and nested substitutions now feed the dangerous-`rm`/`rmdir` decision, so a variable made dangerous by an earlier assignment in the same command list is caught, and lines Claude Code allows at its permission layer are no longer refused on the safe side
 - Added persistent prompt history for the interactive prompt. Reverse search (Ctrl+R or vim `/`) now finds prompts from earlier sessions and other working directories. `PromptHistoryStore` keeps one append-only `prompt-history.jsonl` in the agent directory with private file permissions
 - Vim normal-mode `/` opens prompt-history search and `?` opens the shortcut sheet when Claude Code terminal settings configure the editor. An unconfigured pi editor keeps inserting `?` literally
 - Imported Claude Code `Global` keybindings stay active while the editor's overlays own the prompt, and `history:search` imports onto the native search action
