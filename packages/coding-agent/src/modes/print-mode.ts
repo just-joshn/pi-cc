@@ -195,7 +195,6 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 				selectedModel: session.model?.id,
 			});
 		const recordCostState = (): void => {
-		const recordCostState = (): void => {
 			session.sessionManager.appendCostState?.(costStateOf(usageInput(), clock));
 		};
 		let reachedMaxTurns = false;
@@ -228,31 +227,6 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 					ranLocalCommand = true;
 					localOutputs.push(session.configureAutoCompaction(text.slice(12)));
 					return false;
-				} else await session.prompt(text, { images });
-			} finally {
-				budget.release();
-				limit.release();
-			}
-			reachedMaxTurns ||= limit.reached();
-			return true;
-		};
-			const limit = limitTurns(session.agent, mode === "text" ? options.maxTurns : undefined);
-			const budget = gateBudget(session.agent, () => budgetExhausted(spentUsd, maxBudgetUsd));
-			try {
-				ranLocalCommand = false;
-				if (session.compactionLimits && /^\/compact(?:\s|$)/.test(text)) {
-					ranLocalCommand = true;
-					try {
-						await session.compact(text.slice(8).trim() || undefined);
-						localOutputs.push("Compacted");
-					} catch (error) {
-						compactFailed = true;
-						console.error(compactFailureText(error));
-						exitCode = 1;
-					}
-				} else if (session.compactionLimits && /^\/autocompact(?:\s|$)/.test(text)) {
-					ranLocalCommand = true;
-					localOutputs.push(session.configureAutoCompaction(text.slice(12)));
 				} else await session.prompt(text, { images });
 			} finally {
 				budget.release();
