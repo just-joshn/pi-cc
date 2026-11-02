@@ -95,7 +95,6 @@ export interface SyntheticUserFrame {
 	timestamp: string;
 	isSynthetic: true;
 }
-}
 
 export interface AssistantFrame {
 	type: "assistant";

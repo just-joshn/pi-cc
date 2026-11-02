@@ -67,7 +67,7 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { generateBugReportSummary } from "./bug-report.ts";
 import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
-import { CC_FAILURES_PER_MODEL, type CcPolicy, ccWireProfile } from "./cc-policy.ts";
+import { CC_FAILURES_PER_MODEL, type CcPolicy, ccWireProfile, defaultEffort, supportsEffort } from "./cc-policy.ts";
 import {
 	CC_COMPACT_DISABLED,
 	CC_NOT_ENOUGH_MESSAGES,
