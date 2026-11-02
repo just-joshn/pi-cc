@@ -38,6 +38,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.ts";
+import type { ModelSpend } from "./usage/report.ts";
 export const CURRENT_SESSION_VERSION = 3;
 
 export interface SessionHeader {
@@ -86,6 +87,22 @@ export interface UsageEntry extends SessionEntryBase {
 	usage: Usage;
 	/** Optional human-readable qualifier for usage notices. */
 	note?: string;
+}
+
+/** Session usage totals persisted after a finished turn; the newest entry wins on load. */
+export interface CostStateEntry extends SessionEntryBase {
+	type: "cost_state";
+	/** Wall duration in ms at save time; a resume re-anchors the clock so it continues from here. */
+	totalDuration: number;
+	/** Logical session start (epoch ms). */
+	startTime: number;
+	totalCostUSD: number;
+	/** Cumulative API time in ms. */
+	totalAPIDuration: number;
+	totalLinesAdded: number;
+	totalLinesRemoved: number;
+	modelUsage?: Record<string, ModelSpend>;
+	hasUnknownModelCost: boolean;
 }
 
 export interface CompactionEntry<T = unknown> extends SessionEntryBase {
@@ -185,6 +202,7 @@ export type SessionEntry =
 	| ThinkingLevelChangeEntry
 	| ModelChangeEntry
 	| UsageEntry
+	| CostStateEntry
 	| CompactionEntry
 	| BranchSummaryEntry
 	| CustomEntry
@@ -1262,6 +1280,19 @@ export class SessionManager {
 			model,
 			usage,
 			...(note ? { note } : {}),
+		};
+		this._appendEntry(entry);
+		return entry;
+	}
+
+	/** Append the session's cost-state totals after a finished turn. Returns the appended entry. */
+	appendCostState(state: Omit<CostStateEntry, "type" | "id" | "parentId" | "timestamp">): CostStateEntry {
+		const entry: CostStateEntry = {
+			type: "cost_state",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			...state,
 		};
 		this._appendEntry(entry);
 		return entry;

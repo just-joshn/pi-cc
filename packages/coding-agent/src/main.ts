@@ -100,13 +100,20 @@ import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/setti
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
-import { type PricingPolicy, parsePricingPolicy } from "./core/usage/cost.ts";
+import {
+	type PricingPolicy,
+	parseCostPromotions,
+	parseOperatorCosts,
+	parsePricingPolicy,
+	type RatesContext,
+} from "./core/usage/cost.ts";
 import { builtInExtensions } from "./extensions/index.ts";
 import { loadMcpCommand } from "./extensions/mcp/cli.lazy.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
+import { parseLocalUsageCommand } from "./modes/local-usage.ts";
 import { STREAM_JSON_REQUIRES_VERBOSE, sdkFlagProblem, sdkOutputFormat } from "./modes/sdk/flags.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { captureStartupEnv, startupEnv } from "./utils/internal-env.ts";
@@ -190,6 +197,17 @@ function ccPricingPolicy(settings: CcSettings): PricingPolicy | undefined {
 	return settings.sources.get("modelPricing") === "policy"
 		? parsePricingPolicy(settings.values.modelPricing)
 		: undefined;
+}
+
+/** The operator-fed rate inputs of the price chain, read from the policy tier like `modelPricing`. */
+function ccRatesContext(settings: CcSettings, selectedModel: string | undefined): RatesContext {
+	const policyValue = (key: string): unknown =>
+		settings.sources.get(key) === "policy" ? settings.values[key] : undefined;
+	return {
+		operatorCosts: parseOperatorCosts(policyValue("additionalModelCosts")),
+		promotions: parseCostPromotions(policyValue("modelCostPromotions")),
+		selectedModel,
+	};
 }
 
 function ccRunSettings(settings: CcSettings, parsed: Args): CcSettings {
@@ -1259,9 +1277,11 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// Claude Code prints its not-logged-in line on stdout in text mode, where stdout is human output.
 	// The SDK host reports the missing credential as frames, and pi's JSON mode reports it through pi's own path.
+	const isLocalUsage = initialMessage !== undefined && parseLocalUsageCommand(initialMessage) !== undefined;
 	if (
 		appMode === "print" &&
 		sdkFormat === undefined &&
+		!isLocalUsage &&
 		model !== undefined &&
 		!modelRuntime.hasConfiguredAuth(model.provider)
 	) {
@@ -1303,6 +1323,7 @@ export async function main(args: string[], options?: MainOptions) {
 			tuiMode: parsed.tuiMode,
 			initialThemeSetting: parsed.useTheme,
 			pricing: () => ccPricingPolicy(ccAdmission.run.settings),
+			rates: () => ccRatesContext(ccAdmission.run.settings, session.model?.id),
 			ccTui: () =>
 				resolveCcTuiSettings(ccRunSettings(ccAdmission.run.settings, parsed), {
 					axScreenReaderFlag: parsed.axScreenReader === true,
@@ -1332,6 +1353,7 @@ export async function main(args: string[], options?: MainOptions) {
 	} else {
 		printTimings();
 		const pricing = ccPricingPolicy(ccAdmission.run.settings);
+		const rates = ccRatesContext(ccAdmission.run.settings, model?.id);
 		const printOptions = {
 			messages: parsed.messages,
 			initialMessage,
@@ -1339,6 +1361,7 @@ export async function main(args: string[], options?: MainOptions) {
 			maxTurns: parsed.maxTurns,
 			maxBudgetUsd: parsed.maxBudgetUsd,
 			pricing,
+			rates,
 		};
 		const exitCode = await runPrintMode(
 			runtime,
@@ -1358,6 +1381,7 @@ export async function main(args: string[], options?: MainOptions) {
 							maxTurns: parsed.maxTurns,
 							maxBudgetUsd: parsed.maxBudgetUsd,
 							pricing,
+							rates,
 							hasAuth: (provider) => modelRuntime.hasConfiguredAuth(provider),
 							input: process.stdin,
 							env: process.env,

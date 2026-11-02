@@ -11,10 +11,14 @@ import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { budgetExhausted, budgetStopLine, gateBudget } from "../core/usage/budget.ts";
-import { chargeFor, hasNativeRates, type PricingPolicy } from "../core/usage/cost.ts";
+import { chargeFor, type PricingPolicy, type RatesContext } from "../core/usage/cost.ts";
+import { costStateOf, restoredCostState } from "../core/usage/cost-state.ts";
+import { collectUsage, formatUsageReport, type UsageReportInput } from "../core/usage/report.ts";
+import { SessionClock } from "../core/usage/session-clock.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { compactFailureText } from "./compact-failure.ts";
 import { toJsonEvent } from "./json-event.ts";
+import { parseLocalUsageCommand } from "./local-usage.ts";
 import { limitTurns } from "./max-turns.ts";
 import { SdkHost, type SdkHostOptions, type SdkPrompt } from "./sdk/host.ts";
 
@@ -34,6 +38,8 @@ interface PrintModeBase {
 	maxBudgetUsd?: number;
 	/** The operator's `modelPricing` policy setting, for the text mode's budget. */
 	pricing?: PricingPolicy;
+	/** The operator cost rows, promotions and the session's selected model, for the price chain. */
+	rates?: RatesContext;
 }
 
 export type PrintModeOptions =
@@ -139,8 +145,10 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				const message = event.message as AssistantMessage;
 				if (message.stopReason !== "error" && message.stopReason !== "aborted") {
-					const model = session.modelRuntime.getModel(message.provider, message.model);
-					spentUsd += chargeFor(message.model, message.usage, hasNativeRates(model?.cost), options.pricing).usd;
+					spentUsd += chargeFor(message.model, message.usage, options.pricing, {
+						...options.rates,
+						selectedModel: session.model?.id,
+					}).usd;
 				}
 			}
 			if (sdkHost !== undefined) {
@@ -177,11 +185,30 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		}
 
 		const maxBudgetUsd = mode === "text" ? options.maxBudgetUsd : undefined;
+		const clock = new SessionClock();
+		const restored = restoredCostState(session.sessionManager.getEntries?.() ?? []);
+		if (restored !== undefined) clock.restore(restored.totalDuration, restored.startTime);
+		// The accumulator below counts this run's spend only, so the budget needs no restored-cost split here.
+		const usageInput = (): UsageReportInput =>
+			collectUsage(session.state.messages, clock.elapsed(), options.pricing, {
+				...options.rates,
+				selectedModel: session.model?.id,
+			});
+		const recordCostState = (): void => {
+			session.sessionManager.appendCostState?.(costStateOf(usageInput(), clock));
+		};
 		let reachedMaxTurns = false;
 		const localOutputs: string[] = [];
 		let ranLocalCommand = false;
 		let compactFailed = false;
-		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<void> => {
+		/** Runs one prompt; false when a local command answered it without a model call. */
+		const promptWithinLimit = async (text: string, images?: ImageContent[]): Promise<boolean> => {
+			// /usage, /cost and /stats are local commands in text print mode: answered from the session totals.
+			if (mode === "text" && parseLocalUsageCommand(text) !== undefined) {
+				ranLocalCommand = true;
+				writeRawStdout(`${formatUsageReport(usageInput())}\n`);
+				return false;
+			}
 			const limit = limitTurns(session.agent, mode === "text" ? options.maxTurns : undefined);
 			const budget = gateBudget(session.agent, () => budgetExhausted(spentUsd, maxBudgetUsd));
 			try {
@@ -196,24 +223,27 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 						console.error(compactFailureText(error));
 						exitCode = 1;
 					}
+					return false;
 				} else if (session.compactionLimits && /^\/autocompact(?:\s|$)/.test(text)) {
 					ranLocalCommand = true;
 					localOutputs.push(session.configureAutoCompaction(text.slice(12)));
+					return false;
 				} else await session.prompt(text, { images });
 			} finally {
 				budget.release();
 				limit.release();
 			}
 			reachedMaxTurns ||= limit.reached();
+			return true;
 		};
 
 		if (initialMessage) {
-			await promptWithinLimit(initialMessage, initialImages);
+			if (await promptWithinLimit(initialMessage, initialImages)) recordCostState();
 		}
 
 		for (const message of messages) {
 			if (reachedMaxTurns || compactFailed || budgetExhausted(spentUsd, maxBudgetUsd)) break;
-			await promptWithinLimit(message);
+			if (await promptWithinLimit(message)) recordCostState();
 		}
 
 		if (maxBudgetUsd !== undefined && budgetExhausted(spentUsd, maxBudgetUsd)) {

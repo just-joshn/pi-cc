@@ -11,8 +11,12 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
 import type { HookStreamItem } from "../../core/hooks/stream.ts";
 import { budgetExhausted, gateBudget } from "../../core/usage/budget.ts";
-import { catalogLimits, chargeFor, hasNativeRates, type PricingPolicy } from "../../core/usage/cost.ts";
+import { catalogLimits, chargeFor, type PricingPolicy, type RatesContext } from "../../core/usage/cost.ts";
+import { costStateOf, restoredCostState } from "../../core/usage/cost-state.ts";
+import { collectUsage, formatUsageReport } from "../../core/usage/report.ts";
+import { SessionClock } from "../../core/usage/session-clock.ts";
 import { compactFailureText } from "../compact-failure.ts";
+import { parseLocalUsageCommand } from "../local-usage.ts";
 import { limitTurns } from "../max-turns.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
 import { encodeFrame, parseInputLine } from "./codec.ts";
@@ -21,7 +25,7 @@ import type { Json, SdkFrame, UserReplayFrame } from "./frames.ts";
 import { buildInitFrame, readSessionFacts } from "./init.ts";
 import { FrameRenderer } from "./render.ts";
 import { SessionLedger, TurnTally } from "./result.ts";
-import { syntheticApiErrorFrame } from "./synthetic.ts";
+import { localCommandFrame, syntheticApiErrorFrame } from "./synthetic.ts";
 
 export interface SdkHostOptions {
 	outputFormat: "json" | "stream-json";
@@ -39,6 +43,8 @@ export interface SdkHostOptions {
 	maxBudgetUsd?: number;
 	/** The operator's `modelPricing` policy setting, when one is set. */
 	pricing?: PricingPolicy;
+	/** The operator cost rows, promotions and the session's selected model, for the price chain. */
+	rates?: RatesContext;
 	/** Whether the provider has a credential, asked for the model selected now so a `set_model` shows. */
 	hasAuth(provider: string): boolean;
 	/** Where stream-json user messages and control requests arrive. */
@@ -61,6 +67,7 @@ export class SdkHost {
 	private readonly getSession: () => AgentSession;
 	private readonly options: SdkHostOptions;
 	private readonly ledger = new SessionLedger();
+	private readonly clock = new SessionClock();
 	private readonly permissionMode: { current: string };
 	private readonly collected: SdkFrame[] = [];
 	private readonly renderer: FrameRenderer;
@@ -77,6 +84,11 @@ export class SdkHost {
 		this.permissionMode = { current: options.permissionMode };
 		this.defaultModel = getSession().model;
 		getSession().setHookStreamSink((item) => this.onHookItem(item));
+		const restored = restoredCostState(getSession().sessionManager.getEntries?.() ?? []);
+		if (restored !== undefined) {
+			this.clock.restore(restored.totalDuration, restored.startTime);
+			this.ledger.seed(restored.totalCostUSD);
+		}
 		this.renderer = new FrameRenderer({
 			sessionId: () => this.getSession().sessionId,
 			includePartial: options.includePartial,
@@ -118,7 +130,7 @@ export class SdkHost {
 			const next = await inbox.next();
 			if (next === undefined || this.ended) break;
 			await this.turn(next);
-			if (budgetExhausted(this.ledger.spentUSD(), this.options.maxBudgetUsd)) break;
+			if (budgetExhausted(this.ledger.freshSpentUSD(), this.options.maxBudgetUsd)) break;
 		}
 		if (inbox.failure !== undefined) {
 			this.options.fail(inbox.failure);
@@ -133,6 +145,28 @@ export class SdkHost {
 		const startedAt = Date.now();
 		const { facts, authConfigured } = this.factsOf(session);
 		this.pendingInit = buildInitFrame(facts);
+		const local = parseLocalUsageCommand(prompt.text);
+		if (local !== undefined) {
+			// A local command answers without a model call, so it needs no credential either.
+			if (this.options.replayUser) this.emit(replayFrame(facts.sessionId, prompt));
+			const text = formatUsageReport(
+				collectUsage(session.state.messages, this.clock.elapsed(), this.options.pricing, {
+					...this.options.rates,
+					selectedModel: session.model?.id,
+				}),
+			);
+			this.emit(
+				localCommandFrame({
+					sessionId: facts.sessionId,
+					text,
+					command: local.command,
+					args: local.args,
+				}),
+			);
+			this.emit(this.ledger.localCommandResult(facts.sessionId, Date.now(), startedAt, local.command, text));
+			this.exitCode = 0;
+			return;
+		}
 		if (!authConfigured) {
 			this.emit(
 				syntheticApiErrorFrame({
@@ -151,10 +185,12 @@ export class SdkHost {
 		const tally = new TurnTally(
 			startedAt,
 			(message) => {
-				const model = session.modelRuntime.getModel(message.provider, message.model);
-				return chargeFor(message.model, message.usage, hasNativeRates(model?.cost), this.options.pricing);
+				return chargeFor(message.model, message.usage, this.options.pricing, {
+					...this.options.rates,
+					selectedModel: session.model?.id,
+				});
 			},
-			this.ledger.spentUSD(),
+			this.ledger.freshSpentUSD(),
 			this.options.maxBudgetUsd,
 		);
 		this.renderer.beginTurn(tally);
@@ -206,6 +242,9 @@ export class SdkHost {
 		this.tally = undefined;
 		this.emit(result);
 		this.exitCode = result.is_error ? 1 : 0;
+		const rates = { ...this.options.rates, selectedModel: session.model?.id };
+		const input = collectUsage(session.state.messages, this.clock.elapsed(), this.options.pricing, rates);
+		session.sessionManager.appendCostState?.(costStateOf(input, this.clock));
 	}
 
 	private readStdin(): Inbox {

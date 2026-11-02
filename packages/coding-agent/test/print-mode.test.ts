@@ -152,4 +152,32 @@ describe("runPrintMode", () => {
 		expect(exitCode).toBe(1);
 		expect(errorSpy).toHaveBeenCalled();
 	});
+
+	it("answers /usage locally in text mode without printing prior assistant message", async () => {
+		const runtimeHost = createRuntimeHost(
+			createAssistantMessage({ stopReason: "error", errorMessage: "prior error", text: "old response" }),
+		);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
+			mode: "text",
+			initialMessage: "/usage",
+		});
+
+		expect(exitCode).toBe(0);
+		expect(errorSpy).not.toHaveBeenCalled();
+		expect(runtimeHost.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("does not answer /usage locally in json mode", async () => {
+		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }));
+
+		const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
+			mode: "json",
+			initialMessage: "/usage",
+		});
+
+		expect(exitCode).toBe(0);
+		expect(runtimeHost.session.prompt).toHaveBeenCalledWith("/usage", { images: undefined });
+	});
 });

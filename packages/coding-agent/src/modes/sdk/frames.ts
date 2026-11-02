@@ -22,6 +22,8 @@ export interface MessageUsage {
 	cache_read_input_tokens?: number;
 	/** Present when the request wrote cache entries, split by lifetime. */
 	cache_creation?: { ephemeral_5m_input_tokens: number; ephemeral_1h_input_tokens: number };
+	/** Present when the request used server tools. */
+	server_tool_use?: { web_search_requests: number; web_fetch_requests: number };
 }
 
 export interface SystemInitFrame {
@@ -130,6 +132,19 @@ export interface SyntheticApiErrorFrame {
 	api_error_status?: number;
 }
 
+/** The assistant row Claude Code writes to deliver a local command's text output. */
+export interface LocalCommandFrame {
+	type: "assistant";
+	message: Json;
+	parent_tool_use_id: null;
+	session_id: string;
+	uuid: string;
+	timestamp: string;
+	local_command_source: string;
+	local_command_run: { command: string; args: string };
+	local_command_outcome: { kind: string };
+}
+
 export interface UserToolResultFrame {
 	type: "user";
 	message: { role: "user"; content: Json[] };
@@ -195,6 +210,7 @@ export type SdkFrame =
 	| SyntheticUserFrame
 	| AssistantFrame
 	| SyntheticApiErrorFrame
+	| LocalCommandFrame
 	| UserToolResultFrame
 	| UserInterruptFrame
 	| UserReplayFrame

@@ -104,7 +104,7 @@ export class TurnTally {
 		this.budgetUsd = budgetUsd;
 	}
 
-	/** What the session has spent so far, this user message included. */
+	/** What this run has spent so far, this user message included; the budget's base, restored cost excluded. */
 	spentUSD(): number {
 		return Object.values(this.models).reduce((total, model) => total + model.costUSD, this.priorCostUSD);
 	}
@@ -245,7 +245,7 @@ function modelUsageBlock(models: Record<string, ModelTotals>): Json {
 				webSearchRequests: totals.webSearchRequests,
 				costUSD: totals.costUSD,
 				...totals.limits,
-				thinkingTokens: totals.thinkingTokens,
+				...(totals.thinkingTokens > 0 ? { thinkingTokens: totals.thinkingTokens } : {}),
 				cacheCreationEphemeral5mInputTokens: totals.cacheCreation5m,
 				cacheCreationEphemeral1hInputTokens: totals.cacheCreation1h,
 				canonicalModel: canonicalName(model),
@@ -293,13 +293,24 @@ const SUBAGENT_STATS = {
 /** The totals that outlive one user message: cost, API time and per-model usage grow across turns. */
 export class SessionLedger {
 	private models: Record<string, ModelTotals> = {};
-
-	/** What the session has spent over every user message folded in. */
-	spentUSD(): number {
-		return sum(this.models, "costUSD");
-	}
 	private apiMs = 0;
 	private resultIndex = 0;
+	private restoredCostUSD = 0;
+
+	/** Seeds the cost a resumed session starts from; result totals report it, the budget does not. */
+	seed(costUSD: number): void {
+		this.restoredCostUSD = costUSD;
+	}
+
+	/** What this run has spent, restored dollars excluded: the budget counts only these. */
+	freshSpentUSD(): number {
+		return sum(this.models, "costUSD");
+	}
+
+	/** What the session has spent over every user message folded in, restored cost included. */
+	spentUSD(): number {
+		return this.freshSpentUSD() + this.restoredCostUSD;
+	}
 
 	/** Folds a finished turn in and returns its `result` frame. */
 	result(turn: TurnTally, sessionId: string, now: number): ResultFrame {
@@ -311,7 +322,7 @@ export class SessionLedger {
 			duration_api_ms: this.apiMs,
 			stop_reason: turn.stopReason,
 			session_id: sessionId,
-			total_cost_usd: sum(this.models, "costUSD"),
+			total_cost_usd: this.spentUSD(),
 			usage: usageBlock(turn.models, turn.failedUsage),
 			modelUsage: modelUsageBlock(this.models),
 			permission_denials: turn.denials,
@@ -385,12 +396,42 @@ export class SessionLedger {
 				return {
 					...common,
 					subtype: "error_max_budget_usd",
-					errors: [budgetErrorText(sum(this.models, "costUSD"), outcome.limit)],
+					errors: [budgetErrorText(this.spentUSD(), outcome.limit)],
 					...tail,
 				};
 			case "local_command_error":
 				return { ...common, subtype: "error_during_execution", errors: [outcome.text], ...tail };
 		}
+	}
+
+	/** The success result of a turn a local command answered without a model call. */
+	localCommandResult(sessionId: string, now: number, startedAt: number, command: string, text: string): ResultFrame {
+		return {
+			duration_api_ms: this.apiMs,
+			stop_reason: "end_turn",
+			session_id: sessionId,
+			total_cost_usd: this.spentUSD(),
+			usage: usageBlock({}),
+			modelUsage: modelUsageBlock(this.models),
+			permission_denials: [],
+			terminal_reason: "completed",
+			fast_mode_state: "off",
+			fast_mode_disabled_reason: "sdk_opt_in_required",
+			subagent_stats: SUBAGENT_STATS,
+			safety_stops: 0,
+			is_error: false,
+			num_turns: 1,
+			subtype: "success",
+			api_error_status: null,
+			result: text,
+			local_command: command,
+			type: "result",
+			duration_ms: Math.max(0, now - startedAt),
+			uuid: randomUUID(),
+			queued_turn_count: 0,
+			result_index: this.nextResultIndex(),
+			model_usage_since_last_result: {},
+		};
 	}
 
 	/** The result for a prompt a UserPromptSubmit hook dropped: no request went out, and the reason is the answer. */

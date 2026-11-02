@@ -860,7 +860,8 @@ export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
 ): CompactionPreparation | undefined {
-	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
+	const lastTurn = pathEntries.findLast((entry) => entry.type === "compaction" || entry.type === "message");
+	if (lastTurn?.type === "compaction") {
 		return undefined;
 	}
 

@@ -91,7 +91,12 @@ export async function runHttp(handler: HttpHandler, input: unknown, context: Htt
 			const stderr = json ? "" : `HTTP hook must return JSON, but got non-JSON response body: ${body}`;
 			return { code: null, status: response.status, stdout: body, stderr };
 		}
-		return { code: null, status: response.status, stdout: "", stderr: `HTTP ${response.status} from ${normalizedUrl}` };
+		return {
+			code: null,
+			status: response.status,
+			stdout: "",
+			stderr: `HTTP ${response.status} from ${normalizedUrl}`,
+		};
 	} catch (error) {
 		if (context.signal?.aborted) return { code: null, stdout: "", stderr: "Hook cancelled", failure: "cancelled" };
 		const timedOut = error instanceof Error && error.name === "TimeoutError";

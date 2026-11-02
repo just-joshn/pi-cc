@@ -223,6 +223,8 @@ export class FrameRenderer {
 			}
 		}
 		if (partial.usage.cacheRead > 0) usage.cache_read_input_tokens = partial.usage.cacheRead;
+		const searches = partial.usage.webSearchRequests ?? 0;
+		if (searches > 0) usage.server_tool_use = { web_search_requests: searches, web_fetch_requests: 0 };
 		this.open = {
 			id: partial.responseId ?? `msg_${randomUUID().replaceAll("-", "")}`,
 			model: partial.responseModel ?? partial.model,

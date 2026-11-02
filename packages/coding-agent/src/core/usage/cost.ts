@@ -20,18 +20,15 @@ export interface UsageBreakdown {
 /** `list` is a price Claude Code publishes, `managed` one an operator set in policy, `unknown` a model nobody priced. */
 export type CostBasis = "list" | "managed" | "unknown";
 
-/** How one model is charged: from a rate table, or from the cost pi's own catalog already computed. */
-export type ModelPrice =
-	| {
-			kind: "table";
-			rates: ModelRates;
-			/** The multiplier a managed policy sets. */
-			multiplier: number;
-			/** Managed per-model rates ignore the serving region. */
-			regionPremium: boolean;
-			basis: CostBasis;
-	  }
-	| { kind: "native"; basis: "unknown" };
+/** How one model is charged: a rate table, the multiplier a policy sets, and whether the serving region can raise it. */
+export interface ModelPrice {
+	rates: ModelRates;
+	/** The multiplier a managed policy sets. */
+	multiplier: number;
+	/** Managed per-model rates ignore the serving region. */
+	regionPremium: boolean;
+	basis: CostBasis;
+}
 
 /** The operator's `modelPricing` policy setting. */
 export interface PricingPolicy {
@@ -40,6 +37,29 @@ export interface PricingPolicy {
 	exact: ReadonlyMap<string, ModelRates>;
 	/** The same rates keyed by the catalog id the name resolves to, so any spelling of a built-in model finds them. */
 	builtin: ReadonlyMap<string, ModelRates>;
+}
+
+/** The operator's `additionalModelCosts` setting: model name → rates, validated rows only. */
+export type OperatorCostTable = ReadonlyMap<string, ModelRates>;
+
+/** One `modelCostPromotions` row: price the name `as` a catalog model until `endsAt`. */
+export interface AliasPromotion {
+	as: string;
+	/** Epoch seconds, the unit Claude Code's promotion records carry. */
+	endsAt: number;
+}
+
+/** The operator's `modelCostPromotions` setting, the pi-native feed for CC's alias promotions. */
+export type PromotionTable = ReadonlyMap<string, AliasPromotion>;
+
+/** The operator-fed and session inputs Claude Code's price chain consults beyond its own policy. */
+export interface RatesContext {
+	/** pi-native operator data source for CC's additionalModelCostsCache (settings/policy key). */
+	operatorCosts?: OperatorCostTable;
+	/** pi-native operator data source for CC's alder_ford promotion ({as, ends_at}). */
+	promotions?: PromotionTable;
+	/** The session's selected model (CC's `_d()`); its catalog entry feeds the selected-model fallback. */
+	selectedModel?: string;
 }
 
 const REGION_PREMIUM = 1.1;
@@ -65,8 +85,7 @@ function clamp(value: number, max: number): number {
 }
 
 /** The dollars one request costs at `price`. Every term is a category priced on its own, so the order of terms follows Claude Code's. */
-export function costOf(breakdown: UsageBreakdown, price: ModelPrice, nativeUsd: number): number {
-	if (price.kind === "native") return nativeUsd;
+export function costOf(breakdown: UsageBreakdown, price: ModelPrice): number {
 	const rates = promptRates(price.rates, breakdown);
 	const tokens =
 		(breakdown.input / 1e6) * rates.input +
@@ -92,41 +111,64 @@ function cacheWriteCost(rates: AppliedRates, breakdown: UsageBreakdown): number 
 	return (oneHour / 1e6) * rates.cacheWrite1h + ((breakdown.cacheWrite - oneHour) / 1e6) * rates.cacheWrite5m;
 }
 
-/** What the session's pi catalog says about a model Claude Code has no price for. */
-export interface NativeCost {
-	/** Whether the pi catalog has rates for the model. Zero rates mean it has none. */
-	priced: boolean;
-}
-
 /**
- * The charge for a model name. A model in Claude Code's catalog pays its list rates, or the operator's.
- * A model outside it that pi's own catalog prices keeps pi's cost. A model nobody prices pays the default
- * rates and is marked `unknown`, as Claude Code does.
+ * The charge for a model name, through Claude Code's chain: the policy override, an alias promotion,
+ * an operator row for an alias's identity spelling, the catalog's fast or list rates, an operator row
+ * keyed by the name, the selected model's catalog rates, and finally the default rates.
+ * A model that hit none of the catalog, the operator rows and no promotion is marked `unknown`.
  */
 export function priceOf(
 	name: string,
 	speed: string | undefined,
-	native: NativeCost,
 	policy: PricingPolicy | undefined,
+	rates: RatesContext | undefined,
 ): ModelPrice {
-	const model = findCatalogModel(name);
-	const configured = policy === undefined ? undefined : managedRates(policy, name, model);
-	if (configured !== undefined && policy !== undefined) {
-		return {
-			kind: "table",
-			rates: configured,
-			multiplier: policy.multiplier,
-			regionPremium: false,
-			basis: "managed",
-		};
-	}
 	const multiplier = policy?.multiplier ?? 1;
-	if (model !== undefined) {
-		const basis = multiplier === 1 ? "list" : "managed";
-		return { kind: "table", rates: ratesOf(model, speed), multiplier, regionPremium: true, basis };
+	const identity = name.toLowerCase().replace(/\[1m\]/g, "");
+	const model = findCatalogModel(name);
+
+	const configured = policy === undefined ? undefined : managedRates(policy, name, model);
+	if (configured !== undefined) {
+		return { rates: configured, multiplier, regionPremium: false, basis: "managed" };
 	}
-	if (native.priced) return { kind: "native", basis: "unknown" };
-	return { kind: "table", rates: DEFAULT_RATES, multiplier, regionPremium: true, basis: "unknown" };
+	// Fast responses skip the promotion: Claude Code routes them straight at the model's own rates.
+	if (speed !== "fast") {
+		const promotion = rates?.promotions?.get(identity);
+		const target = promotion === undefined ? undefined : findCatalogModel(promotion.as);
+		if (promotion !== undefined && target !== undefined && Date.now() < promotion.endsAt * 1000) {
+			return { rates: ratesOf(target, speed), multiplier, regionPremium: true, basis: listOrManaged(multiplier) };
+		}
+	}
+	// A name that resolved through an alias can carry an operator row for its exact spelling.
+	const operator = rates?.operatorCosts;
+	if (operator !== undefined && model !== undefined && model.id !== identity) {
+		const aliased = operator.get(identity);
+		if (aliased !== undefined) return operatorPrice(aliased, multiplier);
+	}
+	if (model !== undefined) {
+		return { rates: ratesOf(model, speed), multiplier, regionPremium: true, basis: listOrManaged(multiplier) };
+	}
+	// Only a name outside the catalog reaches here, so the operator row is keyed by its own spelling.
+	const named = operator?.get(identity);
+	if (named !== undefined) return operatorPrice(named, multiplier);
+	const selected = rates?.selectedModel === undefined ? undefined : findCatalogModel(rates.selectedModel);
+	if (selected !== undefined) {
+		return { rates: ratesOf(selected, speed), multiplier, regionPremium: true, basis: unmatchedBasis(multiplier) };
+	}
+	return { rates: DEFAULT_RATES, multiplier, regionPremium: true, basis: unmatchedBasis(multiplier) };
+}
+
+function listOrManaged(multiplier: number): CostBasis {
+	return multiplier === 1 ? "list" : "managed";
+}
+
+/** A model nothing matched still reads as managed pricing while a multiplier policy is in force. */
+function unmatchedBasis(multiplier: number): CostBasis {
+	return multiplier === 1 ? "unknown" : "managed";
+}
+
+function operatorPrice(rates: ModelRates, multiplier: number): ModelPrice {
+	return { rates, multiplier, regionPremium: false, basis: listOrManaged(multiplier) };
 }
 
 function managedRates(policy: PricingPolicy, name: string, model: CatalogModel | undefined): ModelRates | undefined {
@@ -154,9 +196,9 @@ export function parsePricingPolicy(value: unknown): PricingPolicy | undefined {
 	const builtin = new Map<string, ModelRates>();
 	const overrides = isRecord(value.overrides) ? value.overrides : {};
 	for (const [name, row] of Object.entries(overrides)) {
-		const rates = overrideRates(row);
+		const rates = rateRow(row);
 		if (rates === undefined) continue;
-		const key = name.toLowerCase().replace(/\[1m\]/g, "");
+		const key = rowKey(name);
 		if (exact.has(key)) continue;
 		exact.set(key, rates);
 		const catalogId = exactCatalogModel(key)?.id;
@@ -174,28 +216,62 @@ function exactCatalogModel(key: string): CatalogModel | undefined {
 	return CATALOG.find((model) => model.id === key || model.providerIds.includes(key));
 }
 
-function overrideRates(row: unknown): ModelRates | undefined {
+/** Reads the `additionalModelCosts` setting: model name → rates. A row with a bad shape is dropped. */
+export function parseOperatorCosts(value: unknown): OperatorCostTable | undefined {
+	return parseRateRows(value);
+}
+
+/** Reads the `modelCostPromotions` setting: alias → {as, endsAt}. A row with a bad shape is dropped. */
+export function parseCostPromotions(value: unknown): PromotionTable | undefined {
+	if (!isRecord(value)) return undefined;
+	const promotions = new Map<string, AliasPromotion>();
+	for (const [name, row] of Object.entries(value)) {
+		if (!isRecord(row) || typeof row.as !== "string" || row.as === "" || !isFiniteNumber(row.endsAt)) continue;
+		promotions.set(rowKey(name), { as: row.as, endsAt: row.endsAt });
+	}
+	return promotions.size > 0 ? promotions : undefined;
+}
+
+function rowKey(name: string): string {
+	return name.toLowerCase().replace(/\[1m\]/g, "");
+}
+
+/** Collects validated cost rows keyed by spelling, dropping every row with a bad shape. */
+function parseRateRows(value: unknown): Map<string, ModelRates> | undefined {
+	if (!isRecord(value)) return undefined;
+	const rows = new Map<string, ModelRates>();
+	for (const [name, row] of Object.entries(value)) {
+		const rates = rateRow(row);
+		if (rates === undefined || rows.has(rowKey(name))) continue;
+		rows.set(rowKey(name), rates);
+	}
+	return rows.size > 0 ? rows : undefined;
+}
+
+function rateRow(row: unknown): ModelRates | undefined {
 	if (!isRecord(row)) return undefined;
 	const { input, output, cacheRead, cacheWrite } = row;
-	for (const rate of [input, output, cacheRead, cacheWrite]) {
-		if (typeof rate !== "number" || !(rate >= 0)) return undefined;
-	}
+	if (!isRate(input) || !isRate(output) || !isRate(cacheRead) || !isRate(cacheWrite)) return undefined;
 	return {
-		input: input as number,
-		output: output as number,
-		cacheRead: cacheRead as number,
-		cacheWrite5m: cacheWrite as number,
-		webSearch: DEFAULT_RATES.webSearch,
+		input,
+		output,
+		cacheRead,
+		cacheWrite5m: cacheWrite,
+		...(isRate(row.cacheWrite1h) ? { cacheWrite1h: row.cacheWrite1h } : {}),
+		webSearch: isRate(row.webSearch) ? row.webSearch : DEFAULT_RATES.webSearch,
 	};
+}
+
+function isRate(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Whether pi's own catalog prices a model: a model with no rates at all is one nobody priced. */
-export function hasNativeRates(cost: { input: number; output: number } | undefined): boolean {
-	return cost !== undefined && (cost.input > 0 || cost.output > 0);
 }
 
 export interface Charge {
@@ -203,13 +279,13 @@ export interface Charge {
 	basis: CostBasis;
 }
 
-/** The charge for one finished request of the model named `name`, with `nativePriced` saying whether pi's catalog prices it. */
+/** The charge for one finished request of the model named `name`, at the chain's price for it. */
 export function chargeFor(
 	name: string,
 	usage: Usage,
-	nativePriced: boolean,
 	policy: PricingPolicy | undefined,
+	rates: RatesContext | undefined,
 ): Charge {
-	const price = priceOf(name, usage.speed, { priced: nativePriced }, policy);
-	return { usd: costOf(breakdownOf(usage), price, usage.cost.total), basis: price.basis };
+	const price = priceOf(name, usage.speed, policy, rates);
+	return { usd: costOf(breakdownOf(usage), price), basis: price.basis };
 }

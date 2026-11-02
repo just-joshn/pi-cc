@@ -26,7 +26,8 @@ export function prepareCcCompaction(
 	entries: SessionEntry[],
 	settings: CompactionSettings,
 ): CompactionPreparation | undefined {
-	if (entries.at(-1)?.type === "compaction") return undefined;
+	const lastTurn = entries.findLast((entry) => entry.type === "compaction" || entry.type === "message");
+	if (lastTurn?.type === "compaction") return undefined;
 	const projection = buildSessionProjection(entries);
 	const messages = projection.messages.filter((message) => message.role !== "system");
 	if (messages.length === 0) return undefined;

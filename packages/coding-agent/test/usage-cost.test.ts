@@ -1,8 +1,18 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "vitest";
 import { budgetErrorText, budgetExhausted } from "../src/core/usage/budget.ts";
-import { breakdownOf, canonicalName, chargeFor, costOf, parsePricingPolicy, priceOf } from "../src/core/usage/cost.ts";
-import { CATALOG, findCatalogModel } from "../src/core/usage/pricing.ts";
+import {
+	breakdownOf,
+	canonicalName,
+	chargeFor,
+	costOf,
+	parseCostPromotions,
+	parseOperatorCosts,
+	parsePricingPolicy,
+	priceOf,
+	type RatesContext,
+} from "../src/core/usage/cost.ts";
+import { CATALOG, findCatalogModel, type ModelRates } from "../src/core/usage/pricing.ts";
 import { formatDuration, formatUsageReport, formatUsd } from "../src/core/usage/report.ts";
 import { statusContextWindow } from "../src/core/usage/status.ts";
 
@@ -18,9 +28,8 @@ function usage(over: Partial<Usage> = {}): Usage {
 	};
 }
 
-const NOT_PRICED = { priced: false };
-const price = (model: string, speed?: string) => priceOf(model, speed, NOT_PRICED, undefined);
-const cost = (model: string, over: Partial<Usage>) => costOf(breakdownOf(usage(over)), price(model), 0);
+const price = (model: string, speed?: string) => priceOf(model, speed, undefined, undefined);
+const cost = (model: string, over: Partial<Usage>) => costOf(breakdownOf(usage(over)), price(model));
 
 describe("cost per token category", () => {
 	test("prices input, output and cache read per million tokens", () => {
@@ -73,20 +82,19 @@ describe("long prompt pricing", () => {
 
 describe("inference geo and speed", () => {
 	test("multiplies the token subtotal by 1.1 for us, never the web search charge", () => {
-		const base = costOf(breakdownOf(usage({ input: 1e6, webSearchRequests: 1 })), price("claude-opus-4-8"), 0);
+		const base = costOf(breakdownOf(usage({ input: 1e6, webSearchRequests: 1 })), price("claude-opus-4-8"));
 		const us = costOf(
 			breakdownOf(usage({ input: 1e6, webSearchRequests: 1, inferenceGeo: "us" })),
 			price("claude-opus-4-8"),
-			0,
 		);
 		expect(base).toBeCloseTo(5.01);
 		expect(us).toBeCloseTo(5 * 1.1 + 0.01);
 	});
 
 	test("charges fast-mode responses at the fast rates of models that have them", () => {
-		const fast = costOf(breakdownOf(usage({ input: 1e6, speed: "fast" })), price("claude-opus-4-8", "fast"), 0);
+		const fast = costOf(breakdownOf(usage({ input: 1e6, speed: "fast" })), price("claude-opus-4-8", "fast"));
 		expect(fast).toBeCloseTo(10);
-		const slow = costOf(breakdownOf(usage({ input: 1e6, speed: "fast" })), price("claude-sonnet-4-5", "fast"), 0);
+		const slow = costOf(breakdownOf(usage({ input: 1e6, speed: "fast" })), price("claude-sonnet-4-5", "fast"));
 		expect(slow).toBeCloseTo(3);
 	});
 });
@@ -114,18 +122,143 @@ describe("model names", () => {
 
 describe("unknown models", () => {
 	test("a model nobody prices pays the default rates and is marked unknown", () => {
-		const unknown = priceOf("mock-1", undefined, NOT_PRICED, undefined);
+		const unknown = priceOf("mock-1", undefined, undefined, undefined);
 		expect(unknown.basis).toBe("unknown");
-		expect(costOf(breakdownOf(usage({ input: 1e6 })), unknown, 0)).toBeCloseTo(5);
+		expect(costOf(breakdownOf(usage({ input: 1e6 })), unknown)).toBeCloseTo(5);
 	});
 
-	test("a model only pi's catalog prices keeps pi's cost and is marked unknown", () => {
-		const charge = chargeFor("gpt-6.1", usage(), true, undefined);
-		expect(charge).toEqual({ usd: 0.123, basis: "unknown" });
+	test("a model pi's catalog also prices ignores pi's cost", () => {
+		expect(chargeFor("gpt-6.1", usage({ input: 1e6 }), undefined, undefined)).toEqual({ usd: 5, basis: "unknown" });
 	});
 
 	test("a Claude Code model ignores pi's cost", () => {
-		expect(chargeFor("claude-opus-4-8", usage({ input: 1e6 }), true, undefined)).toEqual({ usd: 5, basis: "list" });
+		expect(chargeFor("claude-opus-4-8", usage({ input: 1e6 }), undefined, undefined)).toEqual({
+			usd: 5,
+			basis: "list",
+		});
+	});
+});
+
+describe("unknown-model fallback chain", () => {
+	test("an unknown model pays the selected model's catalog rates", () => {
+		const charge = chargeFor("probe-unknown-x", usage({ input: 1e6 }), undefined, {
+			selectedModel: "claude-sonnet-4-5",
+		});
+		expect(charge).toEqual({ usd: 3, basis: "unknown" });
+	});
+
+	test("the selected model resolves through its provider spellings", () => {
+		const charge = chargeFor("probe-unknown-x", usage({ input: 1e6 }), undefined, {
+			selectedModel: "claude-sonnet-4-5-20250929",
+		});
+		expect(charge.usd).toBeCloseTo(3);
+		expect(charge.basis).toBe("unknown");
+	});
+
+	test("a selected model outside the catalog falls back to the default rates", () => {
+		expect(chargeFor("probe-unknown-x", usage({ input: 1e6 }), undefined, { selectedModel: "mock-1" })).toEqual({
+			usd: 5,
+			basis: "unknown",
+		});
+	});
+});
+
+describe("alias promotions", () => {
+	const endsAt = Math.floor(Date.now() / 1000) + 3600;
+	const promotion = (as: string, at = endsAt): RatesContext => ({
+		promotions: new Map([["probe-alias", { as, endsAt: at }]]),
+	});
+
+	test("a valid promotion prices the alias at the target's catalog rates", () => {
+		expect(chargeFor("probe-alias", usage({ input: 1e6 }), undefined, promotion("claude-sonnet-4-5"))).toEqual({
+			usd: 3,
+			basis: "list",
+		});
+	});
+
+	test("an expired promotion is skipped", () => {
+		const expired = Math.floor(Date.now() / 1000) - 1;
+		expect(
+			chargeFor("probe-alias", usage({ input: 1e6 }), undefined, promotion("claude-sonnet-4-5", expired)),
+		).toEqual({ usd: 5, basis: "unknown" });
+	});
+
+	test("a promotion whose target is not in the catalog is skipped", () => {
+		expect(chargeFor("probe-alias", usage({ input: 1e6 }), undefined, promotion("mock-9"))).toEqual({
+			usd: 5,
+			basis: "unknown",
+		});
+	});
+
+	test("fast responses skip the promotion and pay the alias's own rates", () => {
+		const rates: RatesContext = { promotions: new Map([["claude-haiku-4-5", { as: "claude-opus-4-8", endsAt }]]) };
+		expect(chargeFor("claude-haiku-4-5", usage({ input: 1e6, speed: "fast" }), undefined, rates)).toEqual({
+			usd: 1,
+			basis: "list",
+		});
+		expect(chargeFor("claude-haiku-4-5", usage({ input: 1e6 }), undefined, rates)).toEqual({ usd: 5, basis: "list" });
+	});
+});
+
+describe("operator cost rows", () => {
+	const row: ModelRates = { input: 1, output: 2, cacheRead: 0.1, cacheWrite5m: 1.5, webSearch: 0.01 };
+
+	test("a row for an alias's identity spelling wins over the catalog", () => {
+		const rates: RatesContext = { operatorCosts: new Map([["claude-opus-4-8-20260101", row]]) };
+		expect(chargeFor("claude-opus-4-8-20260101", usage({ input: 1e6 }), undefined, rates)).toEqual({
+			usd: 1,
+			basis: "list",
+		});
+	});
+
+	test("a row by name prices an otherwise unknown model and beats the selected-model fallback", () => {
+		const rates: RatesContext = { operatorCosts: new Map([["probe-x", row]]) };
+		expect(chargeFor("probe-x", usage({ input: 1e6 }), undefined, rates)).toEqual({ usd: 1, basis: "list" });
+		expect(
+			chargeFor("probe-x", usage({ input: 1e6 }), undefined, { ...rates, selectedModel: "claude-sonnet-4-5" }),
+		).toEqual({ usd: 1, basis: "list" });
+	});
+
+	test("basis labels follow the source: managed, list, unknown", () => {
+		const multiplier = parsePricingPolicy({ multiplier: 2 });
+		expect(priceOf("claude-opus-4-8", undefined, multiplier, undefined).basis).toBe("managed");
+		expect(priceOf("probe-x", undefined, multiplier, undefined).basis).toBe("managed");
+		expect(priceOf("claude-opus-4-8", undefined, undefined, undefined).basis).toBe("list");
+		expect(priceOf("probe-x", undefined, undefined, { operatorCosts: new Map([["probe-x", row]]) }).basis).toBe(
+			"list",
+		);
+		expect(priceOf("probe-x", undefined, undefined, { selectedModel: "claude-sonnet-4-5" }).basis).toBe("unknown");
+		expect(priceOf("probe-x", undefined, undefined, undefined).basis).toBe("unknown");
+	});
+});
+
+describe("operator settings parsing", () => {
+	test("additionalModelCosts keeps only valid rows and fills the defaults a row leaves out", () => {
+		const parsed = parseOperatorCosts({
+			"probe-x": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 },
+			broken: { input: "1" },
+			worse: null,
+			negative: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: -1 },
+			"probe-y": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5, cacheWrite1h: 2, webSearch: 0.02 },
+		});
+		expect([...(parsed?.keys() ?? [])]).toEqual(["probe-x", "probe-y"]);
+		expect(parsed?.get("probe-y")?.cacheWrite1h).toBe(2);
+		expect(parsed?.get("probe-y")?.webSearch).toBe(0.02);
+		expect(parsed?.get("probe-x")?.webSearch).toBe(0.01);
+		expect(parseOperatorCosts("x")).toBeUndefined();
+		expect(parseOperatorCosts({ broken: {} })).toBeUndefined();
+	});
+
+	test("modelCostPromotions keeps only rows naming a target and an end time", () => {
+		const parsed = parseCostPromotions({
+			alias: { as: "claude-opus-4-8", endsAt: 123 },
+			bad: { as: "", endsAt: 1 },
+			worse: { as: "x" },
+			nope: 7,
+		});
+		expect([...(parsed?.keys() ?? [])]).toEqual(["alias"]);
+		expect(parseCostPromotions({ nope: 7 })).toBeUndefined();
+		expect(parseCostPromotions("x")).toBeUndefined();
 	});
 });
 
@@ -139,19 +272,19 @@ describe("managed pricing policy", () => {
 		const charge = chargeFor(
 			"us.anthropic.claude-opus-4-8",
 			usage({ input: 1e6, inferenceGeo: "us" }),
-			false,
 			policy,
+			undefined,
 		);
 		expect(charge).toEqual({ usd: 2, basis: "managed" });
 	});
 
 	test("an override has no 1h price, so 1h writes pay the 5m price", () => {
-		const charge = chargeFor("claude-opus-4-8", usage({ cacheWrite: 1e6, cacheWrite1h: 1e6 }), false, policy);
+		const charge = chargeFor("claude-opus-4-8", usage({ cacheWrite: 1e6, cacheWrite1h: 1e6 }), policy, undefined);
 		expect(charge.usd).toBeCloseTo(3);
 	});
 
 	test("the multiplier alone moves a list price and marks it managed", () => {
-		const charge = chargeFor("claude-sonnet-4-5", usage({ input: 1e6 }), false, policy);
+		const charge = chargeFor("claude-sonnet-4-5", usage({ input: 1e6 }), policy, undefined);
 		expect(charge).toEqual({ usd: 6, basis: "managed" });
 	});
 
@@ -170,13 +303,13 @@ describe("managed pricing policy", () => {
 			},
 		});
 		expect([...(mixed?.exact.keys() ?? [])]).toEqual(["claude-opus-4-8"]);
-		expect(chargeFor("claude-opus-4-8", usage({ input: 1e6, inferenceGeo: "us" }), false, mixed)).toEqual({
+		expect(chargeFor("claude-opus-4-8", usage({ input: 1e6, inferenceGeo: "us" }), mixed, undefined)).toEqual({
 			usd: 1,
 			basis: "managed",
 		});
-		expect(chargeFor("claude-sonnet-4-5", usage({ input: 1e6, inferenceGeo: "us" }), false, mixed).usd).toBeCloseTo(
-			3.3,
-		);
+		expect(
+			chargeFor("claude-sonnet-4-5", usage({ input: 1e6, inferenceGeo: "us" }), mixed, undefined).usd,
+		).toBeCloseTo(3.3);
 	});
 
 	test("an out-of-range multiplier is ignored while valid rows stay", () => {
@@ -184,7 +317,7 @@ describe("managed pricing policy", () => {
 		for (const multiplier of [0, -1, 10.5, "2", Number.NaN]) {
 			const parsed = parsePricingPolicy({ multiplier, overrides: rows });
 			expect(parsed?.multiplier).toBe(1);
-			expect(chargeFor("claude-opus-4-8", usage({ input: 1e6 }), false, parsed).usd).toBe(1);
+			expect(chargeFor("claude-opus-4-8", usage({ input: 1e6 }), parsed, undefined).usd).toBe(1);
 		}
 		expect(parsePricingPolicy({ multiplier: 10, overrides: rows })?.multiplier).toBe(10);
 		expect(parsePricingPolicy({ multiplier: 99 })).toBeUndefined();
@@ -195,14 +328,17 @@ describe("managed pricing policy", () => {
 			overrides: { "claude-sonnet-4-5": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
 		});
 		for (const name of ["claude-sonnet-4-5-20250929", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"]) {
-			expect(chargeFor(name, usage({ input: 1e6 }), false, parsed)).toEqual({ usd: 1, basis: "managed" });
+			expect(chargeFor(name, usage({ input: 1e6 }), parsed, undefined)).toEqual({ usd: 1, basis: "managed" });
 		}
 		const custom = parsePricingPolicy({
 			overrides: { "claude-sonnet-4-5-custom": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
 		});
 		expect(custom?.builtin.size).toBe(0);
-		expect(chargeFor("claude-sonnet-4-5", usage({ input: 1e6 }), false, custom)).toEqual({ usd: 3, basis: "list" });
-		expect(chargeFor("claude-sonnet-4-5-custom", usage({ input: 1e6 }), false, custom).usd).toBe(1);
+		expect(chargeFor("claude-sonnet-4-5", usage({ input: 1e6 }), custom, undefined)).toEqual({
+			usd: 3,
+			basis: "list",
+		});
+		expect(chargeFor("claude-sonnet-4-5-custom", usage({ input: 1e6 }), custom, undefined).usd).toBe(1);
 	});
 });
 

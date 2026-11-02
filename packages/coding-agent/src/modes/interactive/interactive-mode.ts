@@ -123,8 +123,8 @@ import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import { withBuiltInRenderers } from "../../core/tools/renderers/index.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
-import type { PricingPolicy } from "../../core/usage/cost.ts";
-import { collectUsage, formatUsageReport, nativePricedBy } from "../../core/usage/report.ts";
+import type { PricingPolicy, RatesContext } from "../../core/usage/cost.ts";
+import { collectUsage, formatUsageReport } from "../../core/usage/report.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { addMcpServerConfig, loadMcpConfig } from "../../extensions/mcp/config.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
@@ -443,6 +443,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
 export interface InteractiveModeOptions {
 	/** The operator's `modelPricing` policy setting, read each time `/usage` opens. */
 	pricing?: () => PricingPolicy | undefined;
+	/** The operator cost rows and promotions, read each time `/usage` opens. */
+	rates?: () => RatesContext | undefined;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Diagnostics collected before the interactive TUI was initialized. */
@@ -6901,7 +6903,7 @@ export class InteractiveMode {
 			this.sessionManager.getBranch().flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
 			process.uptime() * 1000,
 			this.options.pricing?.(),
-			nativePricedBy((provider, model) => session.modelRuntime.getModel(provider, model)),
+			{ ...this.options.rates?.(), selectedModel: session.model?.id },
 		);
 		this.showSelector((done) => {
 			const dialog = new UsageDialogComponent(formatUsageReport(input), done);

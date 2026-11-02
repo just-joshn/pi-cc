@@ -26,7 +26,7 @@ function message(model: string, usage: Partial<AssistantMessage["usage"]>): Assi
 	};
 }
 
-const pricer = (m: AssistantMessage) => chargeFor(m.model, m.usage, false, undefined);
+const pricer = (m: AssistantMessage) => chargeFor(m.model, m.usage, undefined, undefined);
 
 describe("result ledger", () => {
 	test("totals cost from the Claude Code price list, not from pi's catalog cost", () => {
